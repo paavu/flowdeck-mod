@@ -59,3 +59,5 @@ Build, run the mod tests, disable savvy-flow, savvy-progress and context-bar, en
 - Band layout: the flow row first, then the open plan rows, then whatever other mods draw; the row shrinks and clips instead of pushing neighbours; ✕ hides the band only, the Band button or a new flow brings it back.
 - Load order: mods nest in the order of `enabledPlugins`, first outermost; flowdeck must come before next-steps, or next-steps squeezes the band.
 - Child items per agent: done; a worker's `step` list shows as foldable items on its agent row.
+- Per-project saved data: history and plans moved from the shared store to `<project>/.claude/flowdeck/history.json` (50 flows) and `plans.json` (20 sessions), with a `*` `.gitignore` in that folder; each save re-reads the file, merges and writes it whole, so two projects never overwrite each other.
+- Store fallback and migration: with no working folder or a failed write, that save goes to the store keys `history`/`plans` as before; a missing `history.json` first takes this project's entries from the store key `history` (read only, never changed); plans are not migrated.

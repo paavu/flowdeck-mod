@@ -6,7 +6,7 @@ import { derive, finishItems, hasItemOps, ITEM_H, itemAlt, itemLine, itemsOf, it
 import type { StepInput } from './agent-items'
 import { agentState, HOUSEKEEPING, splitHead, stateText } from './agent-state'
 import { contextRows, contextSvg, toReading } from './context'
-import { addEntry, formatEntry, parseHistory, snapshot } from './history'
+import { addEntry, formatEntry, MAX_TEXT, parseHistory, snapshot } from './history'
 import { importPlan, isFinished, normalize, percent, PLAN_ID, placeBar, planId, STATUSES, str, where } from './plan'
 import { planBandSvg, planBandText, planRows, planSvg, STATE_COLOR, stateLabel } from './plan-view'
 import { record, toWindows, usageRows, usageSvg } from './usage'
@@ -746,9 +746,62 @@ async function autoOpen($: EngineInterface, key: string): Promise<void> {
   void $.ui.open({ id: PANE, title: tr().pane })
 }
 
-// Re-reads the stored history first: another session may have saved since. When the read
-// fails, only this session's view is updated, so a passing outage never overwrites the store.
+// Saved data lives in the project folder, so projects never overwrite each other; '' without a project.
+const dataDir = (): string => (project ? `${project.replace(/[\\/]+$/, '')}/.claude/flowdeck` : '')
+
+// A file's text, or null when it cannot be read (missing, over 4 MiB, refused).
+const readFile = async ($: EngineInterface, path: string): Promise<string | null> => {
+  const text: unknown = await Promise.resolve()
+    .then(() => $.fs.read(path))
+    .catch(() => null)
+  return typeof text === 'string' ? text : null
+}
+
+const parseJson = (text: string | null): unknown => {
+  try {
+    return text === null ? undefined : JSON.parse(text)
+  } catch {
+    return undefined
+  }
+}
+
+// Writes the whole file; the folder gets a `*` .gitignore first, so nothing in it is committed. False when either write fails.
+async function writeData($: EngineInterface, name: string, data: unknown): Promise<boolean> {
+  try {
+    const dir = dataDir()
+    if ((await readFile($, `${dir}/.gitignore`)) === null) await $.fs.write(`${dir}/.gitignore`, '*\n')
+    await $.fs.write(`${dir}/${name}`, JSON.stringify(data))
+    return true
+  } catch {
+    return false
+  }
+}
+
+const isOwn = (e: HistoryEntry): boolean => e.project === project.trim().slice(0, MAX_TEXT)
+
+// The shared store's history (the one before project files): this project's entries, or all without a project.
+const storedHistory = async ($: EngineInterface): Promise<HistoryEntry[]> => {
+  const list = parseHistory(await $.store.get('history').catch(() => undefined))
+  return project ? list.filter(isOwn) : list
+}
+
+// Re-reads the project file first: another session may have saved since. A missing file starts from
+// this project's entries in the shared store (a one-time import; the store is left as it is).
+// Without a project folder, or when the write fails, the save goes to the shared store as before.
 async function saveHistory($: EngineInterface, entry: HistoryEntry): Promise<void> {
+  let view: HistoryEntry[] | null = null
+  if (project) {
+    const text = await readFile($, `${dataDir()}/history.json`)
+    const base = text === null ? await storedHistory($) : parseHistory(parseJson(text))
+    const next = addEntry(base, entry)
+    if (next === base) return
+    if (await writeData($, 'history.json', next)) {
+      await update($, history, () => next)
+      return
+    }
+    view = next
+  }
+  // When the store read fails, only this session's view is updated, so a passing outage never overwrites the store.
   let base: HistoryEntry[]
   let isRead = true
   try {
@@ -760,7 +813,7 @@ async function saveHistory($: EngineInterface, entry: HistoryEntry): Promise<voi
   const next = addEntry(base, entry)
   if (next === base) return
   if (isRead) await $.store.set('history', next).catch(() => {})
-  await update($, history, () => next)
+  await update($, history, () => view ?? next)
 }
 
 // Saves the flow as it stands; never throws into the tool call or the turn that asked.
@@ -811,18 +864,28 @@ function parsePlans(v: unknown): SavedPlans {
 
 const newest = (list: TaskPlan[]) => Math.max(...list.map(p => p.startedAt))
 
-// Re-reads the store first so other sessions' plans stay; a failed read skips the write rather than overwrite them.
+// This session's plans set in, the most recent sessions kept.
+const mergePlans = (all: SavedPlans, list: TaskPlan[]): SavedPlans => {
+  if (list.length) all[sessionId] = list
+  else delete all[sessionId]
+  const kept = Object.entries(all)
+    .sort((a, b) => newest(b[1]) - newest(a[1]))
+    .slice(0, PLAN_SESSIONS)
+  return Object.fromEntries(kept)
+}
+
+// Re-reads the project file first so other sessions' plans stay; a missing file starts empty (plans are not imported).
+// Without a project folder, or when the write fails, the store is used: there a failed read skips the write rather than overwrite.
 async function savePlans($: EngineInterface, list: TaskPlan[]): Promise<void> {
   sessionId = (await currentSessionId($)) || sessionId
   if (!sessionId) return
   try {
+    if (project) {
+      const text = await readFile($, `${dataDir()}/plans.json`)
+      if (await writeData($, 'plans.json', mergePlans(parsePlans(parseJson(text)), list))) return
+    }
     const all = parsePlans(await $.store.get('plans'))
-    if (list.length) all[sessionId] = list
-    else delete all[sessionId]
-    const kept = Object.entries(all)
-      .sort((a, b) => newest(b[1]) - newest(a[1]))
-      .slice(0, PLAN_SESSIONS)
-    await $.store.set('plans', Object.fromEntries(kept)).catch(() => {})
+    await $.store.set('plans', mergePlans(all, list)).catch(() => {})
   } catch {
     // A failing store costs the save, not the call.
   }
@@ -891,12 +954,15 @@ export const register: Register = (on, options) => {
     if (typeof storedPlansShown === 'boolean') await update($, panel, prev => ({ ...prev, isPlansShown: storedPlansShown }))
     const storedHistoryShown = await $.store.get('historyShown').catch(() => undefined)
     if (typeof storedHistoryShown === 'boolean') await update($, panel, prev => ({ ...prev, isHistoryShown: storedHistoryShown }))
-    const storedHistory = await $.store.get('history').catch(() => undefined)
-    await update($, history, () => parseHistory(storedHistory))
+    // The project's own files; a missing one falls back to what the shared store held.
+    const historyText = project ? await readFile($, `${dataDir()}/history.json`) : null
+    const savedHistory = historyText === null ? await storedHistory($) : parseHistory(parseJson(historyText))
+    await update($, history, () => savedHistory)
     const sid = (started as { sessionId?: unknown }).sessionId
     sessionId = (await currentSessionId($)) || (typeof sid === 'string' ? sid : '')
     if (sessionId) {
-      const storedPlans = await $.store.get('plans').catch(() => undefined)
+      const plansText = project ? await readFile($, `${dataDir()}/plans.json`) : null
+      const storedPlans = plansText === null ? await $.store.get('plans').catch(() => undefined) : parseJson(plansText)
       await update($, plans, () => parsePlans(storedPlans)[sessionId] ?? [])
     }
     void refreshContext($).catch(() => {})

@@ -38,9 +38,11 @@ const plan = ($: any, title = 'Ship it') =>
 const pane = ($: any, surface: 'terminal' | 'desktop' = 'terminal', bodyColumns = 80) =>
   $.ui.mount({ plugin: 'flowdeck', surface, component: 'Pane', requestId: 'flowdeck-agents', props: { bodyColumns } } as any)
 
+// No fs hook answers here, so the project files cannot be read or written: these tests run on the
+// shared-store fallback (tests/project-store.test.tsx covers the files), which shows this project's entries.
 const entry = (i: number, extra: Record<string, unknown> = {}) => ({
   id: `e${i}`,
-  project: '/old/site',
+  project: '/work/app',
   title: `Old flow ${i}`,
   startedAt: NOW - 2 * HOUR,
   endedAt: NOW - HOUR,
@@ -283,7 +285,7 @@ describe('history section in the panel', () => {
     await p.press({ key: 'history-e1' })
     await settle()
     expect(await p.find({ type: 'Button', text: /▾ Old flow 1/ })).toBeDefined()
-    expect(await p.find({ type: 'Text', text: /\/old\/site · 30m · 12k tokens · finished/ })).toBeDefined()
+    expect(await p.find({ type: 'Text', text: /\/work\/app · 30m · 12k tokens · finished/ })).toBeDefined()
     expect(await p.find({ type: 'Text', text: /✓ write tests \(careful\)/ })).toBeDefined()
     expect(await p.find({ type: 'Text', text: /○ wire it \(medium\)/ })).toBeDefined()
     await p.press({ key: 'history-e1' })

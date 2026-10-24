@@ -32,7 +32,7 @@ Top buttons, in order: **Context · Usage · Plans · Band · History**. Each to
 | Usage | The five-hour session and the week: reset time, a bar that drains as the limit is used (full = 100% left), percent left, an even-pace mark, and a forecast to the reset (recent pace over ~30 min and the window average), e.g. `recent: 100% at 1:36 PM, 1h 3m early` or `on pace`. Needs a subscription with rate-limit readings. |
 | Plans | Plans made with the `plan` tool, each as a track with its state and percent. `Clear finished` removes the done ones. |
 | Agents | Running, finished and planned agents, with model, task progress, context, estimated cost and time. |
-| History | Off by default. Past flows from every project, newest first. Each row shows title, tasks done of planned, estimated cost and date; press it for project, time, tokens, how it ended and the task list. |
+| History | Off by default. Past flows of this project, newest first. Each row shows title, tasks done of planned, estimated cost and date; press it for project, time, tokens, how it ended and the task list. |
 
 Agent rows: the progress line names the state in its colour, with the live tool word while running (`Running · Bash`), `Needs approval` while a permission dialog for its call is up, then `Done` or `Error`. The tier colour stays on the tier name.
 
@@ -50,12 +50,17 @@ Agent rows: the progress line names the state in its colour, with the live tool 
 | Done | green |
 | Error | red |
 
-## Saved data (mod store)
-| Key | Holds |
+## Saved data
+History and plans are kept per project in `<project>/.claude/flowdeck/` (the session's working folder), so two projects never overwrite each other. The folder holds its own `.gitignore` (`*`), so nothing in it is committed; the project's own files are never touched.
+
+| File | Holds |
 |---|---|
-| `history` | The last 50 flows across projects. A flow is saved when it finishes, when a new flow replaces it, and as open when the session ends with it running. |
-| `plans` | Task plans per session, the last 20 sessions; a resumed session gets its plans back. Up to 3 plans are kept per session. |
-| `contextShown`, `usageShown`, `plansShown`, `historyShown` | The section toggles. |
+| `history.json` | The last 50 flows of this project, newest first. A flow is saved when it finishes, when a new flow replaces it, and as open when the session ends with it running. |
+| `plans.json` | Task plans per session, the last 20 sessions; a resumed session gets its plans back. Up to 3 plans are kept per session. |
+
+- One-time import: while `history.json` does not exist, this project's flows from the old shared store key `history` are shown and copied into it with the first save. The store itself is left as it is. Plans are not imported.
+- Fallback: with no working folder, or when the file cannot be written, that save goes to the mod store (keys `history`, `plans`) as before, so nothing is lost.
+- Mod store keys still in use: `contextShown`, `usageShown`, `plansShown`, `historyShown` (the section toggles).
 
 ## Requirements
 - A Claude Code version with mods.

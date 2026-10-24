@@ -1,10 +1,10 @@
-// A record of finished flowdeck flows, kept across projects: one summary per flow, newest first.
+// A record of finished flowdeck flows, kept per project: one summary per flow, newest first.
 import type { AgentRun, Flow, HistoryEntry, HistoryTask } from '../types'
 import { tokens as fmtTokens } from './context'
 
 export const MAX_ENTRIES = 50
 const MAX_TASKS = 100
-const MAX_TEXT = 200
+export const MAX_TEXT = 200
 const MIN = 60_000
 
 export function snapshot(input: {
