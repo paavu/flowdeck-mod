@@ -201,4 +201,11 @@ describe('formatEntry', () => {
     const f = formatEntry(snap({ flow: flow({ title: '   ' }) }), NOW, 'UTC')
     expect(f.head).toBe('Untitled flow · 2/3 · ≈$1.20 · Oct 25')
   })
+
+  test('time is the span of the runs, not their sum, so parallel runs match the panel header', () => {
+    const run = (id: string, startedAt: number, endedAt: number) => ({ id, type: 'flowdeck-light', description: id, model: 'opus', status: 'done', startedAt, endedAt, contextTokens: 0, contextMax: 1, tokens: 0, costUsd: 0, steps: 0, round: 1 }) as any
+    const flow = { title: 'T', total: 2, done: 2, running: 0, phase: 'close', isFinished: true, isLinked: true, tasks: [{ title: 'a', tier: 'light', after: [] }] } as any
+    const e = snapshot({ flow, agents: [run('a', 1000, 61_000), run('b', 1000, 61_000)], project: '/p', startedAt: 1000, endedAt: 61_000, status: 'finished' })
+    expect(e.time).toBe(60_000)
+  })
 })

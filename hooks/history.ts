@@ -28,7 +28,8 @@ export function snapshot(input: {
     tasks: flow.tasks.map(t => ({ title: t.title, tier: t.tier })),
     cost: agents.reduce((s, a) => s + a.costUsd, 0),
     tokens: agents.reduce((s, a) => s + a.tokens, 0),
-    time: agents.reduce((s, a) => s + Math.max(0, (a.endedAt ?? endedAt) - a.startedAt), 0),
+    // The span from the first start to the last end, as the panel header counts it (parallel runs overlap).
+    time: agents.length ? Math.max(0, Math.max(...agents.map(a => a.endedAt ?? endedAt)) - Math.min(...agents.map(a => a.startedAt))) : 0,
   }
 }
 
