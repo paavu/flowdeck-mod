@@ -1927,7 +1927,7 @@ export const register: Register = (on, options) => {
     const ui = $.ui.resolve(e)
     const { Box, Text, Button } = ui
     const planNow = open.length ? await $.clock.now() : 0
-    const bandWidth = Math.max(180, Math.min(MAX_BAND_W, (e.props.bodyColumns || 100) * 9 - 110))
+    const bandWidth = Math.max(180, Math.min(MAX_BAND_W, (e.props.bodyColumns || 100) * 9 - 180))
     const planRowEls =
       e.surface !== 'terminal' && 'Svg' in ui
         ? open.map(pl => {
@@ -1976,7 +1976,7 @@ export const register: Register = (on, options) => {
       const { Svg } = ui
       // About 9 CSS px per reported column (measured in the desktop app; savvy-progress assumed 8 and stopped
       // short); the count, the dismiss and their gaps take the rest, so the row runs to the right edge like the other bars.
-      const width = Math.max(180, Math.min(MAX_BAND_W, (e.props.bodyColumns || 100) * 9 - 110))
+      const width = Math.max(180, Math.min(MAX_BAND_W, (e.props.bodyColumns || 100) * 9 - 180))
       return (
         <Box flexDirection="column">
           <Box flexDirection="row" alignItems="center" gap={1} flexShrink={1} minWidth={0} overflow="hidden">

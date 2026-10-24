@@ -187,7 +187,7 @@ describe('plans in the band above the prompt', () => {
     await start($)
     await create($, 'alpha', 'Alpha rollout')
     for (const columns of [20, 60, 100, 200, 400]) {
-      const slot = Math.max(180, Math.min(1600, columns * 9 - 110))
+      const slot = Math.max(180, Math.min(1600, columns * 9 - 180))
       const b = await band($, 'desktop', columns)
       const json = await drawn(b)
       const widths = [...json.matchAll(/<svg [^>]*?width=\\"(\d+)\\"/g)].map(m => Number(m[1]))
@@ -199,7 +199,7 @@ describe('plans in the band above the prompt', () => {
     await flow($)
     const b = await band($, 'desktop', 100)
     const widths = [...(await drawn(b)).matchAll(/<svg [^>]*?width=\\"(\d+)\\"/g)].map(m => Number(m[1]))
-    expect(widths).toEqual([790, 790])
+    expect(widths).toEqual([720, 720])
     await b.unmount()
   })
 
