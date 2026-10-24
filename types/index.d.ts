@@ -92,6 +92,23 @@ export type Panel = {
   autoOpenedFor: string
 }
 
+// The task plan, a model beside Flow for any task: stages of steps (ported from plan-progress 0.8.2).
+export type StepStatus = 'pending' | 'active' | 'done' | 'error' | 'skipped'
+export type PlanSubstep = { title: string; status: StepStatus }
+export type PlanStep = { title: string; status: StepStatus; substeps: PlanSubstep[]; doneAt?: number }
+export type PlanStage = { name: string; steps: PlanStep[] }
+export type PlanState = 'running' | 'needs_input' | 'error' | 'done'
+export type TaskPlan = {
+  id: string
+  title: string
+  kind: 'plan' | 'todo'
+  stages: PlanStage[]
+  state: PlanState
+  note: string | null
+  startedAt: number
+  endedAt?: number | null
+}
+
 declare module 'claude-code' {
   interface PluginState {
     'flowdeck': {
