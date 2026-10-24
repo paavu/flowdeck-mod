@@ -1,12 +1,11 @@
 import { describe, expect, test } from 'claude-code/testing'
 
-import { MAX_ENTRIES, addEntry, formatEntry, isWorthKeeping, parseHistory, snapshot } from '../hooks/history'
+import { addEntry, formatEntry, isWorthKeeping, parseHistory, snapshot } from '../hooks/history'
 import type { AgentRun, Flow, HistoryEntry } from '../types'
 
 const MIN = 60_000
 const START = Date.UTC(2026, 9, 25, 10, 0)
 const END = START + 30 * MIN
-const NOW = Date.UTC(2026, 9, 25, 12, 0)
 
 const near = (a: number, b: number, eps: number) => Math.abs(a - b) <= eps
 
@@ -20,8 +19,8 @@ const flow = (over: Partial<Flow> = {}): Flow => ({
   isLinked: true,
   tasks: [
     { title: 'Write tests', tier: 'light', after: [] },
-    { title: 'Build module', tier: 'medium', after: [0] },
-    { title: 'Review', tier: 'heavy', after: [1] },
+    { title: 'Build module', tier: 'medium', after: [1] },
+    { title: 'Review', tier: 'heavy', after: [2] },
   ],
   ...over,
 })
@@ -62,9 +61,9 @@ describe('snapshot', () => {
     expect(e.done).toBe(2)
     expect(e.total).toBe(3)
     expect(e.tasks).toEqual([
-      { title: 'Write tests', tier: 'light' },
-      { title: 'Build module', tier: 'medium' },
-      { title: 'Review', tier: 'heavy' },
+      { title: 'Write tests', tier: 'light', after: [] },
+      { title: 'Build module', tier: 'medium', after: [1] },
+      { title: 'Review', tier: 'heavy', after: [2] },
     ])
     expect(e.project).toBe('/Users/me/proj')
     expect(snap({ status: 'open' }).status).toBe('open')
@@ -111,13 +110,12 @@ describe('addEntry', () => {
     expect(next.length).toBe(3)
   })
 
-  test('keeps at most 50 entries', () => {
+  test('never drops an entry', () => {
     let h: HistoryEntry[] = []
     for (let i = 0; i < 60; i++) h = addEntry(h, entry(i))
-    expect(MAX_ENTRIES).toBe(50)
-    expect(h.length).toBe(50)
+    expect(h.length).toBe(60)
     expect(h[0]!.id).toBe(entry(59).id)
-    expect(h.at(-1)!.id).toBe(entry(10).id)
+    expect(h.at(-1)!.id).toBe(entry(0).id)
   })
 
   test('never mutates the input', () => {
@@ -169,37 +167,28 @@ describe('parseHistory', () => {
 
 describe('formatEntry', () => {
   test('a finished flow', () => {
-    const f = formatEntry(snap({ flow: flow({ done: 3 }) }), NOW, 'UTC')
-    expect(f.head).toBe('Ship it · 3/3 · ≈$1.20 · Oct 25')
-    expect(f.lines).toEqual([
-      '/Users/me/proj · 30m · 45k tokens · finished',
-      '✓ Write tests (light)',
-      '✓ Build module (medium)',
-      '✓ Review (heavy)',
-    ])
+    const f = formatEntry(snap({ flow: flow({ done: 3 }) }), 'UTC')
+    expect(f.head).toBe('Ship it')
+    expect(f.line).toBe('Oct 25, 2026 · 10:30 AM · 3/3 · finished')
+    expect(f.lines).toEqual(['✓ Write tests (light)', '✓ Build module (medium)', '✓ Review (heavy)'])
   })
 
   test('an open flow marks the first done tasks and says it ended with the session', () => {
-    const f = formatEntry(snap({ status: 'open' }), NOW, 'UTC')
-    expect(f.head).toBe('Ship it · 2/3 · ≈$1.20 · Oct 25')
-    expect(f.lines).toEqual([
-      '/Users/me/proj · 30m · 45k tokens · ended with the session',
-      '✓ Write tests (light)',
-      '✓ Build module (medium)',
-      '○ Review (heavy)',
-    ])
+    const f = formatEntry(snap({ status: 'open' }), 'UTC')
+    expect(f.head).toBe('Ship it')
+    expect(f.line).toBe('Oct 25, 2026 · 10:30 AM · 2/3 · ended with the session')
+    expect(f.lines).toEqual(['✓ Write tests (light)', '✓ Build module (medium)', '○ Review (heavy)'])
   })
 
-  test('an entry from an earlier year shows the year; a large cost has no decimals', () => {
+  test('an entry from an earlier year always shows its year', () => {
     const old = Date.UTC(2025, 11, 31, 23, 0)
-    const e = { ...snap({ startedAt: old - 30 * MIN, endedAt: old }), cost: 123.4 }
-    expect(formatEntry(e, Date.UTC(2026, 0, 1, 1, 0), 'UTC').head).toBe('Ship it · 2/3 · ≈$123 · Dec 31, 2025')
-    expect(formatEntry(e, Date.UTC(2025, 11, 31, 23, 30), 'UTC').head).toBe('Ship it · 2/3 · ≈$123 · Dec 31')
+    const e = snap({ startedAt: old - 30 * MIN, endedAt: old })
+    expect(formatEntry(e, 'UTC').line).toBe('Dec 31, 2025 · 11:00 PM · 2/3 · finished')
   })
 
   test('an empty title still reads', () => {
-    const f = formatEntry(snap({ flow: flow({ title: '   ' }) }), NOW, 'UTC')
-    expect(f.head).toBe('Untitled flow · 2/3 · ≈$1.20 · Oct 25')
+    const f = formatEntry(snap({ flow: flow({ title: '   ' }) }), 'UTC')
+    expect(f.head).toBe('Untitled flow')
   })
 
   test('time is the span of the runs, not their sum, so parallel runs match the panel header', () => {

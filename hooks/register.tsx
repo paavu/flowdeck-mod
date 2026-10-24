@@ -1,7 +1,7 @@
 import { atom, read, update } from 'claude-code'
-import type { EngineInterface, Register } from 'claude-code'
+import type { EngineInterface, Register, RenderChildren } from 'claude-code'
 
-import type { AgentRun, Flow, HistoryEntry, Panel, Phase, PlannedTask, PlanStage, Reading, Samples, StepStatus, TaskPlan, UsageWindow } from '../types'
+import type { AgentRun, Flow, HistoryAgent, HistoryEntry, Panel, Phase, PlannedTask, PlanStage, Reading, Samples, StepStatus, TaskPlan, UsageWindow } from '../types'
 import { derive, finishItems, hasItemOps, ITEM_H, itemAlt, itemLine, itemsOf, itemSvg, stepItems } from './agent-items'
 import type { StepInput } from './agent-items'
 import { agentState, HOUSEKEEPING, splitHead, stateText } from './agent-state'
@@ -23,6 +23,8 @@ const panel = atom({ plugin: 'flowdeck', key: 'panel' } as const, {
   isHistoryShown: false,
   openEntries: [] as string[],
   openAgents: [] as string[],
+  openFinished: [] as string[],
+  historyLimit: 10,
   autoOpenedFor: '',
 })
 const usageState = atom({ plugin: 'flowdeck', key: 'usage' } as const, { windows: [] as UsageWindow[], samples: {} as Samples })
@@ -419,11 +421,22 @@ const elapsed = (a: AgentRun, at: number): number => (a.endedAt ?? Math.max(at, 
 
 type Planned = PlannedTask & { n: number }
 
-const plannedOf = (f: Flow | null, list: AgentRun[]): Planned[] => {
-  if (!f || f.isFinished) return []
+// The tasks no run was started for, numbered in plan order.
+const unstarted = (tasks: PlannedTask[], list: AgentRun[]): Planned[] => {
   const started = new Set(list.map(a => norm(a.description)))
-  return (f.tasks ?? []).map((t, i) => ({ ...t, n: i + 1 })).filter(t => !started.has(norm(t.title)))
+  return tasks.map((t, i) => ({ ...t, n: i + 1 })).filter(t => !started.has(norm(t.title)))
 }
+
+const plannedOf = (f: Flow | null, list: AgentRun[]): Planned[] => (!f || f.isFinished ? [] : unstarted(f.tasks ?? [], list))
+
+// A saved run as it ended: one saved while still going reads as an error, its clock stopped at the save.
+const endedRun = (a: HistoryAgent, end: number): AgentRun => {
+  const endedAt = a.endedAt ?? end
+  if (a.status !== 'running') return { ...a, endedAt }
+  return { ...a, status: 'failed', endedAt, ...(a.items ? { items: finishItems(itemsOf(a.items), false, endedAt) } : {}) }
+}
+
+const HISTORY_PAGE = 10
 
 const totals = (list: AgentRun[], at: number) => {
   const cost = list.reduce((s, a) => s + a.costUsd, 0)
@@ -1525,14 +1538,6 @@ export const register: Register = (on, options) => {
         onPress={() => update($, panel, prev => ({ ...prev, isCompact: !prev.isCompact }))}
       />
     )
-    const toggleDone = (
-      <Button
-        key="done"
-        label={`${p.isDoneCollapsed ? '▸' : '▾'} ${s.finished} · ${finished.length}`}
-        plain
-        onPress={() => update($, panel, prev => ({ ...prev, isDoneCollapsed: !prev.isDoneCollapsed }))}
-      />
-    )
     const toggleContext = (
       <Button
         key="context"
@@ -1612,40 +1617,6 @@ export const register: Register = (on, options) => {
         {toggleHistory}
       </Box>
     )
-    // Plain rows on both surfaces: one button per past flow, its summary lines under it when opened.
-    const historySection = !p.isHistoryShown ? null : (
-      <Box key="history-section" flexDirection="column">
-        {hist.length === 0 ? (
-          <Text dimColor>no history yet</Text>
-        ) : (
-          hist.map(entry => {
-            const { head, lines } = formatEntry(entry, clockNow)
-            const isOpen = p.openEntries.includes(entry.id)
-            return (
-              <Box key={`history-row-${entry.id}`} flexDirection="column">
-                <Button
-                  key={`history-${entry.id}`}
-                  label={`${isOpen ? '▾' : '▸'} ${head}`}
-                  plain
-                  onPress={() =>
-                    update($, panel, prev => ({
-                      ...prev,
-                      openEntries: prev.openEntries.includes(entry.id) ? prev.openEntries.filter(id => id !== entry.id) : [...prev.openEntries, entry.id],
-                    }))
-                  }
-                />
-                {isOpen &&
-                  lines.map((line, i) => (
-                    <Text key={`history-${entry.id}-${i}`} dimColor wrap="truncate-end">
-                      {line}
-                    </Text>
-                  ))}
-              </Box>
-            )
-          })
-        )}
-      </Box>
-    )
     const finishFlowButton = f && !f.isFinished ? <Button key="flow-finish" label="Finish flow" plain onPress={() => finishOpenFlow($)} /> : null
     const toggles = finishFlowButton ? (
       <Box key="title-controls" flexDirection="row" gap={1}>
@@ -1655,13 +1626,13 @@ export const register: Register = (on, options) => {
     ) : (
       toggleCompact
     )
-    const isEmpty = list.length === 0 && planned.length === 0
     const summary = `≈${fmtCost(t.cost)}, ${fmtTokens(t.tokens)} ${s.tokensWord}, ${fmtTime(t.time)}`
     // An agent that reported its steps folds them out under its row; open only in this session.
     const isUnfolded = (a: AgentRun) => (p.openAgents ?? []).includes(a.id)
-    const foldButton = (a: AgentRun) => (
+    // `kp` prefixes the keys of a history group's rows, so they never share a key with the live ones.
+    const foldButton = (a: AgentRun, kp = '') => (
       <Button
-        key={`agent-fold-${a.id}`}
+        key={`${kp}agent-fold-${a.id}`}
         label={isUnfolded(a) ? '▾' : '▸'}
         plain
         onPress={() =>
@@ -1673,34 +1644,250 @@ export const register: Register = (on, options) => {
       />
     )
 
-    if (e.surface === 'desktop' && 'Svg' in ui) {
-      const { Svg } = ui
-      const W = Math.max(240, Math.min(900, (e.props.bodyColumns || 40) * 8 - 8))
-      const section = (key: string, text: string) => (
-        <Text key={key} dimColor>
-          {text}
-        </Text>
+    const Svg = e.surface === 'desktop' && 'Svg' in ui ? ui.Svg : null
+    const W = Math.max(240, Math.min(900, (e.props.bodyColumns || 40) * 8 - 8))
+    const cols = Math.max(24, e.props.bodyColumns || 40)
+    const barW = Math.max(6, Math.min(20, cols - 34))
+
+    // One flow as the panel draws it, live or from the history: the header (title and the three tiles, then
+    // `controls`) and, on demand, the body (running, the `Finished · N` fold, planned). `at` is the clock the rows count to.
+    type FlowView = {
+      kp: string
+      title: string
+      list: AgentRun[]
+      planned: Planned[]
+      at: number
+      t: ReturnType<typeof totals>
+      isDoneCollapsed: boolean
+      doneKey: string
+      onDone: () => unknown
+      controls: RenderChildren
+    }
+    const flowView = (v: FlowView): { header: RenderChildren; body: () => RenderChildren } => {
+      const { kp, at } = v
+      const running = v.list.filter(a => a.status === 'running').reverse()
+      const finished = v.list.filter(a => a.status !== 'running').reverse()
+      const isEmpty = v.list.length === 0 && v.planned.length === 0
+      const toggleDone = (
+        <Button key={v.doneKey} label={`${v.isDoneCollapsed ? '▸' : '▾'} ${s.finished} · ${finished.length}`} plain onPress={v.onDone} />
       )
-      // With items the row leaves room for its chevron on the right; its children are drawn as wide as it.
-      const agentRow = (a: AgentRun, word: string) => {
-        const alt = `${a.description}: ${modelName(a.model)}, ${word}`
-        const items = itemsOf(a.items)
-        if (!items.length) return <Svg key={a.id} source={agentSvg(W, a, at)} alt={alt} width={W} height={66} />
-        const rowW = W - 28
-        return (
-          <Box key={a.id} flexDirection="column">
-            <Box flexDirection="row" alignItems="center" gap={1}>
-              <Svg source={agentSvg(rowW, a, at)} alt={alt} width={rowW} height={66} />
-              {foldButton(a)}
+      if (Svg) {
+        const viewSummary = `≈${fmtCost(v.t.cost)}, ${fmtTokens(v.t.tokens)} ${s.tokensWord}, ${fmtTime(v.t.time)}`
+        const section = (key: string, text: string) => (
+          <Text key={key} dimColor>
+            {text}
+          </Text>
+        )
+        // With items the row leaves room for its chevron on the right; its children are drawn as wide as it.
+        const agentRow = (a: AgentRun, word: string) => {
+          const alt = `${a.description}: ${modelName(a.model)}, ${word}`
+          const items = itemsOf(a.items)
+          if (!items.length) return <Svg key={`${kp}${a.id}`} source={agentSvg(W, a, at)} alt={alt} width={W} height={66} />
+          const rowW = W - 28
+          return (
+            <Box key={`${kp}${a.id}`} flexDirection="column">
+              <Box flexDirection="row" alignItems="center" gap={1}>
+                <Svg source={agentSvg(rowW, a, at)} alt={alt} width={rowW} height={66} />
+                {foldButton(a, kp)}
+              </Box>
+              {isUnfolded(a) &&
+                items.map((it, i) => (
+                  <Svg key={`${kp}agent-item-${a.id}-${i}`} source={svg(rowW, ITEM_H, itemSvg(rowW, it, at, fitText))} alt={itemAlt(it, at)} width={rowW} height={ITEM_H} />
+                ))}
             </Box>
+          )
+        }
+        return {
+          header: [
+            <Svg source={headerSvg(W, v.title, v.t)} alt={v.title ? `${v.title}: ${viewSummary}` : viewSummary} width={W} height={headerHeight(v.title)} />,
+            v.controls,
+          ],
+          body: () => [
+            isEmpty && <Text dimColor>{s.empty}</Text>,
+            running.length > 0 && section(`${kp}h-run`, `${s.running} · ${running.length}`),
+            running.map(a => agentRow(a, s.isRunning)),
+            finished.length > 0 && toggleDone,
+            !v.isDoneCollapsed && finished.map(a => agentRow(a, s.isFinished)),
+            v.planned.length > 0 && section(`${kp}h-plan`, `${s.planned} · ${v.planned.length}`),
+            v.planned.map(pl => (
+              <Svg key={`${kp}plan-${pl.n}`} source={plannedSvg(W, pl)} alt={`${pl.n}. ${pl.title}: ${s.isPlanned}`} width={W} height={46} />
+            )),
+          ],
+        }
+      }
+      const row = (a: AgentRun) => {
+        const tier = tierOf(a.type)
+        const color = colorOf(tier)
+        const ctx = ctxOf(a)
+        const progress = progressOf(a)
+        const model = a.effort ? `${modelName(a.model)} · ${a.effort}` : modelName(a.model)
+        const steps = a.stepTotal ? `${a.stepDone ?? 0}/${a.stepTotal}${a.stepNote ? ' ' + a.stepNote : ''}` : ''
+        const modelLine = `  ${tier === 'other' ? a.type : tier} · ${model}${a.round > 1 ? ` · ${s.round} ${a.round}` : ''}`
+        // The stats end the model line when they fit there, else they are left out.
+        const stats = fitStats(a, at, ' ', cols - modelLine.length - 3, t => t.length)
+        // The state leads the line in its colour, cut only at the row's width.
+        const state = agentState(a)
+        const head = stateText(a)
+        const room = Math.max(state.name.length + 1, cols - 2 - barW - 1)
+        const [lead, rest] = splitHead(clip(steps ? `${head} · ${steps}` : head, room), head)
+        const items = itemsOf(a.items)
+        return (
+          <Box key={`${kp}${a.id}`} flexDirection="column" marginBottom={1}>
+            <Box flexDirection="row" gap={1}>
+              <Text color={color}>▣</Text>
+              <Text bold wrap="truncate-end">
+                {a.description || a.type}
+              </Text>
+              <Text color={a.status === 'failed' ? 'red' : a.status === 'done' ? 'green' : color}>{STATUS_GLYPH[a.status]}</Text>
+              {items.length > 0 && foldButton(a, kp)}
+            </Box>
+            <Text dimColor wrap="truncate-end">
+              {modelLine}
+              {stats ? ` · ${stats}` : ''}
+            </Text>
+            <Text wrap="truncate-end">
+              {'  '}
+              {progress === null ? <Text dimColor>{ctxBar(ctx, barW)}</Text> : <Text color={state.color}>{ctxBar(progress * 100, barW)}</Text>}{' '}
+              <Text color={state.color}>{lead}</Text>
+              <Text dimColor>{rest}</Text>
+            </Text>
             {isUnfolded(a) &&
-              items.map((it, i) => (
-                <Svg key={`agent-item-${a.id}-${i}`} source={svg(rowW, ITEM_H, itemSvg(rowW, it, at, fitText))} alt={itemAlt(it, at)} width={rowW} height={ITEM_H} />
-              ))}
+              items.map((it, i) => {
+                const l = itemLine(it, at, cols)
+                return (
+                  <Text key={`${kp}agent-item-${a.id}-${i}`} wrap="truncate-end">
+                    {'   '}
+                    <Text color={l.color} dimColor={l.isDim}>
+                      {l.mark}
+                    </Text>{' '}
+                    <Text dimColor={l.isDim}>{l.title}</Text>
+                    {l.time ? <Text dimColor>{`  ${l.time}`}</Text> : null}
+                  </Text>
+                )
+              })}
           </Box>
         )
       }
+      return {
+        header: [
+          <Box flexDirection="row" justifyContent="space-between">
+            <Text bold wrap="truncate-end">
+              {v.title}
+            </Text>
+            {v.controls}
+          </Box>,
+          <Text dimColor>
+            ≈{fmtCost(v.t.cost)} · {fmtTokens(v.t.tokens)} {s.tokensWord} · {fmtTime(v.t.time)}
+          </Text>,
+        ],
+        body: () => [
+          isEmpty && <Text dimColor>{s.empty}</Text>,
+          running.length > 0 && (
+            <Text dimColor>
+              {s.running} · {running.length}
+            </Text>
+          ),
+          running.map(row),
+          finished.length > 0 && toggleDone,
+          !v.isDoneCollapsed && finished.map(row),
+          v.planned.length > 0 && (
+            <Text dimColor>
+              {s.planned} · {v.planned.length}
+            </Text>
+          ),
+          v.planned.map(pl => {
+            const tier = pl.tier in TIER_COLOR ? pl.tier : 'other'
+            return (
+              <Box key={`${kp}plan-${pl.n}`} flexDirection="column" marginBottom={1}>
+                <Text dimColor wrap="truncate-end">
+                  <Text color={colorOf(tier)}>▢</Text> {pl.n}. {pl.title} ◷
+                </Text>
+                <Text dimColor wrap="truncate-end">
+                  {'  '}
+                  {tier} · {TIER_MODEL[tier] ?? ''}
+                  {pl.after.length ? ` · ${s.after} ${pl.after.join(', ')}` : ''}
+                </Text>
+              </Box>
+            )
+          }),
+        ],
+      }
+    }
 
+    const toggleIn = (ids: string[] | undefined, id: string): string[] => {
+      const open = ids ?? []
+      return open.includes(id) ? open.filter(x => x !== id) : [...open, id]
+    }
+    // A past flow as a group: its fold (title, date, done/total, how it ended) and its tiles always;
+    // opened, the flow as it ended with its finished list folded, or the task list of an entry saved without runs.
+    const historyGroup = (entry: HistoryEntry, i: number) => {
+      const { head, line, lines } = formatEntry(entry)
+      const isOpen = p.openEntries.includes(entry.id)
+      const runs = (entry.agents ?? []).map(a => endedRun(a, entry.endedAt))
+      const tasks = entry.tasks.map(tk => ({ title: tk.title, tier: tk.tier, after: tk.after ?? [] }))
+      const view = flowView({
+        kp: `history-${entry.id}-`,
+        title: head,
+        list: runs,
+        planned: unstarted(tasks, runs),
+        at: entry.endedAt,
+        t: { cost: entry.cost, tokens: entry.tokens, time: entry.time },
+        isDoneCollapsed: !(p.openFinished ?? []).includes(entry.id),
+        doneKey: `history-finished-${entry.id}`,
+        onDone: () => update($, panel, prev => ({ ...prev, openFinished: toggleIn(prev.openFinished, entry.id) })),
+        controls: null,
+      })
+      const body = !isOpen
+        ? null
+        : runs.length
+          ? Svg
+            ? view.body()
+            : <Box flexDirection="column" marginTop={1}>{view.body()}</Box>
+          : lines.map((l, k) => (
+              <Text key={`history-${entry.id}-${k}`} dimColor wrap="truncate-end">
+                {l}
+              </Text>
+            ))
+      return (
+        <Box key={`history-row-${entry.id}`} flexDirection="column" marginTop={i ? 1 : 0}>
+          {i > 0 && Svg && <Svg source={svg(W, 1, `<line class="ln" x1="0" y1="0.5" x2="${W}" y2="0.5"/>`)} alt="" width={W} height={1} />}
+          <Button key={`history-${entry.id}`} plain onPress={() => update($, panel, prev => ({ ...prev, openEntries: toggleIn(prev.openEntries, entry.id) }))}>
+            {`${isOpen ? '▾' : '▸'} ${head}`} <Text dimColor>{line}</Text>
+          </Button>
+          {view.header}
+          {body}
+        </Box>
+      )
+    }
+    const shownHistory = hist.slice(0, p.historyLimit ?? HISTORY_PAGE)
+    const historySection = !p.isHistoryShown ? null : (
+      <Box key="history-section" flexDirection="column">
+        {hist.length === 0 ? <Text dimColor>no history yet</Text> : shownHistory.map(historyGroup)}
+        {hist.length > shownHistory.length && (
+          <Button
+            key="history-more"
+            label={`Show older (${hist.length - shownHistory.length})`}
+            plain
+            onPress={() => update($, panel, prev => ({ ...prev, historyLimit: (prev.historyLimit ?? HISTORY_PAGE) + HISTORY_PAGE }))}
+          />
+        )}
+      </Box>
+    )
+    const live = (): ReturnType<typeof flowView> =>
+      flowView({
+        kp: '',
+        title,
+        list,
+        planned,
+        at,
+        t,
+        isDoneCollapsed: p.isDoneCollapsed,
+        doneKey: 'done',
+        onDone: () => update($, panel, prev => ({ ...prev, isDoneCollapsed: !prev.isDoneCollapsed })),
+        controls: toggles,
+      })
+
+    if (Svg) {
       const dc = rd ? contextSvg(W, rd, !p.isContextShown) : null
       const contextSection = dc && rd ? (
         <Svg source={svg(W, dc.height, dc.body)} alt={`context ${rd.percent}%`} width={W} height={dc.height} />
@@ -1740,31 +1927,21 @@ export const register: Register = (on, options) => {
           </Box>
         )
       }
+      const view = live()
       return (
         <Box flexDirection="column">
           {topToggles}
           {contextSection}
           {usageSection}
           {plansSection}
-          <Svg source={headerSvg(W, title, t)} alt={title ? `${title}: ${summary}` : summary} width={W} height={headerHeight(title)} />
-          {toggles}
-          {isEmpty && <Text dimColor>{s.empty}</Text>}
-          {running.length > 0 && section('h-run', `${s.running} · ${running.length}`)}
-          {running.map(a => agentRow(a, s.isRunning))}
-          {finished.length > 0 && toggleDone}
-          {!p.isDoneCollapsed && finished.map(a => agentRow(a, s.isFinished))}
-          {planned.length > 0 && section('h-plan', `${s.planned} · ${planned.length}`)}
-          {planned.map(pl => (
-            <Svg key={`plan-${pl.n}`} source={plannedSvg(W, pl)} alt={`${pl.n}. ${pl.title}: ${s.isPlanned}`} width={W} height={46} />
-          ))}
+          {view.header}
+          {view.body()}
           {historySection}
         </Box>
       )
     }
 
     // Terminal: the same content in text rows.
-    const cols = Math.max(24, e.props.bodyColumns || 40)
-    const barW = Math.max(6, Math.min(20, cols - 34))
     const contextSection = rd && cols >= 20 ? (
       <Box flexDirection="column">
         {contextRows(rd, cols, !p.isContextShown).map((line, i) => (
@@ -1803,75 +1980,14 @@ export const register: Register = (on, options) => {
     ) : (
       <Text dimColor>no plans yet</Text>
     )
-    const row = (a: AgentRun) => {
-      const tier = tierOf(a.type)
-      const color = colorOf(tier)
-      const ctx = ctxOf(a)
-      const progress = progressOf(a)
-      const model = a.effort ? `${modelName(a.model)} · ${a.effort}` : modelName(a.model)
-      const steps = a.stepTotal ? `${a.stepDone ?? 0}/${a.stepTotal}${a.stepNote ? ' ' + a.stepNote : ''}` : ''
-      const modelLine = `  ${tier === 'other' ? a.type : tier} · ${model}${a.round > 1 ? ` · ${s.round} ${a.round}` : ''}`
-      // The stats end the model line when they fit there, else they are left out.
-      const stats = fitStats(a, at, ' ', cols - modelLine.length - 3, t => t.length)
-      // The state leads the line in its colour, cut only at the row's width.
-      const state = agentState(a)
-      const head = stateText(a)
-      const room = Math.max(state.name.length + 1, cols - 2 - barW - 1)
-      const [lead, rest] = splitHead(clip(steps ? `${head} · ${steps}` : head, room), head)
-      const items = itemsOf(a.items)
-      return (
-        <Box key={a.id} flexDirection="column" marginBottom={1}>
-          <Box flexDirection="row" gap={1}>
-            <Text color={color}>▣</Text>
-            <Text bold wrap="truncate-end">
-              {a.description || a.type}
-            </Text>
-            <Text color={a.status === 'failed' ? 'red' : a.status === 'done' ? 'green' : color}>{STATUS_GLYPH[a.status]}</Text>
-            {items.length > 0 && foldButton(a)}
-          </Box>
-          <Text dimColor wrap="truncate-end">
-            {modelLine}
-            {stats ? ` · ${stats}` : ''}
-          </Text>
-          <Text wrap="truncate-end">
-            {'  '}
-            {progress === null ? <Text dimColor>{ctxBar(ctx, barW)}</Text> : <Text color={state.color}>{ctxBar(progress * 100, barW)}</Text>}{' '}
-            <Text color={state.color}>{lead}</Text>
-            <Text dimColor>{rest}</Text>
-          </Text>
-          {isUnfolded(a) &&
-            items.map((it, i) => {
-              const l = itemLine(it, at, cols)
-              return (
-                <Text key={`agent-item-${a.id}-${i}`} wrap="truncate-end">
-                  {'   '}
-                  <Text color={l.color} dimColor={l.isDim}>
-                    {l.mark}
-                  </Text>{' '}
-                  <Text dimColor={l.isDim}>{l.title}</Text>
-                  {l.time ? <Text dimColor>{`  ${l.time}`}</Text> : null}
-                </Text>
-              )
-            })}
-        </Box>
-      )
-    }
-
+    const view = live()
     return (
       <Box flexDirection="column">
         {topToggles}
         {contextSection}
         {usageSection}
         {plansSection}
-        <Box flexDirection="row" justifyContent="space-between">
-          <Text bold wrap="truncate-end">
-            {title}
-          </Text>
-          {toggles}
-        </Box>
-        <Text dimColor>
-          ≈{fmtCost(t.cost)} · {fmtTokens(t.tokens)} {s.tokensWord} · {fmtTime(t.time)}
-        </Text>
+        {view.header}
         {p.isCompact ? (
           <Text wrap="truncate-end">
             {[...running, ...finished].map(a => (
@@ -1887,27 +2003,7 @@ export const register: Register = (on, options) => {
           </Text>
         ) : (
           <Box flexDirection="column" marginTop={1}>
-            {isEmpty && <Text dimColor>{s.empty}</Text>}
-            {running.length > 0 && <Text dimColor>{s.running} · {running.length}</Text>}
-            {running.map(row)}
-            {finished.length > 0 && toggleDone}
-            {!p.isDoneCollapsed && finished.map(row)}
-            {planned.length > 0 && <Text dimColor>{s.planned} · {planned.length}</Text>}
-            {planned.map(pl => {
-              const tier = pl.tier in TIER_COLOR ? pl.tier : 'other'
-              return (
-                <Box key={`plan-${pl.n}`} flexDirection="column" marginBottom={1}>
-                  <Text dimColor wrap="truncate-end">
-                    <Text color={colorOf(tier)}>▢</Text> {pl.n}. {pl.title} ◷
-                  </Text>
-                  <Text dimColor wrap="truncate-end">
-                    {'  '}
-                    {tier} · {TIER_MODEL[tier] ?? ''}
-                    {pl.after.length ? ` · ${s.after} ${pl.after.join(', ')}` : ''}
-                  </Text>
-                </Box>
-              )
-            })}
+            {view.body()}
           </Box>
         )}
         {historySection}

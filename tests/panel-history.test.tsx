@@ -208,7 +208,7 @@ describe('history of flows', () => {
     expect(stored(store)[0].project).toBe('/other/site')
   })
 
-  test('51 flows keep the newest 50', async ($, on) => {
+  test('51 flows are all kept, newest first', async ($, on) => {
     const { store, clock } = engine(on)
     await start($)
     for (let i = 1; i <= 51; i++) {
@@ -216,9 +216,9 @@ describe('history of flows', () => {
       await plan($, `Flow ${i}`)
       await progress($, { finished: true })
     }
-    expect(stored(store).length).toBe(50)
+    expect(stored(store).length).toBe(51)
     expect(stored(store)[0].title).toBe('Flow 51')
-    expect(stored(store)[49].title).toBe('Flow 2')
+    expect(stored(store)[50].title).toBe('Flow 1')
   })
 
   test('a save keeps entries another session wrote meanwhile', async ($, on) => {
@@ -259,7 +259,8 @@ describe('history section in the panel', () => {
     await p.unmount()
     p = await pane($)
     expect(await p.find({ type: 'Button', text: /▾ History/ })).toBeDefined()
-    expect(await p.find({ type: 'Button', text: /▸ Old flow 1 · 1\/2 · ≈\$1\.50/ })).toBeDefined()
+    expect(await p.find({ type: 'Button', text: /▸ Old flow 1 .* · 1\/2 · finished/ })).toBeDefined()
+    expect(await p.find({ type: 'Text', text: /≈\$1\.50 · 12k tokens · 30:00/ })).toBeDefined()
     await p.unmount()
   })
 
@@ -284,8 +285,7 @@ describe('history section in the panel', () => {
     expect(await p.find({ type: 'Text', text: /write tests \(careful\)/ })).toBeUndefined()
     await p.press({ key: 'history-e1' })
     await settle()
-    expect(await p.find({ type: 'Button', text: /▾ Old flow 1/ })).toBeDefined()
-    expect(await p.find({ type: 'Text', text: /\/work\/app · 30m · 12k tokens · finished/ })).toBeDefined()
+    expect(await p.find({ type: 'Button', text: /▾ Old flow 1 .* · finished/ })).toBeDefined()
     expect(await p.find({ type: 'Text', text: /✓ write tests \(careful\)/ })).toBeDefined()
     expect(await p.find({ type: 'Text', text: /○ wire it \(medium\)/ })).toBeDefined()
     await p.press({ key: 'history-e1' })
@@ -324,7 +324,7 @@ describe('history section in the panel', () => {
     await plan($)
     await progress($, { finished: true })
     const p = await pane($)
-    expect(await p.find({ type: 'Button', text: /Ship it · 1\/2/ })).toBeDefined()
+    expect(await p.find({ type: 'Button', text: /▸ Ship it .* · 1\/2 · finished/ })).toBeDefined()
     await p.unmount()
   })
 

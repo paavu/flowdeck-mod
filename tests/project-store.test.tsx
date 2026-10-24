@@ -149,15 +149,15 @@ describe('history in the project folder', () => {
     expect(list[0]).toContain('Flow 2')
   })
 
-  test('a file of 60 entries is cut to the newest 50 on the next save', async ($, on) => {
+  test('a file of 60 entries keeps them all on the next save', async ($, on) => {
     const many = Array.from({ length: 60 }, (_, i) => entry(i + 1))
     const { files } = engine(on, { files: { [HISTORY]: JSON.stringify(many) } })
     await start($)
     await flow($)
     const saved = titles(files[HISTORY])
-    expect(saved).toHaveLength(50)
+    expect(saved).toHaveLength(61)
     expect(saved[0]).toBe('Ship it')
-    expect(saved[49]).toBe('Flow 49')
+    expect(saved[60]).toBe('Flow 60')
   })
 
   test('a corrupt file leaves the history empty and the next flow replaces it', async ($, on) => {

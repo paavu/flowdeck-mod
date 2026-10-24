@@ -74,7 +74,10 @@ export type AgentRun = {
   isAsked?: boolean
 }
 
-export type HistoryTask = { title: string; tier: string }
+export type HistoryTask = { title: string; tier: string; after?: number[] }
+
+/** An agent run as it was when its flow was saved, without the live-only fields. */
+export type HistoryAgent = Omit<AgentRun, 'tool' | 'isAsked'>
 
 export type HistoryEntry = {
   id: string
@@ -89,6 +92,8 @@ export type HistoryEntry = {
   cost: number // USD
   tokens: number
   time: number // ms
+  /** The flow's runs at the end; absent in entries saved before runs were kept. */
+  agents?: HistoryAgent[]
 }
 
 export type Panel = {
@@ -102,6 +107,10 @@ export type Panel = {
   openEntries: string[]
   /** Agent rows unfolded to show their items; this session only. */
   openAgents: string[]
+  /** History groups whose finished list is open; this session only. */
+  openFinished: string[]
+  /** How many history groups are shown; this session only. */
+  historyLimit: number
   autoOpenedFor: string
 }
 

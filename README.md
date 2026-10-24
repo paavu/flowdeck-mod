@@ -32,7 +32,7 @@ Top buttons, in order: **Context · Usage · Plans · Band · History**. Each to
 | Usage | The five-hour session and the week: reset time, a bar that drains as the limit is used (full = 100% left), percent left, an even-pace mark, and a forecast to the reset (recent pace over ~30 min and the window average), e.g. `recent: 100% at 1:36 PM, 1h 3m early` or `on pace`. Needs a subscription with rate-limit readings. |
 | Plans | Plans made with the `plan` tool, each as a track with its state and percent. `Clear finished` removes the done ones. |
 | Agents | Running, finished and planned agents, with model, task progress, context, estimated cost and time. |
-| History | Off by default. Past flows of this project, newest first. Each row shows title, tasks done of planned, estimated cost and date; press it for project, time, tokens, how it ended and the task list. |
+| History | Off by default. Past flows of this project, newest first, each as a group drawn like the running flow. The group's fold button shows the title, when it ended (`Oct 26, 2026 · 10:42 AM`, or `Oct 25 → Oct 26, 2026 · 10:42 AM` when it started on an earlier day), tasks done of planned and how it ended (`finished` or `ended with the session`); the cost, tokens and time tiles stay under it. Opened, it shows the flow's agents as they ended under a `Finished · N` list (folded until pressed), with their chevrons and steps, and the tasks never started. Flows saved before agents were kept show their task list instead. The newest 10 groups show; `Show older (N)` reveals 10 more each press. |
 
 Agent rows: the progress line names the state in its colour, with the live tool word while running (`Running · Bash`), `Needs approval` while a permission dialog for its call is up, then `Done` or `Error`. The tier colour stays on the tier name.
 
@@ -57,7 +57,7 @@ History and plans are kept per project in `<project>/.claude/flowdeck/` (the ses
 
 | File | Holds |
 |---|---|
-| `history.json` | The last 50 flows of this project, newest first. A flow is saved when it finishes, when a new flow replaces it, and as open when the session ends with it running. |
+| `history.json` | Every flow of this project, newest first, with its agent runs as they ended (up to 60 runs per flow, 12 steps per run, texts cut at 200 characters). A flow is saved when it finishes, when a new flow replaces it, and as open when the session ends with it running. Nothing is dropped; the file is meant to stay under 3,000,000 characters (the engine reads and writes at most 4 MiB a file), a soft limit for now. |
 | `plans.json` | Task plans per session, the last 20 sessions; a resumed session gets its plans back. Up to 3 plans are kept per session. |
 
 - One-time import: while `history.json` does not exist, this project's flows from the old shared store key `history` are shown and copied into it with the first save. The store itself is left as it is. Plans are not imported.
