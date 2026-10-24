@@ -5,3 +5,5 @@ Task 1: complete (tests: claude plugin test flowdeck → 3/3 pass; validate pass
 Ruling: contextSvg returns {height, body} (inner svg) instead of a full <svg> string — the panel's svg() wrapper supplies the theme classes — cost if wrong: one wrapper call.
 Task 2: complete (tests: claude plugin test flowdeck → 8/8 pass)
 Ruling: renamed marketplace + author coooloz → paavu-mods across the repo and reinstalled open-items, safety-guard, ssh-status, agents-autopen under it (user chose 'whole marketplace now'; backups *.pre-paavu-mods of settings.json, known_marketplaces.json, installed_plugins.json) — cost if wrong: restore backups. safety-guard working-tree changes (0.2.1) left uncommitted on purpose.
+Ruling: terminal pane clamps width to 24 columns (savvy-progress's existing rule), so the plan's 'under 20 columns draws nothing' case cannot occur in the terminal — the narrow test checks no crash instead — cost if wrong: none.
+Task 3: complete (tests: claude plugin test flowdeck → 16/16 pass)

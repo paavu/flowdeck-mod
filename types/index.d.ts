@@ -23,6 +23,7 @@ export type Flow = {
   running: number
   phase: Phase
   isFinished: boolean
+  isLinked: boolean
   tasks: PlannedTask[]
 }
 

@@ -11,6 +11,15 @@ You are the **orchestrator**. You think, plan, decide, and review. Workers execu
 
 Task from the user: $ARGUMENTS
 
+## Starting: with a task, or without
+
+- **With a task** (the text above): run the flow below on that task.
+- **Without a task** (the text above is empty): adopt the work already underway in this session. Read the conversation and the session's task list, list the tasks that are open or already finished, group them into worker tasks with a tier each, and show that plan. Report it with the `progress` tool (`title`, `total`, `tasks`, and `done` for those already finished), then continue the flow from section 1 for the tasks still open. Do not redo finished work.
+
+## Linked for the whole session
+
+From the first `progress` report on, this flow stays linked to the session until the user ends it. Every task that appears later (a new user request, a new item in the session's task list) goes into the same flow before you start it: call `progress` with `add: [{ title, tier }]`. Never drop an accepted task, never reset `done`, and never start a second flow for the same session. Close with `finished: true` only when the user ends the flow.
+
 ## 0. Preconditions
 
 - The flow is designed for a strong orchestrator model at high effort (Fable high is the reference setup). Do not try to detect or verify the session's model or effort — you cannot see the effort level. Whatever the session runs on is the user's deliberate choice; just orchestrate.
@@ -22,6 +31,7 @@ If the tool `mcp__flowdeck__progress` is available, keep it current; skip silent
 - after presenting the plan: `title` (a few words), `total` (number of worker tasks), `tasks` (`[{ title, tier, after }]` in plan order; `tier` without the `flowdeck-` prefix, `after` the numbers of the tasks it waits for), `phase: "delegate"` (or `"design"` while in section 2);
 - each time a task is accepted in review: `done` (accepted so far); switch `phase` to `"review"` while reviewing;
 - if re-planning changes the tasks: the new `tasks` and `total`;
+- when a new task appears later in the session: `add: [{ title, tier }]` (appends; keeps `done`; a title already in the flow is ignored);
 - once at close: `finished: true`.
 
 When delegating, pass the task's `title` verbatim as the Agent tool's `description` (a return round reuses it too): the agents panel matches runs to planned tasks by it.

@@ -29,6 +29,7 @@ type ProgressInput = {
   phase?: Phase
   finished?: boolean
   tasks?: { title?: string; tier?: string; after?: number[] }[]
+  add?: { title?: string; tier?: string; after?: number[] }[]
 }
 
 // ---------------------------------------------------------------------------
@@ -121,11 +122,12 @@ const blank = (): Flow => ({
   running: 0,
   phase: 'plan',
   isFinished: false,
+  isLinked: false,
   tasks: [],
 })
 
 const isNewFlow = (prev: Flow | null, input: ProgressInput): boolean =>
-  !prev || prev.isFinished || (input.title !== undefined && input.title.trim() !== prev.title)
+  !prev || prev.isFinished || (!prev.isLinked && input.title !== undefined && input.title.trim() !== prev.title)
 
 const cleanTasks = (tasks: ProgressInput['tasks']): PlannedTask[] | undefined =>
   tasks
@@ -139,8 +141,11 @@ const cleanTasks = (tasks: ProgressInput['tasks']): PlannedTask[] | undefined =>
 const merge = (prev: Flow | null, input: ProgressInput): Flow => {
   // A new title means a new flow: never carry counters over from an earlier one.
   const base = isNewFlow(prev, input) || !prev ? blank() : { ...blank(), ...prev }
-  const tasks = cleanTasks(input.tasks) ?? base.tasks
-  const total = Math.max(0, Math.round(input.total ?? (input.tasks ? tasks.length : base.total)))
+  const planned = cleanTasks(input.tasks) ?? base.tasks
+  const known = new Set(planned.map(t => t.title.toLowerCase()))
+  const fresh = (cleanTasks(input.add) ?? []).filter(t => !known.has(t.title.toLowerCase()) && known.add(t.title.toLowerCase()))
+  const tasks = [...planned, ...fresh]
+  const total = Math.max(0, Math.round(input.total ?? (fresh.length && !input.tasks ? base.total + fresh.length : input.tasks ? tasks.length : base.total)))
   const done = Math.min(total || Infinity, Math.max(0, Math.round(input.done ?? base.done)))
   const phase = input.phase && PHASES.includes(input.phase) ? input.phase : base.phase
   return {
@@ -150,6 +155,7 @@ const merge = (prev: Flow | null, input: ProgressInput): Flow => {
     done,
     phase: input.finished ? 'close' : phase,
     isFinished: input.finished === true,
+    isLinked: true,
     tasks,
   }
 }
@@ -631,6 +637,11 @@ async function refreshContext($: EngineInterface): Promise<void> {
   await update($, reading, () => toReading(b))
 }
 
+async function mirrorTasks($: EngineInterface, titles: string[]): Promise<void> {
+  if (!titles.length) return
+  await update($, flow, prev => (prev && prev.isLinked && !prev.isFinished ? merge(prev, { add: titles.map(title => ({ title, tier: 'medium' })) }) : prev))
+}
+
 // Opens the agents pane, or closes it when it is up; true when it ends up open.
 async function togglePane($: EngineInterface): Promise<boolean> {
   const isOpen = (await $.ui.panes()).some(p => p.id === PANE)
@@ -672,6 +683,19 @@ export const register: Register = (on, options) => {
           done: { type: 'integer', minimum: 0, description: 'Number of tasks accepted after review.' },
           phase: { type: 'string', enum: [...PHASES] },
           finished: { type: 'boolean', description: 'True once the flow is closed.' },
+          add: {
+            type: 'array',
+            description:
+              'Tasks to append to the running flow without touching the plan or the accepted count: new requests and new items in the session task list. Titles already in the flow are ignored.',
+            items: {
+              type: 'object',
+              properties: {
+                title: { type: 'string' },
+                tier: { type: 'string', enum: ['fable', 'heavy', 'careful', 'medium', 'light'] },
+              },
+              required: ['title'],
+            },
+          },
           tasks: {
             type: 'array',
             description:
@@ -735,8 +759,20 @@ export const register: Register = (on, options) => {
       await update($, agents, list => list.filter(a => a.status === 'running'))
     }
     const next = await update($, flow, p => merge(p, input))
-    if (next && input.tasks?.length) await autoOpen($, next.title)
+    if (next && (input.tasks?.length || input.add?.length)) await autoOpen($, next.title)
     return { result: `ok: ${label(next ?? blank())}` }
+  })
+
+  // A linked flow takes every task the session adds: the model's task list items are mirrored as planned tasks.
+  on('tool.call', { tool: 'TodoWrite' }, async ($, e, next) => {
+    const todos = (e as unknown as { todos?: { content?: string }[] }).todos ?? []
+    await mirrorTasks($, todos.map(t => String(t.content ?? '').trim()).filter(Boolean)).catch(() => {})
+    return next(e)
+  })
+  on('tool.call', { tool: 'TaskCreate' }, async ($, e, next) => {
+    const input = e as unknown as { subject?: string; title?: string }
+    await mirrorTasks($, [String(input.subject ?? input.title ?? '').trim()].filter(Boolean)).catch(() => {})
+    return next(e)
   })
 
   // A worker's own progress: the call runs in the worker's loop, so agentId names it.
