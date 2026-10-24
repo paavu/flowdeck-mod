@@ -12,7 +12,7 @@ An orchestrated delivery flow for Claude Code with a live side panel. The sessio
 ## Tools (for the model)
 | Tool | Used by | Purpose |
 |---|---|---|
-| `mcp__flowdeck__progress` | orchestrator in a flow | Flow title, planned worker tasks, accepted count, phase (`plan`, `design`, `delegate`, `review`, `close`), `finished`. |
+| `mcp__flowdeck__progress` | orchestrator in a flow | Flow title, planned worker tasks, accepted count, phase (`plan`, `design`, `delegate`, `review`, `close`), `finished`, `restart`. |
 | `mcp__flowdeck__step` | workers | A worker's own steps on its agent row: the plan sent once as a `steps` list, then moved with `next`, `done`, `active`, `failed`. The older `total`, `done`, `note` counts still work. |
 | `mcp__flowdeck__plan` | main session | A task plan for any work: stages of steps, or `kind: "todo"` for a flat list. Created once, then moved with short ops (`next`, `done`, `active`, `failed`, `state`, `note`); calls from subagents are ignored. |
 
@@ -41,6 +41,8 @@ Agent rows: the progress line names the state in its colour, with the live tool 
 ## The band above the prompt
 - The flow row (title, track, state, percent, `×N` agents button that opens the panel) plus up to 2 open plan rows (running, needing input or in error), newest first. With no flow, the plan rows show alone.
 - ✕ hides the band only; the flow stays in the panel. The `Band` button brings it back, and so does a new flow.
+- `Finish` (on the band, between `×N` and ✕) and `Finish flow` (in the panel, next to Collapse) end the open flow as `finished: true` does: it is saved to the history and shows as Done.
+- A new `/flowdeck <task>` while a flow is linked sends `progress` with `restart: true`: the open flow is saved as finished and the new one starts.
 
 ## State colours
 | State | Colour |

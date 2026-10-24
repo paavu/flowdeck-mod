@@ -13,12 +13,12 @@ Task from the user: $ARGUMENTS
 
 ## Starting: with a task, or without
 
-- **With a task** (the text above): run the flow below on that task. If a flow is already linked in this session, do not send a new plan: add the new task's worker tasks with `progress` `add`, keeping everything already in the flow.
-- **Without a task** (the text above is empty): adopt the work already underway in this session. Read the conversation and the session's task list, list the tasks that are open or already finished, group them into worker tasks with a tier each, and show that plan. Report it with the `progress` tool (`title`, `total`, `tasks`, and `done` for those already finished), then continue the flow from section 1 for the tasks still open. Do not redo finished work.
+- **With a task** (the text above): run the flow below on that task. If a flow is already linked in this session, end it and start the new one: send the new plan with `progress` `restart: true` (`title`, `total`, `tasks`, phase `"delegate"`) instead of adding to the old flow.
+- **Without a task** (the text above is empty): adopt the work already underway in this session. Read the conversation and the session's task list, list the tasks that are open or already finished, group them into worker tasks with a tier each, and show that plan. Report it with the `progress` tool (`title`, `total`, `tasks`, and `done` for those already finished), then continue the flow from section 1 for the tasks still open. Do not redo finished work, and do not send `restart`.
 
 ## Linked for the whole session
 
-From the first `progress` report on, this flow stays linked to the session until the user ends it. Every task that appears later (a new user request, a new item in the session's task list) goes into the same flow before you start it: call `progress` with `add: [{ title, tier }]`. Never drop an accepted task, never reset `done`, and never start a second flow for the same session. Close with `finished: true` only when the user ends the flow.
+From the first `progress` report on, this flow stays linked to the session until the user presses Finish or a new `/flowdeck <task>` restarts it. Every task that appears later (a new user request, a new item in the session's task list) goes into the same flow before you start it: call `progress` with `add: [{ title, tier }]`. Never drop an accepted task, never reset `done`, and never start a second flow for the same session. Close with `finished: true` only when the user ends the flow.
 
 ## 0. Preconditions
 

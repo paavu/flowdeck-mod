@@ -49,6 +49,7 @@ type ProgressInput = {
   done?: number
   phase?: Phase
   finished?: boolean
+  restart?: boolean
   tasks?: { title?: string; tier?: string; after?: number[] }[]
   add?: { title?: string; tier?: string; after?: number[] }[]
 }
@@ -848,6 +849,22 @@ async function recordFlow($: EngineInterface, f: Flow, status: 'finished' | 'ope
   }
 }
 
+// Ends the flow with the input's last fields: one finished record, then whatever comes next starts a new one.
+async function finishFlow($: EngineInterface, input: ProgressInput = {}): Promise<Flow | null> {
+  const next = await update($, flow, p => merge(p, { ...input, finished: true }))
+  if (next) {
+    await recordFlow($, next, 'finished')
+    await update($, flowMeta, () => null)
+  }
+  return next
+}
+
+// The Finish buttons: only an open flow is ended, so a press on a stale row does nothing.
+async function finishOpenFlow($: EngineInterface): Promise<void> {
+  const f = await read($, flow)
+  if (f && !f.isFinished) await finishFlow($)
+}
+
 type SavedPlans = Record<string, TaskPlan[]>
 
 const isStoredStep = (st: unknown): boolean =>
@@ -982,7 +999,8 @@ export const register: Register = (on, options) => {
       description:
         'Report /flowdeck progress to the progress bar above the prompt and the agents panel. ' +
         'Call it after presenting the plan (title, total, tasks, phase "delegate"), each time a task is accepted (done), ' +
-        'when switching phase or re-planning (tasks), phase "close" when the current work is done, and finished: true only when the user ends the flow. Fields left out keep their previous value.',
+        'when switching phase or re-planning (tasks), phase "close" when the current work is done, and finished: true only when the user ends the flow. ' +
+        'For a new /flowdeck <task> while a flow is linked, send the new plan with restart: true: the open flow is finished first and the new one starts. Fields left out keep their previous value.',
       inputSchema: {
         type: 'object',
         properties: {
@@ -991,6 +1009,10 @@ export const register: Register = (on, options) => {
           done: { type: 'integer', minimum: 0, description: 'Number of tasks accepted after review.' },
           phase: { type: 'string', enum: [...PHASES] },
           finished: { type: 'boolean', description: 'True once the flow is closed.' },
+          restart: {
+            type: 'boolean',
+            description: 'True to end the open flow (recorded as finished) and start a new one from the rest of this call. Without an open flow it just starts one.',
+          },
           add: {
             type: 'array',
             description:
@@ -1121,24 +1143,25 @@ export const register: Register = (on, options) => {
 
   on('tool.call', { tool: TOOL }, async ($, e) => {
     const input = e as unknown as ProgressInput
-    const prev = await read($, flow)
+    let prev = await read($, flow)
     // Finishing a flow that is already finished changes nothing; it would otherwise open a blank one.
     if (prev?.isFinished && input.finished === true) return { result: `ok: ${label(prev)}` }
+    // A restart ends the open flow as Finish does; the rest of the input then starts the new one.
+    if (input.restart === true && prev && !prev.isFinished) prev = await finishFlow($)
     if (isNewFlow(prev, input)) {
       // The flow being replaced goes to the history first, with its own agents; a finished one is there already.
       if (prev && !prev.isFinished) await recordFlow($, prev, 'finished')
-      const startedAt = await $.clock.now()
-      await update($, flowMeta, () => ({ startedAt, project }))
+      // Without a clock the record starts when the flow is saved, as for a flow no progress call created.
+      const startedAt: number | null = await Promise.resolve()
+        .then(() => $.clock.now())
+        .catch(() => null)
+      await update($, flowMeta, () => (startedAt === null ? null : { startedAt, project }))
       // A new flow starts with a clean list; agents still running stay.
       await update($, agents, list => list.filter(a => a.status === 'running'))
     }
-    const next = await update($, flow, p => merge(p, input))
+    const next = input.finished === true ? await finishFlow($, input) : await update($, flow, p => merge(p, input))
     if (isNewFlow(prev, input)) {
       await update($, panel, p => ({ ...p, isBandHidden: false })) // a new flow brings the band back
-    }
-    if (next?.isFinished) {
-      await recordFlow($, next, 'finished')
-      await update($, flowMeta, () => null) // whatever comes next is a new record
     }
     if (next && (input.tasks?.length || input.add?.length)) await autoOpen($, next.title)
     return { result: `ok: ${label(next ?? blank())}` }
@@ -1623,7 +1646,15 @@ export const register: Register = (on, options) => {
         )}
       </Box>
     )
-    const toggles = toggleCompact
+    const finishFlowButton = f && !f.isFinished ? <Button key="flow-finish" label="Finish flow" plain onPress={() => finishOpenFlow($)} /> : null
+    const toggles = finishFlowButton ? (
+      <Box key="title-controls" flexDirection="row" gap={1}>
+        {finishFlowButton}
+        {toggleCompact}
+      </Box>
+    ) : (
+      toggleCompact
+    )
     const isEmpty = list.length === 0 && planned.length === 0
     const summary = `≈${fmtCost(t.cost)}, ${fmtTokens(t.tokens)} ${s.tokensWord}, ${fmtTime(t.time)}`
     // An agent that reported its steps folds them out under its row; open only in this session.
@@ -1927,6 +1958,7 @@ export const register: Register = (on, options) => {
     const crewButton = (
       <Button key="flowdeck-agents" label={`×${crew}`} plain onPress={() => void togglePane($)} />
     )
+    const finish = f.isFinished ? null : <Button key="flowdeck-finish" label="Finish" plain onPress={() => finishOpenFlow($)} />
     const percent = `${Math.round(ratio(f) * 100)}%`
     const dismiss = (
       <Button
@@ -1950,6 +1982,7 @@ export const register: Register = (on, options) => {
           <Box flexDirection="row" alignItems="center" gap={1} flexShrink={1} minWidth={0} overflow="hidden">
             <Svg source={rowSvg(f, width, isWorking)} alt={`${f.title}: ${label(f)}, ${percent}`} width={width} height={H} />
             {crewButton}
+            {finish}
             {dismiss}
           </Box>
           {planRowEls}
@@ -1973,6 +2006,7 @@ export const register: Register = (on, options) => {
         <Text dimColor>{percent}</Text>
         <Text color={CLAY}>▣</Text>
         {crewButton}
+        {finish}
         {dismiss}
       </Box>
       {planRowEls}
