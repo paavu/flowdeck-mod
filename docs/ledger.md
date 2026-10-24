@@ -34,3 +34,4 @@ Usage: minor (deferred): compact terminal mode still shows all usage rows; a thi
 Usage: not verified in a real session: rateLimits shape/percent scale (0-100) and whether the engine returns stale resetsAt after expiry — check after first new session
 Panel layout: Context\/Usage buttons moved to the top row; Context now collapses to head line + bar (stored contextShown=false means collapsed); Usage hides the whole section. suite 65/65
 Usage bars now show remaining: full = 100% left, drains with use; label 'N% left'; projection drawn as the part that will be used up; even-pace mark at the remaining share. suite 69/69
+Band above prompt: now calls next(e) and stacks above what other mods draw (it used to drop it), width capped at 420px, right edge kept clear (paddingRight 5) like skins' band. suite 73/73. Not seen in a live window yet.

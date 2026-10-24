@@ -12,6 +12,7 @@ const panel = atom({ plugin: 'flowdeck', key: 'panel' } as const, {
   isDoneCollapsed: false,
   isContextShown: true,
   isUsageShown: true,
+  isBandHidden: false,
   autoOpenedFor: '',
 })
 const usageState = atom({ plugin: 'flowdeck', key: 'usage' } as const, { windows: [] as UsageWindow[], samples: {} as Samples })
@@ -809,6 +810,9 @@ export const register: Register = (on, options) => {
       await update($, agents, list => list.filter(a => a.status === 'running'))
     }
     const next = await update($, flow, p => merge(p, input))
+    if (isNewFlow(prev, input)) {
+      await update($, panel, p => ({ ...p, isBandHidden: false })) // a new flow brings the band back
+    }
     if (next && (input.tasks?.length || input.add?.length)) await autoOpen($, next.title)
     return { result: `ok: ${label(next ?? blank())}` }
   })
@@ -1028,10 +1032,22 @@ export const register: Register = (on, options) => {
         }}
       />
     )
+    const toggleBand = (
+      <Button
+        key="band"
+        label={`${p.isBandHidden ? '▸' : '▾'} Band`}
+        plain
+        onPress={async () => {
+          const hidden = !p.isBandHidden
+          await update($, panel, prev => ({ ...prev, isBandHidden: hidden }))
+        }}
+      />
+    )
     const topToggles = (
       <Box key="top-toggles" flexDirection="row" gap={1}>
         {toggleContext}
         {toggleUsage}
+        {toggleBand}
       </Box>
     )
     const toggles = toggleCompact
@@ -1213,7 +1229,8 @@ export const register: Register = (on, options) => {
 
   on('ui.render', { component: 'AbovePrompt' }, async ($, e, next) => {
     const f = await read($, flow)
-    if (f === null || e.props.hasSurvey) return next(e)
+    const hidden = (await read($, panel)).isBandHidden
+    if (f === null || hidden || e.props.hasSurvey) return next(e)
 
     const theirs = await next(e) // what other mods and Claude Code draw here stays, below this row
     const ui = $.ui.resolve(e)
@@ -1231,7 +1248,9 @@ export const register: Register = (on, options) => {
         label="✕"
         plain
         role="dismiss"
-        onPress={() => update($, flow, () => null)}
+        onPress={async () => {
+          await update($, panel, p => ({ ...p, isBandHidden: true })) // hides the band only; the flow stays in the panel
+        }}
       />
     )
 

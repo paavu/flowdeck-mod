@@ -69,6 +69,7 @@ export type Panel = {
   isDoneCollapsed: boolean
   isContextShown: boolean
   isUsageShown: boolean
+  isBandHidden: boolean
   autoOpenedFor: string
 }
 
