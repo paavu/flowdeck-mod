@@ -2,6 +2,8 @@ import { atom, read, update } from 'claude-code'
 import type { EngineInterface, Register } from 'claude-code'
 
 import type { AgentRun, Flow, HistoryEntry, Panel, Phase, PlannedTask, Reading, Samples, TaskPlan, UsageWindow } from '../types'
+import { derive, finishItems, hasItemOps, ITEM_H, itemAlt, itemLine, itemsOf, itemSvg, stepItems } from './agent-items'
+import type { StepInput } from './agent-items'
 import { agentState, HOUSEKEEPING, splitHead, stateText } from './agent-state'
 import { contextRows, contextSvg, toReading } from './context'
 import { addEntry, formatEntry, parseHistory, snapshot } from './history'
@@ -20,6 +22,7 @@ const panel = atom({ plugin: 'flowdeck', key: 'panel' } as const, {
   isBandHidden: false,
   isHistoryShown: false,
   openEntries: [] as string[],
+  openAgents: [] as string[],
   autoOpenedFor: '',
 })
 const usageState = atom({ plugin: 'flowdeck', key: 'usage' } as const, { windows: [] as UsageWindow[], samples: {} as Samples })
@@ -925,16 +928,35 @@ export const register: Register = (on, options) => {
       name: 'step',
       description:
         'For flowdeck workers: report progress on your own task to the agents panel. ' +
-        'Right after reading the brief, call it with `total` (your plan in 3-8 steps) and `done: 0`; ' +
-        'call it again as each step finishes. Cheap and silent: it only draws a bar.',
+        'Right after reading the brief, send your plan once as `steps` (3-8 titles of a few words); ' +
+        'then move it with `next: true` as each step finishes, `done` (titles), `active` or `failed`. ' +
+        'Without a list, `total` (your plan in 3-8 steps) and `done` (a count, 0 at first) with a `note` still work. ' +
+        'Cheap and silent: it only draws the agent row.',
       inputSchema: {
         type: 'object',
         properties: {
-          done: { type: 'integer', minimum: 0, description: 'Steps finished so far.' },
-          total: { type: 'integer', minimum: 1, description: 'Steps planned; may change if the plan changes.' },
-          note: { type: 'string', description: 'The step in progress, a few words.' },
+          steps: {
+            type: 'array',
+            description: 'Your plan in up to 12 steps, sent once (again only when it changes); the first step starts as active.',
+            items: {
+              type: 'object',
+              properties: {
+                title: { type: 'string', description: 'At most 4-5 words.' },
+                status: { type: 'string', enum: ['pending', 'active', 'done', 'error'] },
+              },
+              required: ['title'],
+            },
+          },
+          next: { type: 'boolean', description: 'Finish the step in progress and start the next.' },
+          done: {
+            description: 'Titles of steps now finished; or, without a list, the number of steps finished so far.',
+            anyOf: [{ type: 'array', items: { type: 'string' } }, { type: 'integer', minimum: 0 }],
+          },
+          active: { type: 'string', description: 'Title of the step now in progress.' },
+          failed: { type: 'string', description: 'Title of the step that failed.' },
+          total: { type: 'integer', minimum: 1, description: 'Steps planned, without a list; may change if the plan changes.' },
+          note: { type: 'string', description: 'The step in progress, a few words; with a list, its active title is used.' },
         },
-        required: ['done'],
       },
     })
     const planStep = {
@@ -1093,18 +1115,43 @@ export const register: Register = (on, options) => {
 
   // A worker's own progress: the call runs in the worker's loop, so agentId names it.
   on('tool.call', { tool: STEP_TOOL }, async ($, e) => {
-    const input = e as unknown as { done?: number; total?: number; note?: string }
+    const input = e as unknown as StepInput
     const agentId = e.agentId
     if (!agentId) return { result: 'ignored: only subagents report steps' }
-    await update($, agents, list =>
-      list.map(a => {
-        if (a.agentId !== agentId) return a
-        const total = Math.max(0, Math.round(input.total ?? a.stepTotal ?? 0))
-        const done = Math.max(0, Math.round(input.done ?? a.stepDone ?? 0))
-        return { ...a, stepTotal: total, stepDone: total ? Math.min(total, done) : done, stepNote: input.note?.trim() || undefined }
-      }),
-    )
-    return { result: 'ok' }
+    const num = (v: unknown) => (typeof v === 'number' && Number.isFinite(v) ? v : undefined)
+    // Sent counts and note win for this call; otherwise a list gives them.
+    const sent = { done: num(input.done), total: num(input.total), note: typeof input.note === 'string' ? input.note.trim() : '' }
+    let at: number | undefined
+    if (hasItemOps(input)) {
+      try {
+        at = await $.clock.now()
+      } catch {
+        // No clock: the items go unstamped.
+      }
+    }
+    let unknown: string[] = []
+    try {
+      await update($, agents, list =>
+        list.map(a => {
+          if (a.agentId !== agentId) return a
+          const moved = stepItems(a.items, input, at)
+          if (moved) unknown = moved.unknown
+          if (!moved?.items.length) {
+            const total = Math.max(0, Math.round(sent.total ?? a.stepTotal ?? 0))
+            const done = Math.max(0, Math.round(sent.done ?? a.stepDone ?? 0))
+            return { ...a, ...(moved ? { items: undefined } : {}), stepTotal: total, stepDone: total ? Math.min(total, done) : done, stepNote: sent.note || undefined }
+          }
+          const d = derive(moved.items)
+          const total = Math.max(0, Math.round(sent.total ?? d.total))
+          const done = Math.max(0, Math.round(sent.done ?? d.done))
+          return { ...a, items: moved.items, stepTotal: total, stepDone: total ? Math.min(total, done) : done, stepNote: sent.note || d.note }
+        }),
+      )
+    } catch {
+      return { result: 'ok (the panel could not be updated)' }
+    }
+    if (!unknown.length) return { result: 'ok' }
+    return { result: `ok (unknown step${unknown.length > 1 ? 's' : ''} ${unknown.map(t => `"${t.slice(0, 60)}"`).join(', ')} ignored)` }
   })
 
   // A task plan of the main session; a refused call changes nothing.
@@ -1281,6 +1328,10 @@ export const register: Register = (on, options) => {
           if (a.agentId !== agentId) return a
           // A run whose steps went unseen still gets the turn's own sum.
           const fallback = a.steps === 0 && e.usage
+          // The item still in progress ends with the run.
+          const items = itemsOf(a.items)
+          const closed = items.some(it => it.status === 'active') ? finishItems(items, e.reason === 'answer', at) : null
+          const counts = closed ? derive(closed) : null
           return {
             ...a,
             status: e.reason === 'answer' ? 'done' : 'failed',
@@ -1298,6 +1349,7 @@ export const register: Register = (on, options) => {
                   costUsd: costOf(e.usage.model || a.model, e.usage),
                 }
               : {}),
+            ...(closed && counts ? { items: closed, stepDone: counts.done, stepTotal: counts.total, stepNote: counts.note } : {}),
           }
         }),
       )
@@ -1475,6 +1527,21 @@ export const register: Register = (on, options) => {
     const toggles = toggleCompact
     const isEmpty = list.length === 0 && planned.length === 0
     const summary = `≈${fmtCost(t.cost)}, ${fmtTokens(t.tokens)} ${s.tokensWord}, ${fmtTime(t.time)}`
+    // An agent that reported its steps folds them out under its row; open only in this session.
+    const isUnfolded = (a: AgentRun) => (p.openAgents ?? []).includes(a.id)
+    const foldButton = (a: AgentRun) => (
+      <Button
+        key={`agent-fold-${a.id}`}
+        label={isUnfolded(a) ? '▾' : '▸'}
+        plain
+        onPress={() =>
+          update($, panel, prev => {
+            const open = prev.openAgents ?? []
+            return { ...prev, openAgents: open.includes(a.id) ? open.filter(id => id !== a.id) : [...open, a.id] }
+          })
+        }
+      />
+    )
 
     if (e.surface === 'desktop' && 'Svg' in ui) {
       const { Svg } = ui
@@ -1484,6 +1551,25 @@ export const register: Register = (on, options) => {
           {text}
         </Text>
       )
+      // With items the row leaves room for its chevron on the right; its children are drawn as wide as it.
+      const agentRow = (a: AgentRun, word: string) => {
+        const alt = `${a.description}: ${modelName(a.model)}, ${word}`
+        const items = itemsOf(a.items)
+        if (!items.length) return <Svg key={a.id} source={agentSvg(W, a, at)} alt={alt} width={W} height={66} />
+        const rowW = W - 28
+        return (
+          <Box key={a.id} flexDirection="column">
+            <Box flexDirection="row" alignItems="center" gap={1}>
+              <Svg source={agentSvg(rowW, a, at)} alt={alt} width={rowW} height={66} />
+              {foldButton(a)}
+            </Box>
+            {isUnfolded(a) &&
+              items.map((it, i) => (
+                <Svg key={`agent-item-${a.id}-${i}`} source={svg(rowW, ITEM_H, itemSvg(rowW, it, at, fitText))} alt={itemAlt(it, at)} width={rowW} height={ITEM_H} />
+              ))}
+          </Box>
+        )
+      }
 
       const dc = rd ? contextSvg(W, rd, !p.isContextShown) : null
       const contextSection = dc && rd ? (
@@ -1534,14 +1620,9 @@ export const register: Register = (on, options) => {
           {toggles}
           {isEmpty && <Text dimColor>{s.empty}</Text>}
           {running.length > 0 && section('h-run', `${s.running} · ${running.length}`)}
-          {running.map(a => (
-            <Svg key={a.id} source={agentSvg(W, a, at)} alt={`${a.description}: ${modelName(a.model)}, ${s.isRunning}`} width={W} height={66} />
-          ))}
+          {running.map(a => agentRow(a, s.isRunning))}
           {finished.length > 0 && toggleDone}
-          {!p.isDoneCollapsed &&
-            finished.map(a => (
-              <Svg key={a.id} source={agentSvg(W, a, at)} alt={`${a.description}: ${modelName(a.model)}, ${s.isFinished}`} width={W} height={66} />
-            ))}
+          {!p.isDoneCollapsed && finished.map(a => agentRow(a, s.isFinished))}
           {planned.length > 0 && section('h-plan', `${s.planned} · ${planned.length}`)}
           {planned.map(pl => (
             <Svg key={`plan-${pl.n}`} source={plannedSvg(W, pl)} alt={`${pl.n}. ${pl.title}: ${s.isPlanned}`} width={W} height={46} />
@@ -1605,6 +1686,7 @@ export const register: Register = (on, options) => {
       const head = stateText(a)
       const room = Math.max(state.name.length + 1, cols - 2 - barW - 1 - stats.length - 3)
       const [lead, rest] = splitHead(clip(steps ? `${head} · ${steps}` : head, room), head)
+      const items = itemsOf(a.items)
       return (
         <Box key={a.id} flexDirection="column" marginBottom={1}>
           <Box flexDirection="row" gap={1}>
@@ -1613,6 +1695,7 @@ export const register: Register = (on, options) => {
               {a.description || a.type}
             </Text>
             <Text color={a.status === 'failed' ? 'red' : a.status === 'done' ? 'green' : color}>{STATUS_GLYPH[a.status]}</Text>
+            {items.length > 0 && foldButton(a)}
           </Box>
           <Text dimColor wrap="truncate-end">
             {'  '}
@@ -1627,6 +1710,20 @@ export const register: Register = (on, options) => {
               {rest} · {stats}
             </Text>
           </Text>
+          {isUnfolded(a) &&
+            items.map((it, i) => {
+              const l = itemLine(it, at, cols)
+              return (
+                <Text key={`agent-item-${a.id}-${i}`} wrap="truncate-end">
+                  {'   '}
+                  <Text color={l.color} dimColor={l.isDim}>
+                    {l.mark}
+                  </Text>{' '}
+                  <Text dimColor={l.isDim}>{l.title}</Text>
+                  {l.time ? <Text dimColor>{`  ${l.time}`}</Text> : null}
+                </Text>
+              )
+            })}
         </Box>
       )
     }

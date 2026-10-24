@@ -42,6 +42,10 @@ export type Flow = {
 
 export type AgentStatus = 'running' | 'done' | 'failed'
 
+/** One step of a worker's own list, sent through the `step` tool. */
+export type AgentItemStatus = 'pending' | 'active' | 'done' | 'error'
+export type AgentItem = { title: string; status: AgentItemStatus; startedAt?: number; doneAt?: number }
+
 export type AgentRun = {
   id: string
   agentId?: string
@@ -62,6 +66,8 @@ export type AgentRun = {
   stepDone?: number
   stepTotal?: number
   stepNote?: string
+  /** The worker's own step list, when it sent one; the counts and the note above derive from it. */
+  items?: AgentItem[]
   /** The tool the running agent called last, from its own tool calls; cleared when the run ends. */
   tool?: string
   /** True while a permission dialog for one of the agent's calls is up. */
@@ -94,6 +100,8 @@ export type Panel = {
   isBandHidden: boolean
   isHistoryShown: boolean
   openEntries: string[]
+  /** Agent rows unfolded to show their items; this session only. */
+  openAgents: string[]
   autoOpenedFor: string
 }
 

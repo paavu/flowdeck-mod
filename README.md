@@ -36,6 +36,8 @@ Top buttons, in order: **Context · Usage · Plans · Band · History**. Each to
 
 Agent rows: the progress line names the state in its colour, with the live tool word while running (`Running · Bash`), `Needs approval` while a permission dialog for its call is up, then `Done` or `Error`. The tier colour stays on the tier name.
 
+- Foldable steps: a worker that sends its plan as the `step` tool's `steps` list (then `next`, `done`, `active`, `failed`) gets a `▸` chevron on its row; open, it lists each step with its state mark, colour and time (planned grey, running blue-violet, done green, error red). The row's `3/6 · step` line counts from the list; open rows are kept for the session only.
+
 ## The band above the prompt
 - The flow row (title, track, state, percent, `×N` agents button that opens the panel) plus up to 2 open plan rows (running, needing input or in error), newest first. With no flow, the plan rows show alone.
 - ✕ hides the band only; the flow stays in the panel. The `Band` button brings it back, and so does a new flow.
