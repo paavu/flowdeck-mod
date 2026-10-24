@@ -2,6 +2,7 @@ import { atom, read, update } from 'claude-code'
 import type { EngineInterface, Register } from 'claude-code'
 
 import type { AgentRun, Flow, HistoryEntry, Panel, Phase, PlannedTask, Reading, Samples, TaskPlan, UsageWindow } from '../types'
+import { agentState, HOUSEKEEPING, splitHead, stateText } from './agent-state'
 import { contextRows, contextSvg, toReading } from './context'
 import { addEntry, formatEntry, parseHistory, snapshot } from './history'
 import { importPlan, isFinished, normalize, percent, PLAN_ID, placeBar, planId, str, where } from './plan'
@@ -605,6 +606,10 @@ const agentSvg = (W: number, a: AgentRun, at: number): string => {
   const stats = `ctx ${ctx}% · ${fmtTokens(a.contextTokens)}  ≈${fmtCost(a.costUsd)}  ${fmtTime(elapsed(a, at))}`
   const steps = a.stepTotal ? `${a.stepDone ?? 0}/${a.stepTotal}${a.stepNote ? ' · ' + a.stepNote : ''}` : ''
   const stepsW = Math.max(0, barW - textWidth(stats, 11) - 12)
+  // The state leads the line in its colour; the reported steps follow it.
+  const state = agentState(a)
+  const head = stateText(a)
+  const [lead, rest] = splitHead(fitText(steps ? `${head} · ${steps}` : head, 11, stepsW), head)
   // Without reported steps the bar falls back to the context, drawn grey.
   const fillW = Math.round(barW * (progress ?? ctx / 100))
   return svg(
@@ -613,9 +618,9 @@ const agentSvg = (W: number, a: AgentRun, at: number): string => {
     `${crab(0, 14, costumeOf(a.type), false, a.status === 'running')}
 <text class="t" x="42" y="18" font-family="${FONT}" font-size="13" font-weight="600">${xml(fitText(a.description || a.type, 13, textW))}</text>
 <text x="42" y="34" font-family="${FONT}" font-size="11"><tspan fill="${color}">${xml(tier === 'other' ? a.type : tier)}</tspan><tspan class="s">  ${xml(meta.join('  ·  '))}</tspan></text>
-${steps && stepsW > 30 ? `<text class="t" x="42" y="49" font-family="${FONT}" font-size="11" font-variant-numeric="tabular-nums">${xml(fitText(steps, 11, stepsW))}</text>` : ''}
+${stepsW > 30 ? `<text x="42" y="49" font-family="${FONT}" font-size="11" font-variant-numeric="tabular-nums"><tspan fill="${state.color}">${xml(lead)}</tspan>${rest ? `<tspan class="t">${xml(rest)}</tspan>` : ''}</text>` : ''}
 <text class="s" x="${42 + barW}" y="49" text-anchor="end" font-family="${FONT}" font-size="11" font-variant-numeric="tabular-nums">${stats}</text>
-<rect class="k" x="42" y="55" width="${barW}" height="4" rx="2"/><rect${progress === null ? ' class="m"' : ''} x="42" y="55" width="${fillW}" height="4" rx="2"${progress === null ? '' : ` fill="${color}"`}/>
+<rect class="k" x="42" y="55" width="${barW}" height="4" rx="2"/><rect${progress === null ? ' class="m"' : ''} x="42" y="55" width="${fillW}" height="4" rx="2"${progress === null ? '' : ` fill="${state.color}"`}/>
 ${statusMark(W - 8, 16, a.status, color)}
 <line class="ln" x1="0" y1="65.5" x2="${W}" y2="65.5"/>`,
   )
@@ -814,6 +819,40 @@ const planLine = (p: TaskPlan): string => {
   return `${p.id}: ${w.pos}/${w.total}, ${p.state}${active ? `, active "${active.title}"` : ''}`
 }
 
+// A subagent's calls in flight by tool_use_id: the tool, and whether a permission dialog for it is up.
+// Per call, since one agent may run several at once. A reload starts it empty: a request then marks
+// the agent itself, and its next call clears the mark.
+type Flight = { agentId: string; tool: string; isAsked: boolean }
+const flights = new Map<string, Flight>()
+let flightCount = 0
+
+// What showAgent last wrote per agent, so a call that changes neither the word nor the flag writes nothing.
+// Kept here rather than read back: a hook held open across a call may read an older list than another hook has since written.
+const shown = new Map<string, { tool?: string; isAsked: boolean }>()
+
+const forgetFlights = (agentId: string): void => {
+  for (const [id, f] of flights) if (f.agentId === agentId) flights.delete(id)
+  shown.delete(agentId)
+}
+
+// A running agent's tool word and approval flag from its calls in flight.
+async function showAgent($: EngineInterface, agentId: string, endedTool?: string, isForced = false): Promise<void> {
+  const mine = [...flights.values()].filter(f => f.agentId === agentId)
+  const isAsked = isForced || mine.some(f => f.isAsked)
+  const last = shown.get(agentId)
+  const tool = mine.at(-1)?.tool ?? endedTool ?? last?.tool
+  if (last && last.tool === tool && last.isAsked === isAsked) return
+  await update($, agents, list => {
+    const at = list.findIndex(a => a.agentId === agentId && a.status === 'running')
+    const run = list[at]
+    if (!run || (run.tool === tool && !!run.isAsked === isAsked)) return list
+    const next = [...list]
+    next[at] = { ...run, tool, isAsked }
+    return next
+  })
+  shown.set(agentId, { tool, isAsked }) // an agent the panel does not list is skipped the same way
+}
+
 export const register: Register = (on, options) => {
   on('session.start', async ($, e, next) => {
     const started = await next(e)
@@ -987,6 +1026,60 @@ export const register: Register = (on, options) => {
     const title = typeof input.subject === 'string' ? input.subject.trim() : typeof input.title === 'string' ? input.title.trim() : ''
     if (!e.agentId && title) await mirrorTasks($, [{ title, completed: false }]).catch(() => {})
     return result
+  })
+
+  // A subagent's own call names its tool word; flowdeck's bookkeeping calls do not. Never alters the call.
+  on('tool.call', async ($, e, next) => {
+    const agentId = e.agentId
+    if (!agentId || HOUSEKEEPING.has(e.tool)) return next(e)
+    const useId = e.tool_use_id ?? `${agentId}#${++flightCount}`
+    try {
+      flights.set(useId, { agentId, tool: e.tool, isAsked: false })
+      await showAgent($, agentId)
+    } catch {
+      // A failing read costs the word, not the call.
+    }
+    try {
+      return await next(e)
+    } finally {
+      flights.delete(useId)
+      await showAgent($, agentId, e.tool).catch(() => {})
+    }
+  })
+
+  // Amber only while a permission dialog for the agent's call is really up: a settings hook's answer raises none.
+  on('classic.PermissionRequest', async ($, e, next) => {
+    const agentId = e.agent_id
+    let flight: Flight | undefined
+    let isMarked = false
+    try {
+      if (agentId && !HOUSEKEEPING.has(e.tool_name)) {
+        // The request names no call: the agent's oldest call of this tool not yet asked, else its oldest not asked.
+        const open = [...flights.values()].filter(f => f.agentId === agentId && !f.isAsked)
+        flight = open.find(f => f.tool === e.tool_name) ?? open[0]
+        if (flight) flight.isAsked = true
+        await showAgent($, agentId, undefined, !flight)
+        isMarked = true
+      }
+    } catch {
+      // A failing read costs the mark, not the request.
+    }
+    const answer = await next(e)
+    if (agentId && isMarked && answer.decision) {
+      if (flight) flight.isAsked = false
+      await showAgent($, agentId).catch(() => {})
+    }
+    return answer
+  })
+
+  on('classic.PermissionDenied', async ($, e, next) => {
+    const agentId = e.agent_id
+    if (agentId) {
+      const flight = flights.get(e.tool_use_id) ?? [...flights.values()].find(f => f.agentId === agentId && f.isAsked)
+      if (flight) flight.isAsked = false
+      await showAgent($, agentId).catch(() => {})
+    }
+    return next(e)
   })
 
   // A worker's own progress: the call runs in the worker's loop, so agentId names it.
@@ -1172,6 +1265,7 @@ export const register: Register = (on, options) => {
   on('turn.complete', async ($, e, next) => {
     const agentId = e.agentId
     if (agentId) {
+      forgetFlights(agentId)
       const at = await $.clock.now()
       await update($, agents, list =>
         list.map(a => {
@@ -1182,6 +1276,8 @@ export const register: Register = (on, options) => {
             ...a,
             status: e.reason === 'answer' ? 'done' : 'failed',
             endedAt: at,
+            tool: undefined,
+            isAsked: undefined,
             ...(fallback && e.usage
               ? {
                   model: e.usage.model || a.model,
@@ -1493,7 +1589,13 @@ export const register: Register = (on, options) => {
       const ctx = ctxOf(a)
       const progress = progressOf(a)
       const model = a.effort ? `${modelName(a.model)} · ${a.effort}` : modelName(a.model)
-      const steps = a.stepTotal ? `${a.stepDone ?? 0}/${a.stepTotal}${a.stepNote ? ' ' + a.stepNote : ''} · ` : ''
+      const steps = a.stepTotal ? `${a.stepDone ?? 0}/${a.stepTotal}${a.stepNote ? ' ' + a.stepNote : ''}` : ''
+      const stats = `ctx ${ctx}% · ${fmtTokens(a.contextTokens)} ≈${fmtCost(a.costUsd)} ${fmtTime(elapsed(a, at))}`
+      // The state leads the line in its colour, cut so the stats keep their room.
+      const state = agentState(a)
+      const head = stateText(a)
+      const room = Math.max(state.name.length + 1, cols - 2 - barW - 1 - stats.length - 3)
+      const [lead, rest] = splitHead(clip(steps ? `${head} · ${steps}` : head, room), head)
       return (
         <Box key={a.id} flexDirection="column" marginBottom={1}>
           <Box flexDirection="row" gap={1}>
@@ -1510,10 +1612,10 @@ export const register: Register = (on, options) => {
           </Text>
           <Text wrap="truncate-end">
             {'  '}
-            {progress === null ? <Text dimColor>{ctxBar(ctx, barW)}</Text> : <Text color={color}>{ctxBar(progress * 100, barW)}</Text>}
+            {progress === null ? <Text dimColor>{ctxBar(ctx, barW)}</Text> : <Text color={state.color}>{ctxBar(progress * 100, barW)}</Text>}{' '}
+            <Text color={state.color}>{lead}</Text>
             <Text dimColor>
-              {' '}
-              {steps}ctx {ctx}% · {fmtTokens(a.contextTokens)} ≈{fmtCost(a.costUsd)} {fmtTime(elapsed(a, at))}
+              {rest} · {stats}
             </Text>
           </Text>
         </Box>

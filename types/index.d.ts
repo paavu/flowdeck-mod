@@ -62,6 +62,10 @@ export type AgentRun = {
   stepDone?: number
   stepTotal?: number
   stepNote?: string
+  /** The tool the running agent called last, from its own tool calls; cleared when the run ends. */
+  tool?: string
+  /** True while a permission dialog for one of the agent's calls is up. */
+  isAsked?: boolean
 }
 
 export type HistoryTask = { title: string; tier: string }
