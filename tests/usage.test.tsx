@@ -119,7 +119,7 @@ describe('drawings', () => {
     const text = rows.join('\n')
     expect(text).toContain('Current session')
     expect(text).toContain('Resets at 2:40 PM')
-    expect(text).toContain('76% used')
+    expect(text).toContain('24% left')
     expect(text).toContain('This week')
     expect(text).toContain('Resets Thursday 11:30 AM')
     expect(text).toContain('average: 100% at 1:36 PM')
@@ -141,7 +141,7 @@ describe('drawings', () => {
     const { height, body } = usageSvg(400, toWindows(limits(76, 33)), {}, NOW, 'UTC')
     expect((body.match(/data-bar=/g) ?? []).length).toBe(2)
     expect((body.match(/data-mark=/g) ?? []).length).toBe(2)
-    expect(body).toContain('76% used')
+    expect(body).toContain('24% left')
     expect(height).toBeGreaterThan(100)
   })
 
@@ -160,7 +160,8 @@ describe('review fixes', () => {
     expect(stale.resetsAt).toBeNull()
     const rows = usageRows([w], {}, RESET_5H + 20 * MIN, 80, 'UTC').map(r => r.line).join('\n')
     expect(rows).toContain('window reset')
-    expect(rows).not.toContain('76% used')
+    expect(rows).not.toContain('24% left')
+    expect(rows).toContain('100% left')
   })
 
   test('the week has no recent projection and a busy hour does not make it red', () => {
@@ -207,5 +208,43 @@ describe('review fixes', () => {
     const { body } = usageSvg(400, [w], {}, w.resetsAt! - 5 * HOUR, 'UTC')
     const x = Number(/data-mark="five_hour" x="(-?[\d.]+)"/.exec(body)![1])
     expect(x).toBeGreaterThanOrEqual(0)
+  })
+})
+
+describe('bars show what is left', () => {
+  test('the svg bar is as wide as the share that is left, and drains as usage grows', () => {
+    const width = (pctUsed: number) => {
+      const { body } = usageSvg(400, toWindows(limits(pctUsed, 10)), {}, NOW, 'UTC')
+      return Number(/data-bar="five_hour"[^>]*width="([\d.]+)"/.exec(body)![1])
+    }
+    const track = 400 - 74
+    expect(Math.abs(width(0) - track)).toBeLessThan(0.2) // nothing used: full
+    expect(Math.abs(width(76) - track * 0.24)).toBeLessThan(0.2)
+    expect(width(100)).toBe(0)
+    expect(width(76)).toBeLessThan(width(30))
+  })
+
+  test('the terminal bar is filled by what is left', () => {
+    const bar = (pctUsed: number) => usageRows(toWindows(limits(pctUsed, 10)), {}, NOW, 50, 'UTC').find(r => r.kind === 'bar' && r.window === 0)!.line
+    const filled = (line: string) => (line.match(/█/g) ?? []).length
+    expect(filled(bar(0))).toBeGreaterThan(filled(bar(76)))
+    const b = bar(76)
+    const cells = b.slice(0, b.indexOf(' ')).length
+    expect(Math.abs(filled(b) - Math.round(cells * 0.24))).toBeLessThanOrEqual(1) // the tick may take one cell
+    expect(b).toContain('24% left')
+  })
+
+  test('the projected burn is shown as the part of the bar that will be used up, ahead of the fill', () => {
+    const { body } = usageSvg(400, toWindows(limits(30, 10)), {}, NOW, 'UTC') // 30% used, average ends at 50%
+    const proj = /<rect x="([\d.]+)" y="\d+" width="([\d.]+)" height="3"/.exec(body)!
+    const track = 400 - 74
+    expect(Math.abs(Number(proj[1]) - track * 0.5)).toBeLessThan(0.3) // remaining at reset is 50%
+    expect(Math.abs(Number(proj[1]) + Number(proj[2]) - track * 0.7)).toBeLessThan(0.3) // up to what is left now
+  })
+
+  test('the even-pace mark sits where the remaining share would be on an even pace', () => {
+    const { body } = usageSvg(400, toWindows(limits(30, 10)), {}, NOW, 'UTC') // 60% of the window passed: 40% left
+    const x = Number(/data-mark="five_hour" x="(-?[\d.]+)"/.exec(body)![1])
+    expect(Math.abs(x + 1 - (400 - 74) * 0.4)).toBeLessThan(0.3)
   })
 })

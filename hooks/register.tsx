@@ -1055,7 +1055,7 @@ export const register: Register = (on, options) => {
 
       const du = us.windows.length ? usageSvg(W, us.windows, us.samples, clockNow) : null
       const usageSection = !p.isUsageShown ? null : du ? (
-        <Svg source={svg(W, du.height, du.body)} alt={us.windows.map(w => `${w.label} ${w.percent}% used`).join(', ')} width={W} height={du.height} />
+        <Svg source={svg(W, du.height, du.body)} alt={us.windows.map(w => `${w.label} ${Math.max(0, 100 - w.percent)}% left`).join(', ')} width={W} height={du.height} />
       ) : (
         <Text dimColor>no usage data yet</Text>
       )

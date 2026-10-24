@@ -39,7 +39,7 @@ describe('usage section in the panel', () => {
     await settle()
     const p = await pane($, 'terminal')
     expect(await p.find({ type: 'Text', text: /Current session/ })).toBeDefined()
-    expect(await p.find({ type: 'Text', text: /76% used/ })).toBeDefined()
+    expect(await p.find({ type: 'Text', text: /24% left/ })).toBeDefined()
     expect(await p.find({ type: 'Text', text: /This week/ })).toBeDefined()
     expect(await p.find({ type: 'Text', text: /average: 100% at/ })).toBeDefined()
     await p.unmount()
@@ -56,7 +56,7 @@ describe('usage section in the panel', () => {
     expect(store.usageShown).toBe(false)
     await p.unmount()
     p = await pane($, 'terminal')
-    expect(await p.find({ type: 'Text', text: /76% used/ })).toBeUndefined()
+    expect(await p.find({ type: 'Text', text: /24% left/ })).toBeUndefined()
     await p.unmount()
   })
 
@@ -65,7 +65,7 @@ describe('usage section in the panel', () => {
     await start($)
     await settle()
     const p = await pane($, 'terminal')
-    expect(await p.find({ type: 'Text', text: /76% used/ })).toBeUndefined()
+    expect(await p.find({ type: 'Text', text: /24% left/ })).toBeUndefined()
     await p.unmount()
   })
 

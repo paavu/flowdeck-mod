@@ -129,10 +129,11 @@ export function usageRows(windows: UsageWindow[], samples: Samples, now: number,
     const f = forecast(w, samples, now)
     const over = isOver(w, f)
     const label = `${w.label}  ${resets(w, now, tz)}`.trimEnd()
-    const used = `${pct(w.percent)} used`
+    const left = Math.max(0, 100 - w.percent)
+    const used = `${pct(left)} left`
     const bar = Math.max(6, columns - used.length - 1)
-    const filled = Math.min(bar, Math.round((Math.min(100, w.percent) / 100) * bar))
-    const tick = w.resetsAt === null ? -1 : Math.min(bar - 1, Math.round((f.expected / 100) * bar))
+    const filled = Math.min(bar, Math.round((left / 100) * bar))
+    const tick = w.resetsAt === null ? -1 : Math.min(bar - 1, Math.max(0, Math.round(((100 - f.expected) / 100) * bar)))
     const cells = Array.from({ length: bar }, (_, i) => (i === tick ? '│' : i < filled ? '█' : '░')).join('')
     rows.push({ line: fit(label, columns), kind: 'head', window, over })
     rows.push({ line: `${cells} ${used}`, kind: 'bar', window, over })
@@ -153,11 +154,13 @@ export function usageSvg(width: number, windows: UsageWindow[], samples: Samples
       const f = forecast(w, samples, now)
       const over = isOver(w, f)
       const color = over ? COLOR.over : COLOR[w.kind]
-      const x = (p: number) => (Math.min(100, Math.max(0, p)) / 100) * barW
+      const x = (p: number) => (Math.min(100, Math.max(0, p)) / 100) * barW // percent of the bar's width
+      const left = Math.max(0, 100 - w.percent)
       const y = top + 26
+      // The part that will be used up by the reset at that pace: from what would remain back to what is left now.
       const ext = (p: Projection | null, dy: number, h: number, opacity: number) =>
-        p && w.percent < 100 ? `<rect x="${x(w.percent).toFixed(1)}" y="${y + dy}" width="${Math.max(0, x(p.atReset) - x(w.percent)).toFixed(1)}" height="${h}" fill="${color}" opacity="${opacity}"/>` : ''
-      const markX = Math.min(barW - 2, Math.max(0, x(f.expected) - 1))
+        p && left > 0 ? `<rect x="${x(100 - p.atReset).toFixed(1)}" y="${y + dy}" width="${Math.max(0, x(left) - x(100 - p.atReset)).toFixed(1)}" height="${h}" fill="${color}" opacity="${opacity}"/>` : ''
+      const markX = Math.min(barW - 2, Math.max(0, x(100 - f.expected) - 1))
       const mark = w.resetsAt === null ? '' : `<rect data-mark="${w.kind}" x="${markX.toFixed(1)}" y="${y - 3}" width="2" height="16" fill="#6b6b6b" opacity="0.9"/>`
       const notes = verdictLines(w, f, now, tz)
         .map((note, i) => `<text class="s" x="0" y="${y + 30 + i * 14}" font-family="${FONT}" font-size="11">${esc(fit(note, Math.floor(width / 5.5)))}</text>`)
@@ -165,9 +168,9 @@ export function usageSvg(width: number, windows: UsageWindow[], samples: Samples
       const out = `<text class="t" x="0" y="${top + 14}" font-family="${FONT}" font-size="13" font-weight="600">${esc(w.label)}</text>
 <text class="s" x="${barW}" y="${top + 14}" text-anchor="end" font-family="${FONT}" font-size="11">${esc(resets(w, now, tz))}</text>
 <rect x="0" y="${y}" width="${barW}" height="10" rx="5" fill="${color}" opacity="0.18"/>
-<rect data-bar="${w.kind}" data-state="${over ? 'over' : 'ok'}" x="0" y="${y}" width="${x(w.percent).toFixed(1)}" height="10" rx="5" fill="${color}"/>
+<rect data-bar="${w.kind}" data-state="${over ? 'over' : 'ok'}" x="0" y="${y}" width="${x(left).toFixed(1)}" height="10" rx="5" fill="${color}"/>
 ${ext(f.recent, 0, 10, 0.45)}${ext(f.average, 10, 3, 0.6)}${mark}
-<text class="s" x="${width}" y="${y + 9}" text-anchor="end" font-family="${FONT}" font-size="12" font-variant-numeric="tabular-nums">${pct(w.percent)} used</text>
+<text class="s" x="${width}" y="${y + 9}" text-anchor="end" font-family="${FONT}" font-size="12" font-variant-numeric="tabular-nums">${pct(left)} left</text>
 ${notes}`
       top += ROW
       return out

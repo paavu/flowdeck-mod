@@ -32,3 +32,4 @@ Usage: minor (deferred): label and reset text can overlap in narrow desktop pane
 Usage: minor (deferred): recent pace stays frozen after a burst until the next reading; reset detection only by a falling percent (not resetsAt change)
 Usage: minor (deferred): compact terminal mode still shows all usage rows; a third toggle crowds the title row at 40 columns; no-subscription users see "no usage data yet"
 Usage: not verified in a real session: rateLimits shape/percent scale (0-100) and whether the engine returns stale resetsAt after expiry — check after first new session
+Panel layout: Context\/Usage buttons moved to the top row; Context now collapses to head line + bar (stored contextShown=false means collapsed); Usage hides the whole section. suite 65/65
