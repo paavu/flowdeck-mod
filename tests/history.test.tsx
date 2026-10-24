@@ -1,0 +1,204 @@
+import { describe, expect, test } from 'claude-code/testing'
+
+import { MAX_ENTRIES, addEntry, formatEntry, isWorthKeeping, parseHistory, snapshot } from '../hooks/history'
+import type { AgentRun, Flow, HistoryEntry } from '../types'
+
+const MIN = 60_000
+const START = Date.UTC(2026, 9, 25, 10, 0)
+const END = START + 30 * MIN
+const NOW = Date.UTC(2026, 9, 25, 12, 0)
+
+const near = (a: number, b: number, eps: number) => Math.abs(a - b) <= eps
+
+const flow = (over: Partial<Flow> = {}): Flow => ({
+  title: 'Ship it',
+  total: 3,
+  done: 2,
+  running: 1,
+  phase: 'delegate',
+  isFinished: false,
+  isLinked: true,
+  tasks: [
+    { title: 'Write tests', tier: 'light', after: [] },
+    { title: 'Build module', tier: 'medium', after: [0] },
+    { title: 'Review', tier: 'heavy', after: [1] },
+  ],
+  ...over,
+})
+
+const run = (over: Partial<AgentRun> = {}): AgentRun => ({
+  id: 'a',
+  type: 'flowdeck-light',
+  description: 'x',
+  model: 'opus',
+  status: 'done',
+  startedAt: START,
+  endedAt: START + 5 * MIN,
+  contextTokens: 0,
+  contextMax: 1,
+  tokens: 20_000,
+  costUsd: 0.5,
+  steps: 0,
+  round: 1,
+  ...over,
+})
+
+const agents = [run(), run({ id: 'b', startedAt: START + 5 * MIN, endedAt: undefined, tokens: 25_000, costUsd: 0.7 })]
+const snap = (over: Partial<Parameters<typeof snapshot>[0]> = {}) =>
+  snapshot({ flow: flow(), agents, project: '/Users/me/proj', startedAt: START, endedAt: END, status: 'finished', ...over })
+
+const entry = (i: number, over: Partial<HistoryEntry> = {}): HistoryEntry => ({
+  ...snap({ startedAt: START + i, endedAt: END + i }),
+  ...over,
+})
+
+describe('snapshot', () => {
+  test('sums cost, tokens and time; a running agent counts up to the end', () => {
+    const e = snap()
+    expect(near(e.cost, 1.2, 1e-9)).toBe(true)
+    expect(e.tokens).toBe(45_000)
+    expect(e.time).toBe(5 * MIN + 25 * MIN)
+    expect(e.status).toBe('finished')
+    expect(e.done).toBe(2)
+    expect(e.total).toBe(3)
+    expect(e.tasks).toEqual([
+      { title: 'Write tests', tier: 'light' },
+      { title: 'Build module', tier: 'medium' },
+      { title: 'Review', tier: 'heavy' },
+    ])
+    expect(e.project).toBe('/Users/me/proj')
+    expect(snap({ status: 'open' }).status).toBe('open')
+  })
+
+  test('a run that ends before it starts adds no time', () => {
+    const e = snap({ agents: [run({ endedAt: START - MIN })] })
+    expect(e.time).toBe(0)
+  })
+
+  test('the id is stable across snapshots of the same flow', () => {
+    const a = snap({ endedAt: END })
+    const b = snap({ endedAt: END + MIN, status: 'open' })
+    expect(a.id).toBe(`${START}-/Users/me/proj`)
+    expect(b.id).toBe(a.id)
+  })
+})
+
+describe('isWorthKeeping', () => {
+  test('an empty flow is not kept', () => {
+    const e = snap({ flow: flow({ tasks: [], total: 0, done: 0 }), agents: [] })
+    expect(isWorthKeeping(e)).toBe(false)
+  })
+
+  test('tasks, done tasks or agent spend make it worth keeping', () => {
+    expect(isWorthKeeping(snap())).toBe(true)
+    expect(isWorthKeeping(snap({ agents: [] }))).toBe(true)
+    expect(isWorthKeeping(snap({ flow: flow({ tasks: [], total: 0, done: 0 }) }))).toBe(true)
+    expect(isWorthKeeping(snap({ flow: flow({ tasks: [], total: 1, done: 1 }), agents: [] }))).toBe(true)
+  })
+})
+
+describe('addEntry', () => {
+  test('newest first', () => {
+    const h = addEntry(addEntry([], entry(1)), entry(2))
+    expect(h.map(e => e.id)).toEqual([entry(2).id, entry(1).id])
+  })
+
+  test('a later snapshot of the same flow replaces it and moves to the front', () => {
+    const h = [entry(3), entry(2), entry(1)]
+    const next = addEntry(h, entry(1, { status: 'open', done: 3 }))
+    expect(next.map(e => e.id)).toEqual([entry(1).id, entry(3).id, entry(2).id])
+    expect(next[0]!.done).toBe(3)
+    expect(next.length).toBe(3)
+  })
+
+  test('keeps at most 50 entries', () => {
+    let h: HistoryEntry[] = []
+    for (let i = 0; i < 60; i++) h = addEntry(h, entry(i))
+    expect(MAX_ENTRIES).toBe(50)
+    expect(h.length).toBe(50)
+    expect(h[0]!.id).toBe(entry(59).id)
+    expect(h.at(-1)!.id).toBe(entry(10).id)
+  })
+
+  test('never mutates the input', () => {
+    const h = [entry(2), entry(1)]
+    const copy = JSON.parse(JSON.stringify(h))
+    addEntry(h, entry(1, { done: 0 }))
+    addEntry(h, entry(9))
+    expect(h).toEqual(copy)
+  })
+
+  test('ignores an empty entry', () => {
+    const h = [entry(1)]
+    const empty = snap({ flow: flow({ tasks: [], total: 0, done: 0 }), agents: [], startedAt: START + 7 })
+    expect(addEntry(h, empty)).toEqual(h)
+  })
+})
+
+describe('parseHistory', () => {
+  test('anything that is not an array gives an empty history', () => {
+    expect(parseHistory(null)).toEqual([])
+    expect(parseHistory('nope')).toEqual([])
+    expect(parseHistory({ a: 1 })).toEqual([])
+    expect(parseHistory(undefined)).toEqual([])
+  })
+
+  test('drops bad items and keeps good ones', () => {
+    const good = entry(1)
+    const out = parseHistory([null, 4, { id: 'x' }, { ...good, status: 'weird' }, good])
+    expect(out).toEqual([good])
+  })
+
+  test('clamps numbers, caps task lists, trims and caps strings', () => {
+    const tasks = Array.from({ length: 300 }, (_, i) => ({ title: `t${i}`, tier: 'light' }))
+    const raw = { ...entry(1), cost: -3, tokens: -1, time: -5, title: `  ${'x'.repeat(300)}  `, project: '  /p  ', tasks }
+    const [e] = parseHistory(JSON.parse(JSON.stringify([raw])))
+    expect(e!.cost).toBe(0)
+    expect(e!.tokens).toBe(0)
+    expect(e!.time).toBe(0)
+    expect(e!.tasks.length).toBe(100)
+    expect(e!.title.length).toBe(200)
+    expect(e!.project).toBe('/p')
+  })
+
+  test('a round trip through JSON gives the same history', () => {
+    const h = [entry(2), entry(1)]
+    expect(parseHistory(JSON.parse(JSON.stringify(h)))).toEqual(h)
+  })
+})
+
+describe('formatEntry', () => {
+  test('a finished flow', () => {
+    const f = formatEntry(snap({ flow: flow({ done: 3 }) }), NOW, 'UTC')
+    expect(f.head).toBe('Ship it · 3/3 · ≈$1.20 · Oct 25')
+    expect(f.lines).toEqual([
+      '/Users/me/proj · 30m · 45k tokens · finished',
+      '✓ Write tests (light)',
+      '✓ Build module (medium)',
+      '✓ Review (heavy)',
+    ])
+  })
+
+  test('an open flow marks the first done tasks and says it ended with the session', () => {
+    const f = formatEntry(snap({ status: 'open' }), NOW, 'UTC')
+    expect(f.head).toBe('Ship it · 2/3 · ≈$1.20 · Oct 25')
+    expect(f.lines).toEqual([
+      '/Users/me/proj · 30m · 45k tokens · ended with the session',
+      '✓ Write tests (light)',
+      '✓ Build module (medium)',
+      '○ Review (heavy)',
+    ])
+  })
+
+  test('an entry from an earlier year shows the year; a large cost has no decimals', () => {
+    const old = Date.UTC(2025, 11, 31, 23, 0)
+    const e = { ...snap({ startedAt: old - 30 * MIN, endedAt: old }), cost: 123.4 }
+    expect(formatEntry(e, Date.UTC(2026, 0, 1, 1, 0), 'UTC').head).toBe('Ship it · 2/3 · ≈$123 · Dec 31, 2025')
+    expect(formatEntry(e, Date.UTC(2025, 11, 31, 23, 30), 'UTC').head).toBe('Ship it · 2/3 · ≈$123 · Dec 31')
+  })
+
+  test('an empty title still reads', () => {
+    const f = formatEntry(snap({ flow: flow({ title: '   ' }) }), NOW, 'UTC')
+    expect(f.head).toBe('Untitled flow · 2/3 · ≈$1.20 · Oct 25')
+  })
+})

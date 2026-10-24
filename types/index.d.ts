@@ -64,6 +64,23 @@ export type AgentRun = {
   stepNote?: string
 }
 
+export type HistoryTask = { title: string; tier: string }
+
+export type HistoryEntry = {
+  id: string
+  project: string
+  title: string
+  startedAt: number
+  endedAt: number
+  status: 'finished' | 'open'
+  done: number
+  total: number
+  tasks: HistoryTask[]
+  cost: number // USD
+  tokens: number
+  time: number // ms
+}
+
 export type Panel = {
   isCompact: boolean
   isDoneCollapsed: boolean
