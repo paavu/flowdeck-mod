@@ -56,3 +56,4 @@ Final: minor (deferred): band SVG rebuilt on every agents write at up to 1600px 
 Final: minor (deferred): narrow desktop agent rows with items overrun the stats at W=240; item counts can drift when a count is sent with an item list; a new plan does not bring a dismissed band back (only a new flow or the Band button)
 Final: minor (deferred): rule is appended even if the plan tool is deferred/unlisted; unknown whether prompt.compose reaches subagent prompts
 Final: minor (deferred): read-modify-write on store keys can lose a concurrent session's write (short window)
+Per-project saving (1.0.0002) and agent row layout (1.0.0003: stats on the model line, shortened time→tokens→cost, ctx last) done through /flowdeck; suite 339. Known: an existing history/plans file that fails to read counts as missing and is overwritten on the next save; first fs.write into a project may prompt/be blocked (falls back to the store); not seen live.
