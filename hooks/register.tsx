@@ -1062,9 +1062,9 @@ export const register: Register = (on, options) => {
     return ran
   })
 
-  // The user's own prompt answers whatever a plan was waiting on.
+  // The user's own prompt (typed, or sent from the phone over Remote Control) answers whatever a plan was waiting on.
   on('prompt.submit', async ($, e, next) => {
-    if (e.origin?.kind === 'composer') {
+    if (e.origin?.kind === 'composer' || e.origin?.kind === 'bridge') {
       try {
         if ((await read($, plans)).some(p => p.state === 'needs_input')) {
           await savePlans($, await update($, plans, list => list.map(p => (p.state === 'needs_input' ? { ...p, state: 'running' as const, note: null } : p))))

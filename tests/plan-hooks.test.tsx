@@ -164,6 +164,15 @@ describe('plan mode and input hooks', () => {
     ])
   })
 
+  test('a reply from the phone (Remote Control) also answers it', async ($, on) => {
+    const { store } = engine(on)
+    await start($)
+    await plan($, { id: 'w', title: 'W', stages: [{ name: 'S', steps: [{ title: 'a' }] }], state: 'needs_input', note: 'which branch?' })
+    await submit($, 'bridge')
+    expect(saved(store)[0].state).toBe('running')
+    expect(saved(store)[0].note).toBeNull()
+  })
+
   test('a prompt that is not the user\'s leaves needs_input alone', async ($, on) => {
     const { store, prompts } = engine(on)
     await start($)
