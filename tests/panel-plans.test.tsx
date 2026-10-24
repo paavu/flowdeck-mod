@@ -255,7 +255,7 @@ describe('agent rows: live tool word and state colours', () => {
     await call($, 'mcp__flowdeck__plan', 'w1', { id: 'x' })
     await call($, 'mcp__flowdeck__progress', 'w1', {})
     expect(await words($)).toEqual([{ text: 'Running · Bash', color: RUNNING }])
-    expect(await paneText($)).toMatch(/Running · Bash.*1\/3 tests · ctx/s)
+    expect(await paneText($)).toMatch(/Running · Bash · 1\/3 tests$/m)
   })
 
   test('the main agent’s own tool calls change nothing', async ($, on) => {
@@ -436,6 +436,104 @@ describe('agent rows: live tool word and state colours', () => {
     expect(shown[0]!.text).not.toContain(LONG)
     expect(await paneText($, 40)).toContain('ctx 0%')
     expect((await words($, 120))[0]!.text).toBe(`Running · ${LONG}`)
+  })
+
+  // the row's text lines by their y, tags stripped; the same width estimate the row uses
+  const lineAt = (src: string, y: number) =>
+    [...src.matchAll(new RegExp(`<text[^>]* y="${y}"[^>]*>(.*?)</text>`, 'g'))].map(m => m[1]!.replace(/<[^>]+>/g, '').replace(/&amp;/g, '&'))
+  const charEm = (ch: string) => (/[\s.,:;'|!il1()[\]]/.test(ch) ? 0.3 : /[A-ZА-ЯЁmwшщжюМШЩЖЮ@%]/.test(ch) ? 0.72 : 0.56)
+  const width11 = (s: string) => [...s].reduce((w, ch) => w + charEm(ch) * 11, 0)
+  const STATS = ['ctx 0% · 0  ≈$0.00  0:00', 'ctx 0% · 0  ≈$0.00', 'ctx 0%  ≈$0.00', 'ctx 0%']
+  // desktop W = cols * 8 - 8, at least 240; the text slot is W - 64
+  const rowAt = async ($: any, cols: number) => {
+    const src = await svgOf($, /^wire it:/, cols)
+    const [meta = '', stats = ''] = lineAt(src, 34)
+    return { src, meta, stats, state: lineAt(src, 49), slot: Math.max(240, cols * 8 - 8) - 64 }
+  }
+  const stepped = async ($: any, on: any, note = 'Device verification') => {
+    agentEngine(on)
+    await start($)
+    await spawn($)
+    await call($, 'Bash', 'w1')
+    await call($, 'mcp__flowdeck__step', 'w1', { done: 4, total: 6, note })
+  }
+
+  test('a wide row puts the full stats on the model line and gives the state line the whole width', async ($, on) => {
+    await stepped($, on)
+    const r = await rowAt($, 76)
+    expect(r.meta).toContain('Opus 5.5')
+    expect(r.stats).toBe(STATS[0])
+    expect(r.src).toMatch(/<text class="s" x="\d+" y="34" text-anchor="end"/)
+    expect(r.state).toEqual(['Running · Bash · 4/6 · Device verification'])
+    expect(r.src).not.toContain('NaN')
+  })
+
+  test('a narrower row drops the time first and never cuts the model meta', async ($, on) => {
+    await stepped($, on)
+    // W 272: the meta here has no effort word, so this is where the time no longer fits
+    const r = await rowAt($, 35)
+    const room = r.slot - width11(r.meta) - 12
+    expect(r.meta).not.toContain('…')
+    expect(r.meta).toContain('Opus 5.5')
+    expect(r.stats).toBe(STATS.find(v => width11(v) <= room))
+    expect(r.stats).not.toMatch(/\d:\d\d/)
+    expect(r.stats.startsWith('ctx 0%')).toBe(true)
+    const [t = ''] = r.state
+    expect(t.startsWith('Running · Bash · 4/6 · Device verif')).toBe(true)
+    expect(width11(t)).toBeLessThanOrEqual(r.slot)
+    if (t.endsWith('…')) expect(width11(t)).toBeGreaterThan(r.slot - 12)
+  })
+
+  test('the narrowest row keeps only ctx or nothing, and no text outgrows its slot', async ($, on) => {
+    await stepped($, on)
+    const r = await rowAt($, 30)
+    expect(r.meta).not.toContain('…')
+    expect(r.stats).toBe('ctx 0%')
+    if (r.stats) expect(width11(r.meta) + 12 + width11(r.stats)).toBeLessThanOrEqual(r.slot)
+    for (const t of r.state) expect(width11(t)).toBeLessThanOrEqual(r.slot)
+    expect(r.src).not.toContain('NaN')
+  })
+
+  test('a long step note is cut only at the full row width', async ($, on) => {
+    const NOTE = 'Device verification across every connected phone, tablet and foldable in the lab, then a second full pass'
+    await stepped($, on, NOTE)
+    const r = await rowAt($, 76)
+    const [t = ''] = r.state
+    expect(t.endsWith('…')).toBe(true)
+    expect(t.startsWith('Running · Bash · 4/6 · Device verification across')).toBe(true)
+    expect(width11(t)).toBeLessThanOrEqual(r.slot)
+    expect(width11(t)).toBeGreaterThan(r.slot - 12)
+    expect(r.stats).toBe(STATS[0])
+  })
+
+  test('finished and failed desktop rows carry the stats on the model line', async ($, on) => {
+    agentEngine(on)
+    await start($)
+    await spawn($, 'w1', 'first')
+    await spawn($, 'w2', 'second')
+    await $.turn.complete({ reason: 'answer', answer: 'ok', durationMs: 1, agentId: 'w1' } as any)
+    await $.turn.complete({ reason: 'error', answer: '', durationMs: 1, agentId: 'w2' } as any)
+    for (const name of ['first', 'second']) {
+      const src = await svgOf($, new RegExp(`^${name}:`), 76)
+      expect(lineAt(src, 34)[1]).toBe(STATS[0])
+      expect(lineAt(src, 49).join('')).not.toContain('ctx')
+      expect(src).not.toContain('NaN')
+    }
+  })
+
+  test('the terminal row puts the stats on the model line when they fit, else leaves them out', async ($, on) => {
+    await stepped($, on)
+    const wide = (await paneText($, 80)).split('\n')
+    const model = wide.find(l => l.includes('Opus 5.5'))!
+    expect(model).toContain('ctx 0% · 0 ≈$0.00 0:00')
+    expect(wide.find(l => l.includes('Device verification'))).not.toContain('ctx')
+    const narrow = (await paneText($, 30)).split('\n')
+    const m2 = narrow.find(l => l.includes('Opus 5.5'))!
+    expect(m2.length).toBeLessThanOrEqual(30)
+    expect(m2).not.toMatch(/\d:\d\d/)
+    expect(narrow.join('\n')).not.toContain('NaN')
+    const tight = (await paneText($, 24)).split('\n')
+    expect(tight.find(l => l.includes('Opus 5.5'))).not.toContain('ctx')
   })
 
   test('planned rows keep their neutral look; a matched task shows as its run', async ($, on) => {

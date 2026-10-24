@@ -246,7 +246,7 @@ describe('agent items through the step tool', () => {
     await step($, { active: 'commit' })
     expect((await terminal($)).text).toMatch(/4\/6 commit/)
     await step($, { failed: 'commit' })
-    expect((await terminal($)).text).toMatch(/4\/6 · ctx/)
+    expect((await terminal($)).text).toMatch(/4\/6$/m)
   })
 
   test('an unknown title is ignored with a short note in the result', async ($, on) => {

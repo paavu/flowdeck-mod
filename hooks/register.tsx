@@ -604,6 +604,15 @@ const progressOf = (a: AgentRun): number | null => {
 
 const ctxOf = (a: AgentRun): number => (a.contextMax ? Math.min(100, Math.round((a.contextTokens / a.contextMax) * 100)) : 0)
 
+// The longest form of the stats that fits `room`: the time goes first, then the tokens, then the cost; ctx stays last.
+const fitStats = (a: AgentRun, at: number, gap: string, room: number, width: (s: string) => number): string => {
+  const ctx = `ctx ${ctxOf(a)}%`
+  const tokens = `${ctx} · ${fmtTokens(a.contextTokens)}`
+  const cost = `≈${fmtCost(a.costUsd)}`
+  const forms = [`${tokens}${gap}${cost}${gap}${fmtTime(elapsed(a, at))}`, `${tokens}${gap}${cost}`, `${ctx}${gap}${cost}`, ctx]
+  return forms.find(f => width(f) <= room) ?? ''
+}
+
 const agentSvg = (W: number, a: AgentRun, at: number): string => {
   const s = tr()
   const tier = tierOf(a.type)
@@ -615,9 +624,11 @@ const agentSvg = (W: number, a: AgentRun, at: number): string => {
   if (a.status === 'failed') meta.push(s.failed)
   const barW = textW
   const progress = progressOf(a)
-  const stats = `ctx ${ctx}% · ${fmtTokens(a.contextTokens)}  ≈${fmtCost(a.costUsd)}  ${fmtTime(elapsed(a, at))}`
+  const tierWord = tier === 'other' ? a.type : tier
+  // The stats share the model line, right-aligned; the meta keeps its room first.
+  const stats = fitStats(a, at, '  ', barW - textWidth(`${tierWord}  ${meta.join('  ·  ')}`, 11) - 12, t => textWidth(t, 11))
   const steps = a.stepTotal ? `${a.stepDone ?? 0}/${a.stepTotal}${a.stepNote ? ' · ' + a.stepNote : ''}` : ''
-  const stepsW = Math.max(0, barW - textWidth(stats, 11) - 12)
+  const stepsW = barW
   // The state leads the line in its colour; the reported steps follow it.
   const state = agentState(a)
   const head = stateText(a)
@@ -629,9 +640,9 @@ const agentSvg = (W: number, a: AgentRun, at: number): string => {
     66,
     `${crab(0, 14, costumeOf(a.type), false, a.status === 'running')}
 <text class="t" x="42" y="18" font-family="${FONT}" font-size="13" font-weight="600">${xml(fitText(a.description || a.type, 13, textW))}</text>
-<text x="42" y="34" font-family="${FONT}" font-size="11"><tspan fill="${color}">${xml(tier === 'other' ? a.type : tier)}</tspan><tspan class="s">  ${xml(meta.join('  ·  '))}</tspan></text>
+<text x="42" y="34" font-family="${FONT}" font-size="11"><tspan fill="${color}">${xml(tierWord)}</tspan><tspan class="s">  ${xml(meta.join('  ·  '))}</tspan></text>
+${stats ? `<text class="s" x="${42 + barW}" y="34" text-anchor="end" font-family="${FONT}" font-size="11" font-variant-numeric="tabular-nums">${stats}</text>` : ''}
 ${stepsW > 30 ? `<text x="42" y="49" font-family="${FONT}" font-size="11" font-variant-numeric="tabular-nums"><tspan fill="${state.color}">${xml(lead)}</tspan>${rest ? `<tspan class="t">${xml(rest)}</tspan>` : ''}</text>` : ''}
-<text class="s" x="${42 + barW}" y="49" text-anchor="end" font-family="${FONT}" font-size="11" font-variant-numeric="tabular-nums">${stats}</text>
 <rect class="k" x="42" y="55" width="${barW}" height="4" rx="2"/><rect${progress === null ? ' class="m"' : ''} x="42" y="55" width="${fillW}" height="4" rx="2"${progress === null ? '' : ` fill="${state.color}"`}/>
 ${statusMark(W - 8, 16, a.status, color)}
 <line class="ln" x1="0" y1="65.5" x2="${W}" y2="65.5"/>`,
@@ -1768,11 +1779,13 @@ export const register: Register = (on, options) => {
       const progress = progressOf(a)
       const model = a.effort ? `${modelName(a.model)} · ${a.effort}` : modelName(a.model)
       const steps = a.stepTotal ? `${a.stepDone ?? 0}/${a.stepTotal}${a.stepNote ? ' ' + a.stepNote : ''}` : ''
-      const stats = `ctx ${ctx}% · ${fmtTokens(a.contextTokens)} ≈${fmtCost(a.costUsd)} ${fmtTime(elapsed(a, at))}`
-      // The state leads the line in its colour, cut so the stats keep their room.
+      const modelLine = `  ${tier === 'other' ? a.type : tier} · ${model}${a.round > 1 ? ` · ${s.round} ${a.round}` : ''}`
+      // The stats end the model line when they fit there, else they are left out.
+      const stats = fitStats(a, at, ' ', cols - modelLine.length - 3, t => t.length)
+      // The state leads the line in its colour, cut only at the row's width.
       const state = agentState(a)
       const head = stateText(a)
-      const room = Math.max(state.name.length + 1, cols - 2 - barW - 1 - stats.length - 3)
+      const room = Math.max(state.name.length + 1, cols - 2 - barW - 1)
       const [lead, rest] = splitHead(clip(steps ? `${head} · ${steps}` : head, room), head)
       const items = itemsOf(a.items)
       return (
@@ -1786,17 +1799,14 @@ export const register: Register = (on, options) => {
             {items.length > 0 && foldButton(a)}
           </Box>
           <Text dimColor wrap="truncate-end">
-            {'  '}
-            {tier === 'other' ? a.type : tier} · {model}
-            {a.round > 1 ? ` · ${s.round} ${a.round}` : ''}
+            {modelLine}
+            {stats ? ` · ${stats}` : ''}
           </Text>
           <Text wrap="truncate-end">
             {'  '}
             {progress === null ? <Text dimColor>{ctxBar(ctx, barW)}</Text> : <Text color={state.color}>{ctxBar(progress * 100, barW)}</Text>}{' '}
             <Text color={state.color}>{lead}</Text>
-            <Text dimColor>
-              {rest} · {stats}
-            </Text>
+            <Text dimColor>{rest}</Text>
           </Text>
           {isUnfolded(a) &&
             items.map((it, i) => {
