@@ -205,7 +205,7 @@ const noise = (x: number, y: number): number => {
 // so title, bar, percent and the crab live in one drawing; only the count and
 // the dismiss are Buttons beside it.
 const H = 22
-const MAX_BAND_W = 300 // the widest the desktop band's drawing gets: another mod may put its items beside it
+const MAX_BAND_W = 1600 // the widest the desktop band's drawing gets
 const BAR_H = 16
 const CRAB_W = 26
 const CELL = 3

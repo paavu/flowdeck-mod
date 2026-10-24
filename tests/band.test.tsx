@@ -37,7 +37,7 @@ describe('the band above the prompt', () => {
     await b.unmount()
   })
 
-  test('stays compact: the drawing is narrow and leaves the right edge clear', async ($, on) => {
+  test('fills the available width, leaves the right edge clear and can still give way', async ($, on) => {
     engine(on)
     await start($)
     await plan($)
@@ -45,7 +45,9 @@ describe('the band above the prompt', () => {
       const b = await band($, 'desktop', columns)
       const json = JSON.stringify(await b.drawn())
       const w = Number(/"width":(\d+),"height":\d+/.exec(json)?.[1] ?? /width="?(\d+)/.exec(json)?.[1])
-      expect(w).toBeLessThanOrEqual(300) // small enough to share a row with a neighbour mod's items
+      const slot = Math.min(1600, columns * 8 - 150)
+      expect(w).toBeLessThanOrEqual(slot)
+      expect(w).toBeGreaterThanOrEqual(slot - 1) // it fills the width that is there, like the other bars
       expect(w).toBeLessThanOrEqual(columns * 8 - 150) // never wider than the slot minus the buttons and the collapse mark
       expect(json).toContain('"paddingRight":5')
       expect(json).toContain('"flexShrink":1') // it gives way instead of pushing a neighbour out
