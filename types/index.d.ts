@@ -87,6 +87,8 @@ export type Panel = {
   isContextShown: boolean
   isUsageShown: boolean
   isBandHidden: boolean
+  isHistoryShown: boolean
+  openEntries: string[]
   autoOpenedFor: string
 }
 
@@ -99,6 +101,8 @@ declare module 'claude-code' {
       reading: Reading | null
       usage: { windows: UsageWindow[]; samples: Samples }
       now: number
+      history: HistoryEntry[]
+      flowMeta: { startedAt: number; project: string } | null
     }
   }
 }

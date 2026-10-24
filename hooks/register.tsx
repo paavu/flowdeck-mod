@@ -1,8 +1,9 @@
 import { atom, read, update } from 'claude-code'
 import type { EngineInterface, Register } from 'claude-code'
 
-import type { AgentRun, Flow, Panel, Phase, PlannedTask, Reading, Samples, UsageWindow } from '../types'
+import type { AgentRun, Flow, HistoryEntry, Panel, Phase, PlannedTask, Reading, Samples, UsageWindow } from '../types'
 import { contextRows, contextSvg, toReading } from './context'
+import { addEntry, formatEntry, parseHistory, snapshot } from './history'
 import { record, toWindows, usageRows, usageSvg } from './usage'
 
 const flow = atom({ plugin: 'flowdeck', key: 'flow' } as const, null)
@@ -13,11 +14,15 @@ const panel = atom({ plugin: 'flowdeck', key: 'panel' } as const, {
   isContextShown: true,
   isUsageShown: true,
   isBandHidden: false,
+  isHistoryShown: false,
+  openEntries: [] as string[],
   autoOpenedFor: '',
 })
 const usageState = atom({ plugin: 'flowdeck', key: 'usage' } as const, { windows: [] as UsageWindow[], samples: {} as Samples })
 const reading = atom({ plugin: 'flowdeck', key: 'reading' } as const, null as Reading | null)
 const now = atom({ plugin: 'flowdeck', key: 'now' } as const, 0)
+const history = atom({ plugin: 'flowdeck', key: 'history' } as const, [] as HistoryEntry[])
+const flowMeta = atom({ plugin: 'flowdeck', key: 'flowMeta' } as const, null as { startedAt: number; project: string } | null)
 
 const TOOL = 'mcp__flowdeck__progress'
 const STEP_TOOL = 'mcp__flowdeck__step'
@@ -104,6 +109,8 @@ const STRINGS = {
 // Module scope is fine here: session.start sets it again on every (re)load.
 let lang: Lang = 'en'
 const tr = () => STRINGS[lang]
+// The session's working folder, the project a history entry names; set the same way.
+let project = ''
 
 const isRussian = (v: unknown): boolean => typeof v === 'string' && /^(ru|russian|рус)/i.test(v.trim())
 
@@ -711,14 +718,54 @@ async function autoOpen($: EngineInterface, key: string): Promise<void> {
   void $.ui.open({ id: PANE, title: tr().pane })
 }
 
+// Re-reads the stored history first: another session may have saved since. When the read
+// fails, only this session's view is updated, so a passing outage never overwrites the store.
+async function saveHistory($: EngineInterface, entry: HistoryEntry): Promise<void> {
+  let base: HistoryEntry[]
+  let isRead = true
+  try {
+    base = parseHistory(await $.store.get('history'))
+  } catch {
+    base = await read($, history)
+    isRead = false
+  }
+  const next = addEntry(base, entry)
+  if (next === base) return
+  if (isRead) await $.store.set('history', next).catch(() => {})
+  await update($, history, () => next)
+}
+
+// Saves the flow as it stands; never throws into the tool call or the turn that asked.
+async function recordFlow($: EngineInterface, f: Flow, status: 'finished' | 'open'): Promise<void> {
+  try {
+    const endedAt = await $.clock.now()
+    let meta = await read($, flowMeta)
+    if (!meta) {
+      // A flow no progress call created (a worker launch): it starts its record now, under one id from here on.
+      const fresh = { startedAt: endedAt, project }
+      meta = fresh
+      await update($, flowMeta, () => fresh)
+    }
+    const list = await read($, agents)
+    await saveHistory($, snapshot({ flow: f, agents: list, project: meta.project, startedAt: meta.startedAt, endedAt, status }))
+  } catch {
+    // A failing store or clock costs the record, not the call.
+  }
+}
+
 export const register: Register = (on, options) => {
   on('session.start', async ($, e, next) => {
     const started = await next(e)
     lang = await detectLang($, options.language)
+    project = typeof e.cwd === 'string' ? e.cwd : ''
     const stored = await $.store.get('contextShown').catch(() => undefined)
     if (typeof stored === 'boolean') await update($, panel, prev => ({ ...prev, isContextShown: stored }))
     const storedUsage = await $.store.get('usageShown').catch(() => undefined)
     if (typeof storedUsage === 'boolean') await update($, panel, prev => ({ ...prev, isUsageShown: storedUsage }))
+    const storedHistoryShown = await $.store.get('historyShown').catch(() => undefined)
+    if (typeof storedHistoryShown === 'boolean') await update($, panel, prev => ({ ...prev, isHistoryShown: storedHistoryShown }))
+    const storedHistory = await $.store.get('history').catch(() => undefined)
+    await update($, history, () => parseHistory(storedHistory))
     void refreshContext($).catch(() => {})
     await $.tool.register({
       name: 'progress',
@@ -806,12 +853,20 @@ export const register: Register = (on, options) => {
     const input = e as unknown as ProgressInput
     const prev = await read($, flow)
     if (isNewFlow(prev, input)) {
+      // The flow being replaced goes to the history first, with its own agents; a finished one is there already.
+      if (prev && !prev.isFinished) await recordFlow($, prev, 'finished')
+      const startedAt = await $.clock.now()
+      await update($, flowMeta, () => ({ startedAt, project }))
       // A new flow starts with a clean list; agents still running stay.
       await update($, agents, list => list.filter(a => a.status === 'running'))
     }
     const next = await update($, flow, p => merge(p, input))
     if (isNewFlow(prev, input)) {
       await update($, panel, p => ({ ...p, isBandHidden: false })) // a new flow brings the band back
+    }
+    if (next?.isFinished) {
+      await recordFlow($, next, 'finished')
+      await update($, flowMeta, () => null) // whatever comes next is a new record
     }
     if (next && (input.tasks?.length || input.add?.length)) await autoOpen($, next.title)
     return { result: `ok: ${label(next ?? blank())}` }
@@ -973,6 +1028,13 @@ export const register: Register = (on, options) => {
     return result
   })
 
+  // A flow still open when the session ends is kept as open; finishing it later updates the same entry.
+  on('session.end', async ($, e, next) => {
+    const f = await read($, flow).catch(() => null)
+    if (f && !f.isFinished) await recordFlow($, f, 'open')
+    return next(e)
+  })
+
   on('ui.render', { component: 'Pane', requestId: PANE }, async ($, e) => {
     const s = tr()
     const ui = $.ui.resolve(e)
@@ -982,6 +1044,7 @@ export const register: Register = (on, options) => {
     const p: Panel = await read($, panel)
     const rd = await read($, reading)
     const us = await read($, usageState)
+    const hist = await read($, history)
     const clockNow = await $.clock.now()
     const at = Math.max(await read($, now), ...list.map(a => a.startedAt), 0)
 
@@ -1043,11 +1106,58 @@ export const register: Register = (on, options) => {
         }}
       />
     )
+    const toggleHistory = (
+      <Button
+        key="history"
+        label={`${p.isHistoryShown ? '▾' : '▸'} History`}
+        plain
+        onPress={async () => {
+          const shown = !p.isHistoryShown
+          await update($, panel, prev => ({ ...prev, isHistoryShown: shown }))
+          await $.store.set('historyShown', shown).catch(() => {})
+        }}
+      />
+    )
     const topToggles = (
       <Box key="top-toggles" flexDirection="row" gap={1}>
         {toggleContext}
         {toggleUsage}
         {toggleBand}
+        {toggleHistory}
+      </Box>
+    )
+    // Plain rows on both surfaces: one button per past flow, its summary lines under it when opened.
+    const historySection = !p.isHistoryShown ? null : (
+      <Box key="history-section" flexDirection="column">
+        {hist.length === 0 ? (
+          <Text dimColor>no history yet</Text>
+        ) : (
+          hist.map(entry => {
+            const { head, lines } = formatEntry(entry, clockNow)
+            const isOpen = p.openEntries.includes(entry.id)
+            return (
+              <Box key={`history-row-${entry.id}`} flexDirection="column">
+                <Button
+                  key={`history-${entry.id}`}
+                  label={`${isOpen ? '▾' : '▸'} ${head}`}
+                  plain
+                  onPress={() =>
+                    update($, panel, prev => ({
+                      ...prev,
+                      openEntries: prev.openEntries.includes(entry.id) ? prev.openEntries.filter(id => id !== entry.id) : [...prev.openEntries, entry.id],
+                    }))
+                  }
+                />
+                {isOpen &&
+                  lines.map((line, i) => (
+                    <Text key={`history-${entry.id}-${i}`} dimColor wrap="truncate-end">
+                      {line}
+                    </Text>
+                  ))}
+              </Box>
+            )
+          })
+        )}
       </Box>
     )
     const toggles = toggleCompact
@@ -1085,6 +1195,7 @@ export const register: Register = (on, options) => {
             {contextSection}
             {usageSection}
             {toggles}
+            {historySection}
           </Box>
         )
       }
@@ -1109,6 +1220,7 @@ export const register: Register = (on, options) => {
           {planned.map(pl => (
             <Svg key={`plan-${pl.n}`} source={plannedSvg(W, pl)} alt={`${pl.n}. ${pl.title}: ${s.isPlanned}`} width={W} height={46} />
           ))}
+          {historySection}
         </Box>
       )
     }
@@ -1223,6 +1335,7 @@ export const register: Register = (on, options) => {
             })}
           </Box>
         )}
+        {historySection}
       </Box>
     )
   })
