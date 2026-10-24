@@ -197,6 +197,7 @@ const noise = (x: number, y: number): number => {
 // so title, bar, percent and the crab live in one drawing; only the count and
 // the dismiss are Buttons beside it.
 const H = 22
+const MAX_BAND_W = 420 // the widest the desktop band's drawing gets, however wide the window
 const BAR_H = 16
 const CRAB_W = 26
 const CELL = 3
@@ -1214,6 +1215,7 @@ export const register: Register = (on, options) => {
     const f = await read($, flow)
     if (f === null || e.props.hasSurvey) return next(e)
 
+    const theirs = await next(e) // what other mods and Claude Code draw here stays, below this row
     const ui = $.ui.resolve(e)
     const { Box, Text, Button } = ui
     const list = await read($, agents)
@@ -1235,23 +1237,27 @@ export const register: Register = (on, options) => {
 
     if ('Svg' in ui) {
       const { Svg } = ui
-      // About 8 CSS px per reported column; the rest is the count, the dismiss
-      // and their gaps. No floor above the slot: a row wider than it would wrap.
-      const width = Math.max(180, Math.min(1600, (e.props.bodyColumns || 100) * 8 - 96))
+      // About 8 CSS px per reported column; the count, the dismiss, their gaps and the host's collapse mark
+      // (the right edge stays clear) take the rest. Capped so a wide window does not stretch the row.
+      const width = Math.max(180, Math.min(MAX_BAND_W, (e.props.bodyColumns || 100) * 8 - 150))
       return (
-        <Box flexDirection="row" alignItems="center" gap={1}>
-          <Svg source={rowSvg(f, width, isWorking)} alt={`${f.title}: ${label(f)}, ${percent}`} width={width} height={H} />
-          {crewButton}
-          {dismiss}
+        <Box flexDirection="column">
+          <Box flexDirection="row" alignItems="center" gap={1} paddingRight={5}>
+            <Svg source={rowSvg(f, width, isWorking)} alt={`${f.title}: ${label(f)}, ${percent}`} width={width} height={H} />
+            {crewButton}
+            {dismiss}
+          </Box>
+          {theirs}
         </Box>
       )
     }
 
     const cols = e.props.bodyColumns
     const titleW = Math.max(8, Math.min(30, f.title.length + 2, Math.floor(cols / 3)))
-    const width = Math.max(6, Math.min(40, cols - titleW - 32))
+    const width = Math.max(6, Math.min(30, cols - titleW - 37))
     return (
-      <Box flexDirection="row" gap={2}>
+      <Box flexDirection="column">
+      <Box flexDirection="row" gap={2} paddingRight={5}>
         <Box width={titleW} flexShrink={0}>
           <Text color={f.isFinished ? DONE : ACCENT}>● </Text>
           <Text wrap="truncate-end">{f.title}</Text>
@@ -1262,6 +1268,8 @@ export const register: Register = (on, options) => {
         <Text color={CLAY}>▣</Text>
         {crewButton}
         {dismiss}
+      </Box>
+      {theirs}
       </Box>
     )
   })
