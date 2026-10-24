@@ -988,11 +988,11 @@ export const register: Register = (on, options) => {
     return started
   })
 
-  // A failed composition below still gets the rule rather than an error from here.
+  // The rule is added to whatever the engine and other mods composed; a failure below is not masked (that would replace the real prompt with ours alone).
   on('prompt.compose', async ($, e, next) => {
     const rule = { id: 'flowdeck:plan-rule', text: PLAN_RULE, scope: 'session' as const }
-    const result = await next(e).catch(() => ({ sections: [] }))
-    return { sections: [...(result?.sections ?? []), rule] }
+    const result = await next(e)
+    return { sections: [...result.sections, rule] }
   })
 
   on('command.run', { command: 'flowdeck-agents' }, async $ => {
