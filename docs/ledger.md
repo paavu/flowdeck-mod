@@ -41,3 +41,4 @@ History: Ruling: entry = summary per flow; all projects; last 50; saved in the e
 History: minor (deferred): a second finished:true while a costly worker still runs can create a separate blank-flow entry (unguarded, low likelihood)
 History: minor (deferred): done tasks in an entry are shown as the first N in plan order (the flow counts done tasks, not which)
 Band overlap: next-steps puts everything drawn below it in a no-shrink box to the right of its checkboxes, so flowdeck's 420px drawing squeezed the checklist. Band now max 300px, flexShrink 1, minWidth 0, overflow hidden. Not seen live.
+Band overlap v2: root cause was LOAD ORDER (first in enabledPlugins = outermost); flowdeck moved before next-steps in ~/.claude/settings.json. Needs /reload-plugins or a new session; not seen live.
