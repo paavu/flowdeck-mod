@@ -4,7 +4,7 @@ import type { EngineInterface, Register } from 'claude-code'
 import type { AgentRun, Flow, HistoryEntry, Panel, Phase, PlannedTask, Reading, Samples, TaskPlan, UsageWindow } from '../types'
 import { contextRows, contextSvg, toReading } from './context'
 import { addEntry, formatEntry, parseHistory, snapshot } from './history'
-import { isFinished, normalize, placeBar, planId, where } from './plan'
+import { importPlan, isFinished, normalize, PLAN_ID, placeBar, planId, str, where } from './plan'
 import { record, toWindows, usageRows, usageSvg } from './usage'
 
 const flow = atom({ plugin: 'flowdeck', key: 'flow' } as const, null)
@@ -1013,6 +1013,67 @@ export const register: Register = (on, options) => {
     } catch {
       return { result: 'flowdeck plan: could not update the plan' }
     }
+  })
+
+  // The plan the user approves in plan mode becomes the plan "plan"; approving a revision updates it.
+  on('tool.call', { tool: 'ExitPlanMode' }, async ($, e, next) => {
+    const ran = await next(e)
+    if (e.agentId || ran.deny !== undefined || ran.isError === true) return ran
+    try {
+      const fromResult = (ran.result as { plan?: unknown } | undefined)?.plan
+      const fromInput = (e as unknown as { plan?: unknown }).plan
+      const text = typeof fromResult === 'string' && fromResult.trim() ? fromResult : fromInput
+      if (typeof text !== 'string') return ran
+      const list = await read($, plans)
+      const made = importPlan(text, list.find(p => p.id === PLAN_ID) ?? null, await $.clock.now())
+      if (!made) return ran
+      const placed = await update($, plans, prev => placeBar(prev, made))
+      await savePlans($, placed)
+    } catch {
+      // A failing store or clock costs the plan, not the approval.
+    }
+    return ran
+  })
+
+  // A question to the user marks the newest running plan as waiting until the answer comes back.
+  on('tool.call', { tool: 'AskUserQuestion' }, async ($, e, next) => {
+    if (e.agentId) return next(e)
+    let waiting: string | undefined
+    try {
+      const first = ((e as unknown as { questions?: unknown }).questions as { header?: unknown; question?: unknown }[] | undefined)?.[0]
+      const note = str(first?.header, 160) || str(first?.question, 160) || null
+      const live = (await read($, plans)).filter(p => p.state === 'running').pop()
+      if (live) {
+        waiting = live.id
+        await savePlans($, await update($, plans, list => list.map(p => (p.id === live.id ? { ...p, state: 'needs_input' as const, note } : p))))
+      }
+    } catch {
+      // A failing store costs the waiting mark, not the question.
+    }
+    const ran = await next(e)
+    if (waiting) {
+      try {
+        const id = waiting
+        await savePlans($, await update($, plans, list => list.map(p => (p.id === id && p.state === 'needs_input' ? { ...p, state: 'running' as const, note: null } : p))))
+      } catch {
+        // as above
+      }
+    }
+    return ran
+  })
+
+  // The user's own prompt answers whatever a plan was waiting on.
+  on('prompt.submit', async ($, e, next) => {
+    if (e.origin?.kind === 'composer') {
+      try {
+        if ((await read($, plans)).some(p => p.state === 'needs_input')) {
+          await savePlans($, await update($, plans, list => list.map(p => (p.state === 'needs_input' ? { ...p, state: 'running' as const, note: null } : p))))
+        }
+      } catch {
+        // A failing store costs the reset, not the prompt.
+      }
+    }
+    return next(e)
   })
 
   // Safety net: worker launches move the faint layer even if the orchestrator forgets to report.
