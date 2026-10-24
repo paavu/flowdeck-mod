@@ -1369,9 +1369,9 @@ export const register: Register = (on, options) => {
 
     if ('Svg' in ui) {
       const { Svg } = ui
-      // About 8 CSS px per reported column; the count, the dismiss and their gaps take the rest, so the row
-      // runs to the right edge like the other bars.
-      const width = Math.max(180, Math.min(MAX_BAND_W, (e.props.bodyColumns || 100) * 8 - 96))
+      // About 9 CSS px per reported column (measured in the desktop app; savvy-progress assumed 8 and stopped
+      // short); the count, the dismiss and their gaps take the rest, so the row runs to the right edge like the other bars.
+      const width = Math.max(180, Math.min(MAX_BAND_W, (e.props.bodyColumns || 100) * 9 - 110))
       return (
         <Box flexDirection="column">
           <Box flexDirection="row" alignItems="center" gap={1} flexShrink={1} minWidth={0} overflow="hidden">

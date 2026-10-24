@@ -45,7 +45,7 @@ describe('the band above the prompt', () => {
       const b = await band($, 'desktop', columns)
       const json = JSON.stringify(await b.drawn())
       const w = Number(/"width":(\d+),"height":\d+/.exec(json)?.[1] ?? /width="?(\d+)/.exec(json)?.[1])
-      const slot = Math.min(1600, columns * 8 - 96)
+      const slot = Math.min(1600, columns * 9 - 110) // measured: the host's column is about 9 CSS px wide
       expect(w).toBeLessThanOrEqual(slot)
       expect(w).toBeGreaterThanOrEqual(slot - 1) // it fills the width that is there, like the other bars
             expect(json).not.toContain('"paddingRight"') // the row runs to the right edge like the other bars
