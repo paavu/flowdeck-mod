@@ -14,6 +14,7 @@ An orchestrated delivery flow for Claude Code with a live side panel. The sessio
 
 ## The panel
 - Buttons on top: `Context`, `Usage` and `Band` (the progress bar above the prompt; its ✕ hides only the band, the flow stays in the panel, and a new flow brings it back).
+- Plans in the band: up to two open plans (running, needing input or in error), newest first, as one-line rows with their title, track, state and percent below the flow row, or alone when no flow runs; `Band` and ✕ hide them with the rest.
 - Context section: the context window as a stacked bar with tokens per category and where auto-compaction runs. The Context button collapses it to its head line and the bar (and expands it again); the choice is remembered.
 - Usage section: the current session (five-hour) and the week, each with its reset time, a bar that drains as you use up the limit (full = 100% left) and the percent left, plus a burn forecast under each bar: an even-pace mark, and two projections to the reset (recent pace over the last ~30 minutes, and the average since the window started) with a verdict such as `recent: 100% at 1:36 PM, 1h 3m early` or `on pace`. The Usage button hides the whole section and shows it again; the choice is remembered. Needs a subscription with rate-limit readings.
 - Plans section: the task plans made with the `plan` tool, each as a progress track with its state and percent; the Plans button hides the section and shows it again (remembered), and `Clear finished` removes the done plans.

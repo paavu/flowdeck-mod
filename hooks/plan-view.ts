@@ -145,6 +145,49 @@ ${ticks}${mark}
   return { height: PLAN_H, body }
 }
 
+const BAND_H = 22
+const BAND_TRACK_H = 16
+
+// The band row above the prompt, as the inside of a 22 px svg: a dot, the title, the track filled to the percent, the state pill and the percent.
+export function planBandSvg(width: number, p: TaskPlan, now: number): { height: number; body: string } {
+  const W = Number.isFinite(width) ? Math.max(0, Math.floor(width)) : 0
+  const state = stateOf(p)
+  const color = STATE_COLOR[state]
+  const f = factsOf(p, now)
+  const pctText = `${f.pct}%`
+  const mid = BAND_H / 2
+  const pillLabel = fitText(STATE_NAME[state], 11, Math.max(0, W - 16), true)
+  const pillW = pillLabel ? Math.ceil(textWidth(pillLabel, 11, true) + 16) : 0
+  const pctW = Math.ceil(textWidth('100%', 12, true)) // sized for 100% so the track keeps its length
+  const right = pillW + 8 + pctW
+  const titleMax = Math.min(W * 0.4, W - 16 - right - 8 - 48)
+  const title = titleMax >= 24 ? fitText(f.title, 13, titleMax, true) : ''
+  const trackX = title ? Math.ceil(16 + textWidth(title, 13, true) + 10) : 16
+  const trackW = Math.max(0, W - trackX - 8 - right)
+  const fx = (Math.min(100, Math.max(0, f.pct)) / 100) * trackW
+  const ty = (BAND_H - BAND_TRACK_H) / 2
+  const pillX = Math.max(0, W - pctW - 8 - pillW)
+  const body = `<circle cx="5" cy="${mid}" r="4" fill="${color}"/>
+${title ? `<text class="t" x="16" y="${mid + 4.5}" font-family="${FONT}" font-size="13" font-weight="600">${esc(title)}</text>\n` : ''}<rect data-track="1" class="k" x="${trackX}" y="${ty}" width="${n1(trackW)}" height="${BAND_TRACK_H}" rx="${BAND_TRACK_H / 2}"/>
+<rect data-fill="${state}" x="${trackX}" y="${ty}" width="${n1(fx)}" height="${BAND_TRACK_H}" rx="${n1(Math.min(BAND_TRACK_H, fx) / 2)}" fill="${color}"/>
+${pillW ? `<rect data-pill="${state}" x="${pillX}" y="${ty}" width="${pillW}" height="${BAND_TRACK_H}" rx="${BAND_TRACK_H / 2}" fill="${color}"/>
+<text x="${n1(pillX + pillW / 2)}" y="${mid + 4}" text-anchor="middle" font-family="${FONT}" font-size="11" font-weight="600" fill="${PILL_TEXT[state]}">${esc(pillLabel)}</text>\n` : ''}<text class="t" x="${W}" y="${mid + 4.5}" text-anchor="end" font-family="${FONT}" font-size="12" font-weight="600" font-variant-numeric="tabular-nums">${pctText}</text>`
+  return { height: BAND_H, body }
+}
+
+// The band row in the terminal: `<title> <bar> <State> <NN%>`, never longer than `columns`.
+export function planBandText(p: TaskPlan, columns: number): string {
+  const cols = Number.isFinite(columns) ? Math.max(0, Math.floor(columns)) : 0
+  const f = factsOf(p, 0)
+  const tail = `${STATE_NAME[stateOf(p)]} ${f.pct}%`
+  const room = cols - tail.length - 1
+  if (room <= 0) return cut(tail, cols)
+  const title = room >= 8 ? cut(f.title, Math.min(30, Math.floor(room / 2))) : ''
+  const cells = title ? room - title.length - 1 : room
+  const filled = Math.min(cells, Math.round((Math.min(100, Math.max(0, f.pct)) / 100) * cells))
+  return `${title ? title + ' ' : ''}${'█'.repeat(filled)}${'░'.repeat(cells - filled)} ${tail}`
+}
+
 export type PlanRow = { line: string; kind: 'head' | 'bar' | 'note'; color: string }
 
 // The terminal rows: the title and state, a bar of exactly `columns` cells ending in the percent, and the caption; `color` is the state's hex for the caller to map.

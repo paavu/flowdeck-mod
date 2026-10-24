@@ -5,7 +5,7 @@ import type { AgentRun, Flow, HistoryEntry, Panel, Phase, PlannedTask, Reading, 
 import { contextRows, contextSvg, toReading } from './context'
 import { addEntry, formatEntry, parseHistory, snapshot } from './history'
 import { importPlan, isFinished, normalize, percent, PLAN_ID, placeBar, planId, str, where } from './plan'
-import { planRows, planSvg, stateLabel } from './plan-view'
+import { planBandSvg, planBandText, planRows, planSvg, STATE_COLOR, stateLabel } from './plan-view'
 import { record, toWindows, usageRows, usageSvg } from './usage'
 
 const flow = atom({ plugin: 'flowdeck', key: 'flow' } as const, null)
@@ -558,6 +558,9 @@ const statusMark = (x: number, y: number, status: string, color: string): string
 
 const svg = (W: number, H: number, body: string): string =>
   `<svg xmlns="http://www.w3.org/2000/svg" width="${W}" height="${H}" viewBox="0 0 ${W} ${H}">${PANE_CSS}${CRAB_CSS}${body}</svg>`
+
+// A plan row's alt text in the band; the band's handler has its own `percent`.
+const planAlt = (pl: TaskPlan): string => `${pl.title}: ${stateLabel(pl)}, ${percent(pl, where(pl))}%`
 
 // The pane's own title already says "Agents": the header names the flow, if any.
 const headerSvg = (W: number, title: string, t: ReturnType<typeof totals>): string => {
@@ -1578,11 +1581,40 @@ export const register: Register = (on, options) => {
   on('ui.render', { component: 'AbovePrompt' }, async ($, e, next) => {
     const f = await read($, flow)
     const hidden = (await read($, panel)).isBandHidden
-    if (f === null || hidden || e.props.hasSurvey) return next(e)
+    if (hidden || e.props.hasSurvey) return next(e)
+    // the open plans, newest first, at most two rows below the flow row
+    const open = [...(await read($, plans))].reverse().filter(pl => pl.state === 'running' || pl.state === 'needs_input' || pl.state === 'error').slice(0, 2)
+    if (f === null && open.length === 0) return next(e)
 
     const theirs = await next(e) // what other mods and Claude Code draw here stays, below this row
     const ui = $.ui.resolve(e)
     const { Box, Text, Button } = ui
+    const planNow = open.length ? await $.clock.now() : 0
+    const bandWidth = Math.max(180, Math.min(MAX_BAND_W, (e.props.bodyColumns || 100) * 9 - 110))
+    const planRowEls =
+      e.surface !== 'terminal' && 'Svg' in ui
+        ? open.map(pl => {
+            const { Svg } = ui
+            const d = planBandSvg(bandWidth, pl, planNow)
+            return (
+              <Box key={`flowdeck-plan-${pl.id}`} flexDirection="row" flexShrink={1} minWidth={0} overflow="hidden">
+                <Svg source={svg(bandWidth, d.height, d.body)} alt={planAlt(pl)} width={bandWidth} height={d.height} />
+              </Box>
+            )
+          })
+        : open.map(pl => (
+            <Text key={`flowdeck-plan-${pl.id}`} color={STATE_COLOR[pl.state] ?? ACCENT} wrap="truncate-end">
+              {planBandText(pl, e.props.bodyColumns)}
+            </Text>
+          ))
+    if (f === null) {
+      return (
+        <Box flexDirection="column">
+          {planRowEls}
+          {theirs}
+        </Box>
+      )
+    }
     const list = await read($, agents)
     const crew = list.length + plannedOf(f, list).length
     const isWorking = list.some(a => a.status === 'running')
@@ -1614,6 +1646,7 @@ export const register: Register = (on, options) => {
             {crewButton}
             {dismiss}
           </Box>
+          {planRowEls}
           {theirs}
         </Box>
       )
@@ -1636,6 +1669,7 @@ export const register: Register = (on, options) => {
         {crewButton}
         {dismiss}
       </Box>
+      {planRowEls}
       {theirs}
       </Box>
     )
