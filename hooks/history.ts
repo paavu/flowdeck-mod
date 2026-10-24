@@ -6,13 +6,39 @@ const MAX_TASKS = 100
 export const MAX_TEXT = 200
 // Bounds one entry: the newest runs of a flow, each with its capped items and strings.
 export const MAX_AGENTS = 60
-// What one history file should stay under (the engine reads and writes at most 4 MiB a file).
-export const MAX_HISTORY_CHARS = 3_000_000
-// One history file (the active `history.json` or an archive `history-<n>.json`) stays under this.
-export const SEGMENT_MAX = MAX_HISTORY_CHARS
+// What one saved file should stay under, in UTF-8 bytes: the engine reads and writes at most 4 MiB (4,194,304 bytes) a file,
+// and the rest is room for the index, merged side files and one save's growth.
+export const MAX_HISTORY_BYTES = 2_500_000
+// One history file (the active `history.json`, an archive `history-<n>.json`, a side file) and `plans.json` stay under this.
+export const SEGMENT_MAX = MAX_HISTORY_BYTES
+// No write bigger than this is ever sent: it counts as a failed write.
+export const WRITE_MAX = 3_900_000
 export const ARCHIVE_FILE = /^history-(\d+)\.json$/
-export const EXTRA_FILE = /^history-extra-\d+(?:-\d+)?\.json$/
+// A side file is named after its flow's start: `history-extra-<startedAt>.json`, `-2`, `-3` … when that name holds another flow.
+export const EXTRA_FILE = /^history-extra-(\d+)(?:-\d+)?\.json$/
 export const archiveNumber = (file: string): number => Number(ARCHIVE_FILE.exec(file)?.[1] ?? 0)
+export const sideName = (startedAt: number, k = 1): string => `history-extra-${Math.round(startedAt)}${k > 1 ? `-${k}` : ''}.json`
+export const sideStart = (file: string): number | null => {
+  const m = EXTRA_FILE.exec(file)
+  return m ? Number(m[1]) : null
+}
+
+// The UTF-8 size of a text: 1 byte up to U+007F, 2 up to U+07FF, 4 for a surrogate pair, else 3 (a lone surrogate is written as U+FFFD).
+export function byteLength(s: string): number {
+  let n = 0
+  for (let i = 0; i < s.length; i++) {
+    const c = s.charCodeAt(i)
+    if (c < 0x80) n += 1
+    else if (c < 0x800) n += 2
+    else if (c >= 0xd800 && c <= 0xdbff && i + 1 < s.length && (s.charCodeAt(i + 1) & 0xfc00) === 0xdc00) {
+      n += 4
+      i++
+    } else n += 3
+  }
+  return n
+}
+
+export const jsonBytes = (v: unknown): number => byteLength(JSON.stringify(v))
 
 const AGENT_STATUSES: readonly AgentStatus[] = ['running', 'done', 'failed']
 
@@ -75,16 +101,17 @@ export function snapshot(input: {
 }): HistoryEntry {
   const { flow, agents, project, startedAt, endedAt, status } = input
   const newest = [...agents].sort((a, b) => a.startedAt - b.startedAt).slice(-MAX_AGENTS)
+  // Capped as they are written, so one entry stays far below a file's limit.
   return {
     id: `${startedAt}-${project}`,
     project,
-    title: flow.title,
+    title: cap(flow.title),
     startedAt,
     endedAt,
     status,
     done: flow.done,
     total: flow.total,
-    tasks: flow.tasks.map(t => ({ title: t.title, tier: t.tier, after: afterOf(t.after) })),
+    tasks: flow.tasks.slice(0, MAX_TASKS).map(t => ({ title: cap(t.title), tier: cap(t.tier), after: afterOf(t.after).slice(0, MAX_TASKS) })),
     cost: agents.reduce((s, a) => s + a.costUsd, 0),
     tokens: agents.reduce((s, a) => s + a.tokens, 0),
     // The span from the first start to the last end, as the panel header counts it (parallel runs overlap).
@@ -101,41 +128,42 @@ export function addEntry(history: HistoryEntry[], entry: HistoryEntry): HistoryE
   return [entry, ...history.filter(e => e.id !== entry.id)]
 }
 
-// The newest entries whose JSON stays under `maxChars`, and the older rest; the order is kept.
-export function splitBySize(entries: HistoryEntry[], maxChars: number = MAX_HISTORY_CHARS): { kept: HistoryEntry[]; overflow: HistoryEntry[] } {
+// The newest entries whose JSON stays under `maxBytes` (UTF-8), and the older rest; the order is kept.
+export function splitBySize(entries: HistoryEntry[], maxBytes: number = MAX_HISTORY_BYTES): { kept: HistoryEntry[]; overflow: HistoryEntry[] } {
   let size = 2 // the brackets
   let at = 0
   for (; at < entries.length; at++) {
-    const next = JSON.stringify(entries[at]).length + (at ? 1 : 0)
-    if (size + next >= maxChars) break
+    const next = jsonBytes(entries[at]) + (at ? 1 : 0)
+    if (size + next >= maxBytes) break
     size += next
   }
   return { kept: entries.slice(0, at), overflow: entries.slice(at) }
 }
 
 // One split that always takes at least one entry, so an entry bigger than the limit still moves on.
-const takeSegment = (entries: HistoryEntry[], maxChars: number) => {
-  const s = splitBySize(entries, maxChars)
+const takeSegment = (entries: HistoryEntry[], maxBytes: number) => {
+  const s = splitBySize(entries, maxBytes)
   return s.kept.length || !entries.length ? s : { kept: entries.slice(0, 1), overflow: entries.slice(1) }
 }
 
-// Under the limit, nothing moves. Over it, the newest entries within `keepChars` stay active and the rest is cut into
-// archive segments under the limit, oldest first. Keeping half, not all, leaves room: else every later save would
+// Under the limit (UTF-8 bytes), nothing moves. Over it, the newest entries within `keepBytes` stay active and the rest is
+// cut into archive segments under the limit, oldest first. Keeping half, not all, leaves room: else every later save would
 // push one entry out into an archive of its own.
-export function rotate(entries: HistoryEntry[], maxChars: number = SEGMENT_MAX, keepChars: number = maxChars / 2): { kept: HistoryEntry[]; archives: HistoryEntry[][] } {
-  if (JSON.stringify(entries).length < maxChars) return { kept: entries, archives: [] }
-  const { kept, overflow } = takeSegment(entries, keepChars)
+export function rotate(entries: HistoryEntry[], maxBytes: number = SEGMENT_MAX, keepBytes: number = maxBytes / 2): { kept: HistoryEntry[]; archives: HistoryEntry[][] } {
+  if (jsonBytes(entries) < maxBytes) return { kept: entries, archives: [] }
+  const { kept, overflow } = takeSegment(entries, keepBytes)
   const archives: HistoryEntry[][] = []
   let rest = overflow
   while (rest.length) {
-    const s = takeSegment(rest, maxChars)
+    const s = takeSegment(rest, maxBytes)
     archives.unshift(s.kept)
     rest = s.overflow
   }
   return { kept, archives }
 }
 
-export function summarize(file: string, entries: HistoryEntry[], size: number = JSON.stringify(entries).length): HistorySegment {
+// `flows` holds each entry's start and end, so a reader knows what the archive holds without reading it.
+export function summarize(file: string, entries: HistoryEntry[], size: number = jsonBytes(entries)): HistorySegment {
   return {
     file,
     count: entries.length,
@@ -145,8 +173,11 @@ export function summarize(file: string, entries: HistoryEntry[], size: number = 
     tokens: entries.reduce((s, e) => s + e.tokens, 0),
     time: entries.reduce((s, e) => s + e.time, 0),
     size,
+    flows: entries.map(e => [Math.round(e.startedAt), e.endedAt]),
   }
 }
+
+const isPair = (v: unknown): v is [number, number] => Array.isArray(v) && v.length === 2 && v.every(n => num(n) !== null)
 
 function parseSegment(v: unknown): HistorySegment | null {
   if (!v || typeof v !== 'object') return null
@@ -154,8 +185,23 @@ function parseSegment(v: unknown): HistorySegment | null {
   const nums = [o.count, o.from, o.to, o.cost, o.tokens, o.time, o.size].map(num)
   if (typeof o.file !== 'string' || !ARCHIVE_FILE.test(o.file) || nums.some(n => n === null)) return null
   const [count, from, to, cost, tokens, time, size] = nums as number[]
-  return { file: o.file, count: count!, from: from!, to: to!, cost: cost!, tokens: tokens!, time: time!, size: size! }
+  const s: HistorySegment = { file: o.file, count: count!, from: from!, to: to!, cost: cost!, tokens: tokens!, time: time!, size: size! }
+  // An index written before 1.0.0007 has no `flows`: the reader learns them from the archive itself.
+  if (Array.isArray(o.flows) && o.flows.every(isPair)) s.flows = o.flows.map(p => [Math.round(p[0]), p[1]])
+  return s
 }
+
+// The latest end each archived start has, over every archive that says what it holds.
+export function archivedEnds(segments: HistorySegment[]): Map<number, number> {
+  const ends = new Map<number, number>()
+  for (const s of segments) for (const [start, end] of s.flows ?? []) ends.set(start, Math.max(end, ends.get(start) ?? -Infinity))
+  return ends
+}
+
+// Whether an archive holds this flow as it is or newer: then the copy is not shown or saved again; a later snapshot is.
+export const isArchived = (e: HistoryEntry, ends: Map<number, number>): boolean => (ends.get(Math.round(e.startedAt)) ?? -Infinity) >= e.endedAt
+
+export const withoutArchivedBy = (list: HistoryEntry[], ends: Map<number, number>): HistoryEntry[] => (ends.size ? list.filter(e => !isArchived(e, ends)) : list)
 
 // `history-index.json`: the archives' summaries and the side files already merged into the active segment; null when it is no index.
 export function parseIndex(raw: unknown): { segments: HistorySegment[]; merged: string[] } | null {
@@ -179,6 +225,20 @@ export function mergeEntries(...lists: HistoryEntry[][]): HistoryEntry[] {
       at.set(e.id, out.length)
       out.push(e)
     } else if (e.endedAt > out[i]!.endedAt) out[i] = e
+  }
+  return out
+}
+
+// `base` in its own order, with each entry of `incoming` it lacks, or holds an older copy of, put before the first entry
+// that ended before it: a flow brought back from a side file or the store sits where it belongs in time.
+export function placeByEnd(base: HistoryEntry[], incoming: HistoryEntry[]): HistoryEntry[] {
+  let out = base
+  for (const e of mergeEntries(incoming)) {
+    const old = out.find(x => x.id === e.id)
+    if (old && old.endedAt >= e.endedAt) continue
+    const rest = old ? out.filter(x => x.id !== e.id) : out
+    const at = rest.findIndex(x => x.endedAt < e.endedAt)
+    out = at < 0 ? [...rest, e] : [...rest.slice(0, at), e, ...rest.slice(at)]
   }
   return out
 }

@@ -1,8 +1,9 @@
 import { describe, expect, test } from 'claude-code/testing'
 
-import { addEntry, entryDate, formatEntry, MAX_AGENTS, MAX_HISTORY_CHARS, parseHistory, snapshot, splitBySize } from '../hooks/history'
+import { addEntry, entryDate, formatEntry, MAX_AGENTS, MAX_HISTORY_BYTES, parseHistory, snapshot, splitBySize } from '../hooks/history'
 import { STATE_COLOR } from '../hooks/plan-view'
 import type { AgentRun, Flow, HistoryEntry } from '../types'
+import { utf8 } from './fake-fs'
 
 const MIN = 60_000
 const HOUR = 60 * MIN
@@ -107,6 +108,22 @@ describe('history entries hold the flow', () => {
     expect(e.tokens).toBe(80 * 12_000)
   })
 
+  test('snapshot caps what it writes: the title, each task title and tier at 200, the first 100 tasks, 100 waits each', () => {
+    const long = 'x'.repeat(500)
+    const tasks = Array.from({ length: 150 }, (_, i) => ({ title: `${i} ${long}`, tier: long, after: Array.from({ length: 300 }, (_, k) => k + 1) }))
+    const e = snap([run()], { flow: flow({ title: long, tasks }) })
+    expect(e.title).toHaveLength(200)
+    expect(e.tasks).toHaveLength(100)
+    expect(e.tasks[99]!.title.startsWith('99 ')).toBe(true)
+    for (const t of e.tasks) {
+      expect(t.title).toHaveLength(200)
+      expect(t.tier).toHaveLength(200)
+      expect(t.after).toHaveLength(100)
+    }
+    // what is written is what a read gives back
+    expect(parseHistory(JSON.parse(JSON.stringify([e])))).toEqual([e])
+  })
+
   test('parseHistory: old entries without agents load as they are, and the new fields survive a round trip', () => {
     const old = { id: 'old', project: '/work/app', title: 'Old', startedAt: 1, endedAt: 2, status: 'finished', done: 1, total: 2, tasks: [{ title: 'a', tier: 'light' }], cost: 1, tokens: 2, time: 3 }
     const [o] = parseHistory([old])
@@ -145,19 +162,19 @@ describe('history is never cut', () => {
     expect(h[0]!.startedAt).toBe(NOW + 119)
   })
 
-  test('splitBySize keeps the newest under 3,000,000 characters and returns the rest as overflow', () => {
+  test('splitBySize keeps the newest under 2,500,000 bytes and returns the rest as overflow', () => {
     const base = big(0)
     const list = Array.from({ length: 400 }, (_, i) => ({ ...base, id: `big-${399 - i}`, startedAt: NOW + (399 - i) * MIN })) // newest first
-    const { kept, overflow } = splitBySize(list, MAX_HISTORY_CHARS)
-    expect(MAX_HISTORY_CHARS).toBe(3_000_000)
-    expect(JSON.stringify(kept).length).toBeLessThan(3_000_000)
+    const { kept, overflow } = splitBySize(list, MAX_HISTORY_BYTES)
+    expect(MAX_HISTORY_BYTES).toBe(2_500_000)
+    expect(utf8(JSON.stringify(kept))).toBeLessThan(2_500_000)
     expect(kept.length).toBeGreaterThan(0)
     expect(overflow.length).toBeGreaterThan(0)
     expect(kept[0]!.id).toBe(list[0]!.id)
     expect([...kept, ...overflow].map(e => e.id)).toEqual(list.map(e => e.id))
     // one more would pass the limit
-    expect(JSON.stringify([...kept, overflow[0]]).length).toBeGreaterThanOrEqual(3_000_000)
-    const small = splitBySize(list.slice(0, 2), MAX_HISTORY_CHARS)
+    expect(utf8(JSON.stringify([...kept, overflow[0]]))).toBeGreaterThanOrEqual(2_500_000)
+    const small = splitBySize(list.slice(0, 2), MAX_HISTORY_BYTES)
     expect(small.kept.length).toBe(2)
     expect(small.overflow).toEqual([])
   })
@@ -167,7 +184,7 @@ describe('history is never cut', () => {
     const list = Array.from({ length: 30 }, (_, i) => ({ ...base, id: `big-${29 - i}` }))
     const next = addEntry(list, { ...base, id: 'big-30' })
     expect(next.length).toBe(31)
-    expect(JSON.stringify(next).length).toBeGreaterThan(3_000_000)
+    expect(utf8(JSON.stringify(next))).toBeGreaterThan(2_500_000)
   })
 })
 
@@ -386,19 +403,67 @@ describe('history groups in the panel', () => {
     }
   })
 
-  test('a run saved while still running reads as ended: Error, its time fixed', async ($, on) => {
+  test('a run saved while still running keeps its status and reads Running at finish in blue-violet, its time fixed', async ($, on) => {
     const e = { ...snap([run({ status: 'running', endedAt: undefined, startedAt: NOW - HOUR - 2 * MIN })]), id: 'gR' }
+    expect(e.agents![0]!.status).toBe('running')
     const { clock } = engine(on, { store: { historyShown: true, history: [e] } })
     await start($)
     await settle()
-    await press($, 'terminal', 'history-gR', 'history-finished-gR')
+    await press($, 'terminal', 'history-gR')
     let t = await terminal($)
-    expect(t.text).toMatch(/Error/)
+    expect(t.text).toMatch(/Running at finish/)
     expect(t.text).toMatch(/2:00/)
-    expect(t.text).not.toMatch(/Running/)
+    expect(t.text).not.toMatch(/Error/)
     clock.now = NOW + HOUR
     t = await terminal($)
     expect(t.text).toMatch(/2:00/)
+    const d = await desktop($)
+    const row = d.svgs.find((s: any) => /^write tests:/.test(String(s.props.alt)))
+    expect(String(row?.props.source)).toContain('Running at finish')
+    expect(String(row?.props.source)).toContain(`fill="${STATE_COLOR.running}"`)
+    expect(String(row?.props.source)).toContain('2:00')
+    expect(String(row?.props.source)).not.toContain(STATE_COLOR.error)
+  })
+
+  test('a flow finished while a worker still runs saves the run as running, ended at the save, and the group draws it Running at finish', async ($, on) => {
+    const { store, clock } = engine(on, { store: { historyShown: true } })
+    await start($)
+    await progress($, { title: 'Live one', total: 1, done: 0, phase: 'delegate', tasks: [{ title: 'write tests', tier: 'careful' }] })
+    clock.now = NOW + 1000
+    await $.agent.spawn({ subagentType: 'flowdeck-careful', description: 'write tests', tool_use_id: 'w1' } as any)
+    clock.now = NOW + 61_000
+    await progress($, { finished: true })
+    const saved = (store.history as any[])[0]
+    expect(saved.agents.map((a: any) => [a.id, a.status, a.endedAt])).toEqual([['w1', 'running', NOW + 61_000]])
+    await press($, 'terminal', `history-${saved.id}`)
+    const t = await terminal($)
+    expect(t.text).toMatch(/Running at finish/)
+    expect(t.text).toMatch(/1:00/)
+  })
+
+  test('folding a row in a group folds only that group’s row, never the same agent in another group or the live panel', async ($, on) => {
+    engine(on, { store: { historyShown: true, history: [groupA(), { ...groupA(), id: 'gC', title: 'Flow C' }] } })
+    await start($)
+    await settle()
+    // a live run with the same id as the groups' a2, with its own steps (one row's line counts once as `✗ patch it`)
+    await progress($, { title: 'Live', total: 1, done: 0, phase: 'delegate', tasks: [{ title: 'wire it', tier: 'medium' }] })
+    await $.agent.spawn({ subagentType: 'flowdeck-medium', description: 'wire it', tool_use_id: 'a2' } as any)
+    await $.tool.call({ tool: 'mcp__flowdeck__step', agentId: 'a2', steps: [{ title: 'live one' }, { title: 'live two' }] } as any)
+    await press($, 'terminal', 'history-gA', 'history-finished-gA', 'history-gC', 'history-finished-gC', 'history-gA-agent-fold-a2')
+    const count = (text: string, word: string) => text.split(word).length - 1
+    let t = await terminal($)
+    expect(count(t.text, '✗ patch it')).toBe(1)
+    // the live row's second step shows only when that row is unfolded
+    expect(t.text).not.toMatch(/live two/)
+    const label = (key: string) => String(t.buttons.find((b: any) => String(b.props.key) === key)?.props.label)
+    expect(label('history-gA-agent-fold-a2')).toBe('▾')
+    expect(label('history-gC-agent-fold-a2')).toBe('▸')
+    expect(label('agent-fold-a2')).toBe('▸')
+    await press($, 'terminal', 'agent-fold-a2')
+    t = await terminal($)
+    expect(t.text).toMatch(/live two/)
+    expect(count(t.text, '✗ patch it')).toBe(1)
+    expect(label('history-gC-agent-fold-a2')).toBe('▸')
   })
 
   test('twelve groups show the newest ten and Show older reveals the rest', async ($, on) => {

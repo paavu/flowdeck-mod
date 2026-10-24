@@ -18,7 +18,7 @@ Task from the user: $ARGUMENTS
 
 ## Linked for the whole session
 
-From the first `progress` report on, this flow stays linked to the session until the user presses Finish or a new `/flowdeck <task>` restarts it. Every task that appears later (a new user request, a new item in the session's task list) goes into the same flow before you start it: call `progress` with `add: [{ title, tier }]`. Never drop an accepted task, never reset `done`, and never start a second flow for the same session. Close with `finished: true` only when the user ends the flow.
+From the first `progress` report on, this flow stays linked to the session. A flow ends in one of three ways: the user presses Finish (on the band or in the panel; the flow ends without you), a new `/flowdeck <task>` makes you send `restart: true`, or the user tells you the flow is done. Every task that appears later (a new user request, a new item in the session's task list) goes into the same flow before you start it: call `progress` with `add: [{ title, tier }]`. Never drop an accepted task, never reset `done`, and never start a new flow beside the open one: the only way to replace it is `restart: true` for a new `/flowdeck <task>`. Send `finished: true` only when the user asks you to end the flow.
 
 ## 0. Preconditions
 
@@ -32,7 +32,7 @@ If the tool `mcp__flowdeck__progress` is available, keep it current; skip silent
 - each time a task is accepted in review: `done` (accepted so far); switch `phase` to `"review"` while reviewing;
 - if re-planning changes the tasks: the new `tasks` and `total`;
 - when a new task appears later in the session: `add: [{ title, tier }]` (appends; keeps `done`; a title already in the flow is ignored);
-- when the current work is complete: `phase: "close"`. Set `finished: true` only when the user ends the flow (a linked flow outlives a batch of work);
+- when the current work is complete: `phase: "close"`. Set `finished: true` only when the user asks you to end the flow (a linked flow outlives a batch of work; the Finish button ends it without you);
 
 The flow's worker tasks stay on `progress`. For work outside a flow, or a checklist of your own orchestrator steps, use `mcp__flowdeck__plan`: create it once with `id`, `title` and `stages` (or `kind: "todo"`), then move it with short ops (`{id, next:true}`, `{id, done:[...], active:"..."}`, `{id, failed:"...", note}`, `{id, state:"needs_input", note}`, `{id, state:"done"}`).
 

@@ -7,18 +7,22 @@ export const HOUSEKEEPING: ReadonlySet<string> = new Set(['mcp__flowdeck__step',
 
 export type AgentState = { name: string; color: string }
 
-type Shown = Pick<AgentRun, 'status'> & Partial<Pick<AgentRun, 'tool' | 'isAsked'>>
+type Shown = Pick<AgentRun, 'status'> & Partial<Pick<AgentRun, 'tool' | 'isAsked' | 'endedAt'>>
+
+// A live run has no end yet; one that is running with an end was saved in a flow's history while it still ran.
+export const isRunningAtFinish = (a: Shown): boolean => a.status === 'running' && a.endedAt !== undefined
 
 export const agentState = (a: Shown): AgentState => {
   if (a.status === 'done') return { name: 'Done', color: STATE_COLOR.done }
   if (a.status === 'failed') return { name: 'Error', color: STATE_COLOR.error }
+  if (isRunningAtFinish(a)) return { name: 'Running at finish', color: STATE_COLOR.running }
   if (a.isAsked) return { name: 'Needs approval', color: STATE_COLOR.needs_input }
   return { name: 'Running', color: STATE_COLOR.running }
 }
 
 export const stateText = (a: Shown): string => {
   const { name } = agentState(a)
-  return a.status === 'running' && !a.isAsked && a.tool ? `${name} · ${a.tool}` : name
+  return a.status === 'running' && !a.isAsked && a.tool && !isRunningAtFinish(a) ? `${name} · ${a.tool}` : name
 }
 
 // A fitted line back into its coloured head and the rest; a line cut inside the head is all head.

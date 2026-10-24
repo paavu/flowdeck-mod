@@ -32,6 +32,12 @@ describe('agent state on the progress line', () => {
     expect(stateText({ status: 'failed', tool: 'Bash' })).toBe('Error')
   })
 
+  test('a run saved while still running (status running, an end) is Running at finish in blue-violet, without a tool word', () => {
+    expect(agentState({ status: 'running', endedAt: 5 })).toEqual({ name: 'Running at finish', color: STATE_COLOR.running })
+    expect(stateText({ status: 'running', endedAt: 5, tool: 'Bash' })).toBe('Running at finish')
+    expect(agentState({ status: 'done', endedAt: 5 }).name).toBe('Done')
+  })
+
   test('the housekeeping tools are flowdeck’s own step, progress and plan', () => {
     expect([...HOUSEKEEPING].sort()).toEqual(['mcp__flowdeck__plan', 'mcp__flowdeck__progress', 'mcp__flowdeck__step'])
     expect(HOUSEKEEPING.has('Bash')).toBe(false)

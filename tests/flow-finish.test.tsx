@@ -1,5 +1,7 @@
 import { describe, expect, test } from 'claude-code/testing'
 
+import { fakeFs } from './fake-fs'
+
 const NOW = Date.UTC(2026, 9, 26, 12, 40)
 const HISTORY = '/work/app/.claude/flowdeck/history.json'
 
@@ -7,8 +9,9 @@ type Fail = { fs?: boolean; store?: boolean; clock?: boolean }
 
 function engine(on: any, opts: { store?: Record<string, unknown>; fail?: Fail } = {}) {
   const store = opts.store ?? {}
-  const files: Record<string, string> = {}
   const fail = opts.fail ?? {}
+  const fs = fakeFs(on, { fail })
+  const files = fs.files
   const clock = { now: NOW }
   on('env.get', () => ({ value: undefined }))
   on('settings.read', () => ({ value: {} }))
@@ -34,19 +37,9 @@ function engine(on: any, opts: { store?: Record<string, unknown>; fail?: Fail } 
     store[e.key] = e.value
     return { value: undefined }
   })
-  on('fs.read', (_$: any, e: any) => {
-    if (fail.fs) throw new Error('fs down')
-    if (!(e.path in files)) throw new Error('ENOENT')
-    return { value: files[e.path] }
-  })
-  on('fs.write', (_$: any, e: any) => {
-    if (fail.fs) throw new Error('EACCES')
-    files[e.path] = e.text
-    return { value: undefined }
-  })
   on('session.usage', () => ({ value: { startedAt: 0, context: { tokens: 0, window: 0, percent: 0 }, rateLimits: [], cost: { usd: 0 } } }))
   on('ui.render', ($: any, e: any) => $.ui.resolve(e).Text({ children: 'band below' }))
-  return { store, files, clock, fail }
+  return { store, files, clock, fail, fs }
 }
 
 const USAGE = { model: 'claude-opus-5-5', input_tokens: 1000, output_tokens: 0, cache_read_input_tokens: 0, cache_creation_input_tokens: 0 }
@@ -294,5 +287,88 @@ describe('restart', () => {
     await progress($, { finished: true })
     await progress($, { finished: true })
     expect(entries(files).length).toBe(1)
+  })
+})
+
+describe('finish races', () => {
+  // Holds the first fs call (the first save's first step) until released.
+  const holdFirst = (fs: { delay: any }) => {
+    let release!: () => void
+    const held = new Promise<void>(r => (release = r))
+    const state = { isHeld: false, release: () => release() }
+    fs.delay = async () => {
+      if (state.isHeld) return
+      state.isHeld = true
+      await held
+    }
+    return state
+  }
+
+  test('the Finish button and finished: true at once record one entry with the flow’s own content', async ($, on) => {
+    const { files, fs } = engine(on)
+    workers(on)
+    await start($)
+    await plan($)
+    // a run with spend, so a second, blank snapshot of the flow would be worth keeping and show up
+    await spawn($, 'w1', 'write tests')
+    await $.turn.complete({ reason: 'answer', answer: 'ok', durationMs: 1, agentId: 'w1', usage: USAGE } as any)
+    const b = await band($, 'terminal')
+    const h = holdFirst(fs)
+    const both = Promise.all([b.press({ key: 'flowdeck-finish' }), progress($, { finished: true })])
+    while (!h.isHeld) await settle()
+    await settle()
+    h.release()
+    await both
+    await b.unmount()
+    fs.delay = null
+    const list = entries(files)
+    expect(list.map(e => [e.title, e.done, e.total, e.tasks.length, e.agents.length])).toEqual([['Ship it', 1, 2, 2, 1]])
+    expect(Object.keys(files).filter(p => p.includes('/history-extra-'))).toHaveLength(1)
+    expect(await terminalLabel($)).toBe(true)
+  })
+
+  test('two Finish presses at once (the band and the panel) record one entry with the flow’s own content', async ($, on) => {
+    const { files, fs } = engine(on)
+    workers(on)
+    await start($)
+    await plan($)
+    await spawn($, 'w1', 'write tests')
+    await $.turn.complete({ reason: 'answer', answer: 'ok', durationMs: 1, agentId: 'w1', usage: USAGE } as any)
+    const b = await band($, 'terminal')
+    const p = await pane($)
+    const h = holdFirst(fs)
+    const both = Promise.all([b.press({ key: 'flowdeck-finish' }), p.press({ key: 'flow-finish' })])
+    while (!h.isHeld) await settle()
+    await settle()
+    h.release()
+    await both
+    await b.unmount()
+    await p.unmount()
+    fs.delay = null
+    expect(entries(files).map(e => [e.title, e.done, e.total, e.tasks.length, e.agents.length])).toEqual([['Ship it', 1, 2, 2, 1]])
+    expect(Object.keys(files).filter(f => f.includes('/history-extra-'))).toHaveLength(1)
+  })
+
+  test('a restart while Finish is still saving keeps the new flow’s start; the old record keeps its own', async ($, on) => {
+    const { files, fs, clock } = engine(on)
+    await start($)
+    await plan($, 'Old work')
+    const b = await band($, 'terminal')
+    const h = holdFirst(fs)
+    const pressing = b.press({ key: 'flowdeck-finish' })
+    while (!h.isHeld) await settle()
+    clock.now = NOW + 60_000
+    expect(String((await progress($, { restart: true, title: 'New work', total: 1, phase: 'delegate', tasks: [{ title: 'new task', tier: 'light' }] })).result)).toBe('ok: Tasks 0/1')
+    h.release()
+    await pressing
+    await b.unmount()
+    fs.delay = null
+    clock.now = NOW + 120_000
+    await progress($, { finished: true })
+    const list = entries(files)
+    expect(list.map(e => e.title)).toEqual(['New work', 'Old work'])
+    expect(list[0].startedAt).toBe(NOW + 60_000)
+    expect(list[1].startedAt).toBe(NOW)
+    expect(list[1].endedAt).toBe(NOW)
   })
 })

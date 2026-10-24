@@ -182,17 +182,21 @@ describe('plan tool', () => {
     expect(await plan($, { id: 'other', next: true })).toMatch(/^flowdeck plan: no plan "other" yet/)
   })
 
-  test('the store keeps the 20 most recent sessions', async ($, on) => {
+  test('the store keeps every session: none is dropped for age', async ($, on) => {
     const plans: Record<string, unknown> = {}
     for (let i = 0; i < 25; i++) plans[`old${i}`] = [{ id: 'p', title: 't', kind: 'plan', stages: [], state: 'done', note: null, startedAt: i }]
+    const before = JSON.stringify(plans)
     const { store } = engine(on, { store: { plans } })
     await start($)
     await create($)
     const keys = Object.keys(store.plans as object)
-    expect(keys).toHaveLength(20)
+    expect(keys).toHaveLength(26)
     expect(keys).toContain('s')
-    expect(keys).not.toContain('old5')
+    expect(keys).toContain('old0')
     expect(keys).toContain('old24')
+    const kept = { ...(store.plans as Record<string, unknown>) }
+    delete kept.s
+    expect(JSON.stringify(kept)).toBe(before)
   })
 
   for (const [name, value] of [['a string', 'nope'], ['an object of numbers', { x: 5 }], ['a session of numbers', { s: 5 }]] as const) {

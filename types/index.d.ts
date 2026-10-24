@@ -105,7 +105,9 @@ export type HistorySegment = {
   cost: number // USD
   tokens: number
   time: number // ms
-  size: number // serialized characters
+  size: number // serialized UTF-8 bytes
+  /** Each flow it holds as [startedAt, endedAt]; absent in an index written before 1.0.0007. */
+  flows?: [number, number][]
 }
 
 export type Panel = {
@@ -129,6 +131,8 @@ export type Panel = {
   historySegment: string | null
   /** The archive file that could not be loaded, '' when none; this session only. */
   historyError: string
+  /** Why the latest view shows only recovered entries ('' when history.json was read); this session only. */
+  historyWarning?: string
   autoOpenedFor: string
 }
 

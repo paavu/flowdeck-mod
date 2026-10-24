@@ -1,13 +1,15 @@
 import { describe, expect, test } from 'claude-code/testing'
 
-import { mergeEntries, parseIndex, rotate, spanText, summarize, withoutCopies } from '../hooks/history'
+import { byteLength, mergeEntries, parseIndex, placeByEnd, rotate, spanText, summarize, withoutCopies, WRITE_MAX } from '../hooks/history'
 import type { HistoryEntry } from '../types'
+import { ENGINE_MAX, fakeFs, utf8 } from './fake-fs'
 
 const NOW = Date.UTC(2026, 9, 26, 12, 40)
 const MIN = 60_000
 const HOUR = 60 * MIN
 const DAY = 24 * HOUR
 const DIR = '/work/app/.claude/flowdeck'
+const WARNING = 'history.json could not be read; showing recovered entries (the file is untouched)'
 const HISTORY = `${DIR}/history.json`
 const INDEX = `${DIR}/history-index.json`
 const arc = (n: number) => `${DIR}/history-${n}.json`
@@ -64,7 +66,7 @@ describe('rotation, pure', () => {
     expect(rotate([big], LIMIT)).toEqual({ kept: [big], archives: [] })
   })
 
-  test('summarize counts the span, sums and size', () => {
+  test('summarize counts the span, sums, size in bytes and each flow’s start and end', () => {
     const list = seed(3)
     expect(summarize('history-1.json', list)).toEqual({
       file: 'history-1.json',
@@ -75,7 +77,10 @@ describe('rotation, pure', () => {
       tokens: 36_000,
       time: 90 * MIN,
       size: size(list),
+      flows: list.map(e => [e.startedAt, e.endedAt]),
     })
+    const wide = [entry(1, { title: 'Ж'.repeat(100) })]
+    expect(summarize('history-1.json', wide).size).toBe(utf8(JSON.stringify(wide)))
   })
 
   test('parseIndex keeps valid segments and merged side files only', () => {
@@ -94,6 +99,14 @@ describe('rotation, pure', () => {
       ['e2', 'newer'],
       ['e3', 'Flow 3'],
     ])
+  })
+
+  test('placeByEnd keeps the list’s own order and puts each flow it lacks, or holds older, where it ended', () => {
+    const list = [entry(1), entry(3), entry(5)]
+    expect(placeByEnd(list, [entry(4), entry(2), entry(9)]).map(e => e.id)).toEqual(['e1', 'e2', 'e3', 'e4', 'e5', 'e9'])
+    expect(placeByEnd(list, [entry(3, { title: 'older', endedAt: 0 })]).map(e => e.title)).toEqual(['Flow 1', 'Flow 3', 'Flow 5'])
+    expect(placeByEnd(list, [entry(5, { title: 'newer', endedAt: NOW })]).map(e => e.title)).toEqual(['newer', 'Flow 1', 'Flow 3'])
+    expect(placeByEnd([entry(2), entry(1)], []).map(e => e.id)).toEqual(['e2', 'e1'])
   })
 
   test('withoutCopies drops only exact copies of archived entries', () => {
@@ -117,12 +130,14 @@ type Opts = { store?: Record<string, unknown>; files?: Record<string, string>; u
 
 function engine(on: any, opts: Opts = {}) {
   const store = opts.store ?? {}
-  const files = opts.files ?? {}
-  const unreadable = new Set(opts.unreadable ?? [])
-  const writes: string[] = []
-  const reads: string[] = []
+  const fs = fakeFs(on, { files: opts.files, unreadable: opts.unreadable })
+  const { files, writes, reads, unreadable } = fs
   const clock = { now: NOW }
-  const ctl = { failWrite: null as null | ((path: string) => boolean) }
+  const ctl = {
+    set failWrite(f: null | ((path: string) => boolean)) {
+      fs.fail.write = f ?? false
+    },
+  }
   on('env.get', (_$: any, e: any) => ({ value: e.name === 'FLOWDECK_HISTORY_SEGMENT_MAX' ? (opts.max ?? String(LIMIT)) : undefined }))
   on('settings.read', () => ({ value: {} }))
   on('clock.every', () => ({ value: undefined }))
@@ -140,32 +155,8 @@ function engine(on: any, opts: Opts = {}) {
     store[e.key] = e.value
     return { value: undefined }
   })
-  on('fs.read', (_$: any, e: any) => {
-    reads.push(e.path)
-    if (unreadable.has(e.path)) throw new Error('EACCES')
-    if (!(e.path in files)) throw new Error('ENOENT')
-    return { value: files[e.path] }
-  })
-  on('fs.write', (_$: any, e: any) => {
-    if (ctl.failWrite?.(e.path)) throw new Error('EACCES')
-    writes.push(e.path)
-    files[e.path] = e.text
-    return { value: undefined }
-  })
-  on('fs.stat', (_$: any, e: any) => {
-    if (!(e.path in files)) throw new Error('ENOENT')
-    return { value: { kind: 'file', size: files[e.path]!.length, mtimeMs: 0, isLink: false } }
-  })
-  on('fs.list', (_$: any, e: any) => {
-    const pre = `${String(e.path).replace(/\/$/, '')}/`
-    const names = Object.keys(files)
-      .filter(p => p.startsWith(pre) && !p.slice(pre.length).includes('/'))
-      .map(p => p.slice(pre.length))
-    if (!names.length) throw new Error('ENOENT')
-    return { value: names.map(name => ({ name, kind: 'file', size: 0, mtimeMs: 0, isLink: false })) }
-  })
   on('session.usage', () => ({ value: { startedAt: 0, context: { tokens: 0, window: 0, percent: 0 }, rateLimits: [], cost: { usd: 0 } } }))
-  return { store, files, writes, reads, clock, ctl, unreadable }
+  return { store, files, writes, reads, clock, ctl, unreadable, fs }
 }
 
 const start = ($: any) => $.session.start({ surface: 'terminal', isInteractive: true, cwd: '/work/app' } as any)
@@ -241,12 +232,14 @@ describe('rotation on save', () => {
           tokens: kept.reduce((s, e) => s + e.tokens, 0),
           time: kept.reduce((s, e) => s + e.time, 0),
           size: files[arc(1)]!.length,
+          flows: kept.map(e => [e.startedAt, e.endedAt]),
         },
       ],
-      merged: [],
+      merged: [`history-extra-${NOW + MIN}.json`],
     })
-    const order = writes.filter(w => [arc(1), INDEX, HISTORY].includes(w))
-    expect(order).toEqual([arc(1), INDEX, HISTORY])
+    // the flow's own side file first, then the archive, the index, history.json, and the index marking the side file merged
+    const order = writes.filter(w => !w.endsWith('/.gitignore'))
+    expect(order).toEqual([`${DIR}/history-extra-${NOW + MIN}.json`, arc(1), INDEX, HISTORY, INDEX])
   })
 
   test('a second rotation creates history-2.json and leaves history-1.json as it was', async ($, on) => {
@@ -299,8 +292,9 @@ describe('rotation on save', () => {
     for (const p of [HISTORY, ...paths]) expect(env.files[p]!.length).toBeLessThan(LIMIT)
     // archives are not one flow each: a rotation moves about half the limit
     expect(paths.length).toBeLessThan(40 / 2)
-    // the index grows by one short summary per archive (under 200 characters), far below the real 3,000,000 limit
-    expect(env.files[INDEX]!.length).toBeLessThan(200 * paths.length + 50)
+    // the index grows by one short summary per archive (under 200 bytes) and under 80 bytes per flow (its start and end, its
+    // side file's name), far below the real 2,500,000-byte limit
+    expect(env.files[INDEX]!.length).toBeLessThan(200 * paths.length + 80 * 40 + 50)
     for (const p of paths) expect(env.writes.filter(w => w === p)).toHaveLength(1)
     const c = counts(env.files)
     expect(new Set(c.keys())).toEqual(new Set(all))
@@ -391,6 +385,28 @@ describe('copies left by a cut-short rotation', () => {
     })
   }
 
+  for (const isLegacy of [false, true]) {
+    test(`a copy of an archived flow is hidden from the latest view even with history.json under the limit${isLegacy ? ' (an index without flows: the archive is read for them)' : ''}`, async ($, on) => {
+      const resaved = entry(4, { title: 'Resaved', endedAt: NOW })
+      const list = [resaved, entry(1), entry(2), entry(3)]
+      const archived = [entry(3), entry(4)]
+      const seg = summarize('history-1.json', archived)
+      if (isLegacy) delete seg.flows
+      const env = engine(on, {
+        store: { historyShown: true },
+        files: { [HISTORY]: JSON.stringify(list), [arc(1)]: JSON.stringify(archived), [INDEX]: JSON.stringify({ segments: [seg] }) },
+      })
+      expect(size(list)).toBeLessThan(LIMIT)
+      await start($)
+      await settle()
+      const v = await view($)
+      // e3 is an exact copy: hidden; e4 was saved again after it was archived: its newer snapshot shows
+      expect(v.groups).toEqual(['e4', 'e1', 'e2'])
+      expect(v.text).toContain('· 3 flows')
+      expect(env.writes).toEqual([])
+    })
+  }
+
   test('a re-saved flow whose old copy was archived keeps both copies', async ($, on) => {
     const list = seed(FULL)
     const changed = { ...list.at(-1)!, title: 'Resaved', endedAt: NOW }
@@ -415,16 +431,83 @@ describe('a history.json that is there but cannot be used', () => {
     expect((env.store.history as any[]).map(e => e.id)).toEqual([id])
     await start($)
     await settle()
-    expect((await view($)).groups).toEqual([id])
+    let v = await view($)
+    expect(v.groups).toEqual([id])
+    expect(v.text).toContain(WARNING)
+    for (const surface of ['terminal', 'desktop'] as const) {
+      const p = await pane($, surface)
+      const drawn = JSON.stringify(await p.drawn())
+      await p.unmount()
+      // a dim line above the groups
+      expect(drawn.indexOf(WARNING)).toBeGreaterThan(-1)
+      expect(drawn.indexOf(WARNING)).toBeLessThan(drawn.indexOf(`"history-${id}"`))
+    }
     // readable again: the next save merges the side file in, and it is not merged twice
     env.unreadable.clear()
     await flow($, env, 'Later')
     expect(idsOf(env.files[HISTORY])).toEqual([`${env.clock.now}-/work/app`, id, 'e1', 'e2', 'e3'])
-    expect(JSON.parse(env.files[INDEX]!).merged).toEqual([`history-extra-${NOW + MIN}.json`])
+    expect((await view($)).text).not.toContain(WARNING)
+    // every flow has its own side file now: the earlier one and this save's are both marked merged
+    expect([...JSON.parse(env.files[INDEX]!).merged].sort()).toEqual([`history-extra-${NOW + MIN}.json`, `history-extra-${env.clock.now}.json`])
     expect(idsOf(env.files[`${DIR}/history-extra-${NOW + MIN}.json`])).toEqual([id])
     await start($)
     await settle()
-    expect((await view($)).groups).toEqual([`${env.clock.now}-/work/app`, id, 'e1', 'e2', 'e3'])
+    v = await view($)
+    expect(v.groups).toEqual([`${env.clock.now}-/work/app`, id, 'e1', 'e2', 'e3'])
+    expect(v.text).not.toContain(WARNING)
+  })
+
+  test('read, stat and the listing failing: `exists` says it is there, so it is never overwritten', async ($, on) => {
+    const before = JSON.stringify(seed(3))
+    const env = engine(on, { files: { [HISTORY]: before }, unreadable: [HISTORY] })
+    env.fs.fail.stat = true
+    env.fs.fail.list = true
+    await start($)
+    expect(await flow($, env)).toContain('ok')
+    const id = `${NOW + MIN}-/work/app`
+    expect(env.files[HISTORY]).toBe(before)
+    expect(env.fs.tried.map(t => t.path)).not.toContain(HISTORY)
+    expect(idsOf(env.files[`${DIR}/history-extra-${NOW + MIN}.json`])).toEqual([id])
+    expect((env.store.history as any[]).map(e => e.id)).toEqual([id])
+  })
+
+  test('read, stat, listing and `exists` all failing: whether anything is there is unknown, so nothing in the folder is written', async ($, on) => {
+    const before = JSON.stringify(seed(3))
+    const env = engine(on, { store: { historyShown: true }, files: { [HISTORY]: before }, unreadable: [HISTORY] })
+    Object.assign(env.fs.fail, { stat: true, list: true, exists: true })
+    await start($)
+    expect(await flow($, env)).toContain('ok')
+    const id = `${NOW + MIN}-/work/app`
+    expect(env.fs.tried).toEqual([])
+    expect(env.files).toEqual({ [HISTORY]: before })
+    expect((env.store.history as any[]).map(e => e.id)).toEqual([id])
+    await start($)
+    await settle()
+    const v = await view($)
+    expect(v.groups).toEqual([id])
+    expect(v.text).toContain(WARNING)
+  })
+
+  test('with stat and the listing failing, a missing history.json is still created: `exists` tells it is missing', async ($, on) => {
+    const env = engine(on)
+    env.fs.fail.stat = true
+    env.fs.fail.list = true
+    await start($)
+    await flow($, env)
+    expect(idsOf(env.files[HISTORY])).toEqual([`${NOW + MIN}-/work/app`])
+    expect(env.files[`${DIR}/.gitignore`]).toBe('*\n')
+  })
+
+  test('an index whose existence is unknown is never written and nothing rotates; history.json, read fine, still takes the flow', async ($, on) => {
+    const env = engine(on, { files: { [HISTORY]: JSON.stringify(seed(FULL)), [INDEX]: '{"segments":[]}' }, unreadable: [INDEX] })
+    Object.assign(env.fs.fail, { stat: true, list: true, exists: true })
+    await start($)
+    expect(await flow($, env)).toContain('ok')
+    expect(env.files[INDEX]).toBe('{"segments":[]}')
+    expect(archivePaths(env.files)).toEqual([])
+    expect(idsOf(env.files[HISTORY])).toHaveLength(FULL + 1)
+    // .gitignore and the side file could not be told missing either: neither is written
+    expect(Object.keys(env.files).sort()).toEqual([HISTORY, INDEX].sort())
   })
 
   test('corrupt (read ok, parse fails): kept as it is, the entry goes to a side file; an existing side file name is not reused', async ($, on) => {
@@ -434,6 +517,25 @@ describe('a history.json that is there but cannot be used', () => {
     expect(env.files[HISTORY]).toBe('nope')
     expect(env.files[`${DIR}/history-extra-${NOW + MIN}.json`]).toBe('[]')
     expect(idsOf(env.files[`${DIR}/history-extra-${NOW + MIN}-2.json`])).toEqual([`${NOW + MIN}-/work/app`])
+  })
+
+  test('a re-save of the same flow overwrites only its own side file; a slot holding another flow is never written over', async ($, on) => {
+    const slot1 = `${DIR}/history-extra-${NOW + MIN}.json`
+    const slot2 = `${DIR}/history-extra-${NOW + MIN}-2.json`
+    const other = JSON.stringify([entry(1, { id: `${NOW + MIN}-/elsewhere`, startedAt: NOW + MIN })])
+    const env = engine(on, { files: { [slot1]: other } })
+    await start($)
+    env.clock.now += MIN
+    await progress($, { title: 'Ship it', total: 2, done: 1, phase: 'delegate', tasks: [{ title: 'write tests', tier: 'careful' }] })
+    await $.session.end({ reason: 'clear', sessionId: 's' } as any)
+    const id = `${NOW + MIN}-/work/app`
+    expect(JSON.parse(env.files[slot2]!).map((e: any) => [e.id, e.status])).toEqual([[id, 'open']])
+    env.clock.now += MIN
+    await progress($, { finished: true })
+    expect(JSON.parse(env.files[slot2]!).map((e: any) => [e.id, e.status, e.endedAt])).toEqual([[id, 'finished', env.clock.now]])
+    expect(env.files[slot1]).toBe(other)
+    expect(Object.keys(env.files).filter(p => p.includes('/history-extra-'))).toHaveLength(2)
+    expect(idsOf(env.files[HISTORY])[0]).toBe(id)
   })
 
   test('an unreadable index stops rotation but never the save', async ($, on) => {
@@ -588,5 +690,153 @@ describe('browsing segments in the panel', () => {
     const v = await view($)
     expect(v.keys).not.toContain('history-older')
     expect(v.text).toContain('· 2 flows')
+  })
+})
+
+describe('sizes are UTF-8 bytes', () => {
+  const WORDS = { Cyrillic: 'Привет мир ', CJK: '你好世界和平', emoji: '🚀🎉🧪🔥' }
+
+  test('byteLength counts UTF-8: ASCII 1, Cyrillic 2, CJK 3, emoji 4, a lone surrogate 3', () => {
+    expect(byteLength('abc')).toBe(3)
+    expect(byteLength('Жж')).toBe(4)
+    expect(byteLength('你好')).toBe(6)
+    expect(byteLength('🚀')).toBe(4)
+    expect(byteLength('\ud83d')).toBe(3)
+    expect(byteLength('a\udc00b')).toBe(5)
+    expect(byteLength('\ud83dx')).toBe(4)
+    for (const w of Object.values(WORDS)) expect(byteLength(w.repeat(50))).toBe(utf8(w.repeat(50)))
+  })
+
+  for (const [name, w] of Object.entries(WORDS)) {
+    test(`${name} entries rotate before the byte limit, though their characters are under it`, () => {
+      const list = Array.from({ length: 30 }, (_, i) => entry(i + 1, { title: w.repeat(30).slice(0, 200) }))
+      const text = JSON.stringify(list)
+      const limit = Math.round((text.length + utf8(text)) / 2)
+      expect(text.length).toBeLessThan(limit)
+      const { kept, archives } = rotate(list, limit)
+      expect(archives.length).toBeGreaterThan(0)
+      for (const part of [kept, ...archives]) expect(utf8(JSON.stringify(part))).toBeLessThan(limit)
+      expect([...kept, ...[...archives].reverse().flat()].map(e => e.id)).toEqual(list.map(e => e.id))
+    })
+  }
+
+  test('on disk: multibyte flows keep every file under the byte limit, and no write passes 4 MiB', async ($, on) => {
+    const env = engine(on)
+    await start($)
+    const all: string[] = []
+    for (let i = 0; i < 30; i++) {
+      await flow($, env, `${Object.values(WORDS)[i % 3]!.repeat(6)} ${i}`)
+      all.push(`${env.clock.now}-/work/app`)
+    }
+    const paths = archivePaths(env.files)
+    expect(paths.length).toBeGreaterThan(1)
+    for (const p of [HISTORY, ...paths]) expect(utf8(env.files[p]!)).toBeLessThan(LIMIT)
+    for (const p of paths) expect(JSON.parse(env.files[INDEX]!).segments.find((s: any) => p.endsWith(s.file)).size).toBe(utf8(env.files[p]!))
+    expect(Math.max(...env.fs.tried.map(t => t.bytes))).toBeLessThan(ENGINE_MAX)
+    const c = counts(env.files)
+    expect(new Set(c.keys())).toEqual(new Set(all))
+    expect([...c.values()].every(n => n === 1)).toBe(true)
+  })
+
+  // An entry of about 44 kB: a 100-emoji title and 100 tasks of 99 emoji each (all under the 200-character cap).
+  const fat = (i: number): HistoryEntry => entry(i, { title: '🚀'.repeat(100), tasks: Array.from({ length: 100 }, (_, k) => ({ title: `${'🧪'.repeat(99)}${k}`, tier: 'careful' })) })
+  const fill = (bytes: number): HistoryEntry[] => {
+    const one = utf8(JSON.stringify(fat(1))) + 1
+    return Array.from({ length: Math.floor((bytes - 2) / one) }, (_, k) => fat(k + 1))
+  }
+
+  test('at the real limit: a history.json of emoji flows under 2,500,000 characters but near 4 MiB rotates, and no write passes 3,900,000 bytes', { timeoutMs: 60_000 }, async ($, on) => {
+    const list = fill(4_100_000)
+    const text = JSON.stringify(list)
+    // what a character count let through: far under its old 3,000,000, while the bytes are near the engine's 4 MiB
+    expect(text.length).toBeLessThan(2_500_000)
+    expect(utf8(text)).toBeGreaterThan(4_000_000)
+    expect(utf8(text)).toBeLessThan(ENGINE_MAX)
+    const env = engine(on, { max: '', files: { [HISTORY]: text } })
+    await start($)
+    expect(await flow($, env)).toContain('ok')
+    const paths = archivePaths(env.files)
+    expect(paths.length).toBeGreaterThan(0)
+    for (const p of [HISTORY, ...paths]) expect(utf8(env.files[p]!)).toBeLessThan(2_500_000)
+    expect(Math.max(...env.fs.tried.map(t => t.bytes))).toBeLessThan(WRITE_MAX)
+    const c = counts(env.files)
+    expect(new Set(c.keys())).toEqual(new Set([`${NOW + MIN}-/work/app`, ...list.map(e => e.id)]))
+    expect([...c.values()].every(n => n === 1)).toBe(true)
+  })
+
+  test('a write over 3,900,000 bytes is never sent: with rotation stopped by an unreadable index, history.json stays as it is and the flow is kept in its side file and the store', { timeoutMs: 60_000 }, async ($, on) => {
+    const list = fill(3_880_000)
+    const text = JSON.stringify(list)
+    const env = engine(on, { max: '', store: { historyShown: true }, files: { [HISTORY]: text, [INDEX]: '{broken' } })
+    await start($)
+    env.clock.now += MIN
+    await progress($, { title: '🚀'.repeat(100), total: 1, done: 1, phase: 'delegate', tasks: Array.from({ length: 100 }, (_, k) => ({ title: `${'🧪'.repeat(99)}${k}`, tier: 'careful' })) })
+    expect(String((await progress($, { finished: true })).result)).toContain('ok')
+    const id = `${env.clock.now}-/work/app`
+    expect(env.files[HISTORY]).toBe(text)
+    expect(env.fs.tried.map(t => t.path)).not.toContain(HISTORY)
+    expect(Math.max(...env.fs.tried.map(t => t.bytes))).toBeLessThan(WRITE_MAX)
+    expect(idsOf(env.files[`${DIR}/history-extra-${env.clock.now}.json`])).toEqual([id])
+    expect((env.store.history as any[]).map(e => e.id)).toEqual([id])
+    await start($)
+    await settle()
+    expect((await view($)).groups[0]).toBe(id)
+  })
+})
+
+describe('two sessions saving at once', () => {
+  const gate = () => {
+    let open!: () => void
+    const p = new Promise<void>(r => (open = r))
+    return { p, open }
+  }
+
+  test('one save overwriting history.json and the index without the other’s flow never loses it: the flow’s side file brings it back', async ($, on) => {
+    const env = engine(on, { store: { historyShown: true }, files: { [HISTORY]: JSON.stringify([entry(1)]) } })
+    await start($)
+    const idA = `${NOW + MIN}-/work/app`
+    const idB = `${NOW + 2 * MIN}-/work/app`
+    const sideA = `${DIR}/history-extra-${NOW + MIN}.json`
+    env.clock.now = NOW + MIN
+    await progress($, { title: 'A', total: 1, done: 1, phase: 'delegate', tasks: [{ title: 'a', tier: 'light' }] })
+    // A is held before its first call; B saves meanwhile up to its history.json write; A then saves whole, B writes
+    // history.json last (without A, read before A wrote it), and A's index, written last, marks A's side file merged.
+    const a = gate()
+    const b = gate()
+    const ai = gate()
+    let isHeld = false
+    let historyWrites = 0
+    let indexWrites = 0
+    env.fs.delay = async (op, path) => {
+      if (op === 'read' && path === sideA && !isHeld) {
+        isHeld = true
+        await a.p
+      } else if (op === 'write' && path === HISTORY && ++historyWrites === 1) {
+        a.open()
+        await b.p
+      } else if (op === 'write' && path === INDEX) {
+        if (++indexWrites === 1) {
+          b.open()
+          await ai.p
+        } else (globalThis as any).setTimeout(ai.open, 20)
+      }
+    }
+    const finishingA = progress($, { finished: true })
+    while (!isHeld) await settle()
+    env.clock.now = NOW + 2 * MIN
+    await progress($, { title: 'B', total: 1, done: 1, phase: 'delegate', tasks: [{ title: 'b', tier: 'light' }] })
+    await progress($, { finished: true })
+    await finishingA
+    env.fs.delay = null
+    // the feared state: history.json is B's, without A, and the index marks A's side file merged
+    expect(idsOf(env.files[HISTORY])).toEqual([idB, 'e1'])
+    expect(JSON.parse(env.files[INDEX]!).merged).toContain(`history-extra-${NOW + MIN}.json`)
+    // the next load reads A back from its side file, in its place in time
+    await start($)
+    await settle()
+    expect((await view($)).groups).toEqual([idB, idA, 'e1'])
+    // and the next save writes every flow into history.json, each once
+    await flow($, env, 'C')
+    expect(idsOf(env.files[HISTORY])).toEqual([`${env.clock.now}-/work/app`, idB, idA, 'e1'])
   })
 })
