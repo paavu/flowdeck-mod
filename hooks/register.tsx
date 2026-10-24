@@ -205,7 +205,7 @@ const noise = (x: number, y: number): number => {
 // so title, bar, percent and the crab live in one drawing; only the count and
 // the dismiss are Buttons beside it.
 const H = 22
-const MAX_BAND_W = 420 // the widest the desktop band's drawing gets, however wide the window
+const MAX_BAND_W = 300 // the widest the desktop band's drawing gets: another mod may put its items beside it
 const BAR_H = 16
 const CRAB_W = 26
 const CELL = 3
@@ -1374,7 +1374,7 @@ export const register: Register = (on, options) => {
       const width = Math.max(180, Math.min(MAX_BAND_W, (e.props.bodyColumns || 100) * 8 - 150))
       return (
         <Box flexDirection="column">
-          <Box flexDirection="row" alignItems="center" gap={1} paddingRight={5}>
+          <Box flexDirection="row" alignItems="center" gap={1} paddingRight={5} flexShrink={1} minWidth={0} overflow="hidden">
             <Svg source={rowSvg(f, width, isWorking)} alt={`${f.title}: ${label(f)}, ${percent}`} width={width} height={H} />
             {crewButton}
             {dismiss}
@@ -1389,7 +1389,7 @@ export const register: Register = (on, options) => {
     const width = Math.max(6, Math.min(30, cols - titleW - 37))
     return (
       <Box flexDirection="column">
-      <Box flexDirection="row" gap={2} paddingRight={5}>
+      <Box flexDirection="row" gap={2} paddingRight={5} flexShrink={1} minWidth={0} overflow="hidden">
         <Box width={titleW} flexShrink={0}>
           <Text color={f.isFinished ? DONE : ACCENT}>● </Text>
           <Text wrap="truncate-end">{f.title}</Text>

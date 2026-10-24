@@ -45,9 +45,11 @@ describe('the band above the prompt', () => {
       const b = await band($, 'desktop', columns)
       const json = JSON.stringify(await b.drawn())
       const w = Number(/"width":(\d+),"height":\d+/.exec(json)?.[1] ?? /width="?(\d+)/.exec(json)?.[1])
-      expect(w).toBeLessThanOrEqual(420)
+      expect(w).toBeLessThanOrEqual(300) // small enough to share a row with a neighbour mod's items
       expect(w).toBeLessThanOrEqual(columns * 8 - 150) // never wider than the slot minus the buttons and the collapse mark
       expect(json).toContain('"paddingRight":5')
+      expect(json).toContain('"flexShrink":1') // it gives way instead of pushing a neighbour out
+      expect(json).toContain('"overflow":"hidden"')
       await b.unmount()
     }
   })
