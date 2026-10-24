@@ -33,6 +33,8 @@ const TOOL = 'mcp__flowdeck__progress'
 const STEP_TOOL = 'mcp__flowdeck__step'
 const PLAN_TOOL = 'mcp__flowdeck__plan'
 const PLAN_SESSIONS = 20
+const PLAN_RULE = `# Progress plans
+A task needing more than ~3 edits or commands gets a plan via ${PLAN_TOOL}: create it once with the full breakdown (2-7 stages of steps {title}, or kind: "todo" for one flat list; titles of at most 4 words, in the user's language; one id per task; the first open step becomes active). Move it with short calls: {id, next:true}, {id, done:["A"], active:"B"}, {id, failed:"B", note}, {id, state:"needs_input", note} before asking the user, {id, state:"done"} to finish. When the plan changes, resend stages under the same id. During a /flowdeck flow, report the flow's tasks with ${TOOL}, not a second plan for the same work. No edit is ever blocked for lack of a plan.`
 const PANE = 'flowdeck-agents'
 const PHASES: readonly Phase[] = ['plan', 'design', 'delegate', 'review', 'close']
 const ACCENT = '#8f8cf4'
@@ -984,6 +986,13 @@ export const register: Register = (on, options) => {
       })()
     })
     return started
+  })
+
+  // A failed composition below still gets the rule rather than an error from here.
+  on('prompt.compose', async ($, e, next) => {
+    const rule = { id: 'flowdeck:plan-rule', text: PLAN_RULE, scope: 'session' as const }
+    const result = await next(e).catch(() => ({ sections: [] }))
+    return { sections: [...(result?.sections ?? []), rule] }
   })
 
   on('command.run', { command: 'flowdeck-agents' }, async $ => {

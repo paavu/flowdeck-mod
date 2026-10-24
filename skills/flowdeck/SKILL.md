@@ -34,6 +34,8 @@ If the tool `mcp__flowdeck__progress` is available, keep it current; skip silent
 - when a new task appears later in the session: `add: [{ title, tier }]` (appends; keeps `done`; a title already in the flow is ignored);
 - when the current work is complete: `phase: "close"`. Set `finished: true` only when the user ends the flow (a linked flow outlives a batch of work);
 
+The flow's worker tasks stay on `progress`. For work outside a flow, or a checklist of your own orchestrator steps, use `mcp__flowdeck__plan`: create it once with `id`, `title` and `stages` (or `kind: "todo"`), then move it with short ops (`{id, next:true}`, `{id, done:[...], active:"..."}`, `{id, failed:"...", note}`, `{id, state:"needs_input", note}`, `{id, state:"done"}`).
+
 When delegating, pass the task's `title` verbatim as the Agent tool's `description` (a return round reuses it too): the agents panel matches runs to planned tasks by it.
 
 ## 1. Understand and plan (orchestrator only)

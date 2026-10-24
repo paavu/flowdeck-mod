@@ -50,3 +50,12 @@ Build, run the mod tests, disable savvy-flow, savvy-progress and context-bar, en
 - Refresh: `turn.complete` plus `session.compact` events; data from `$.session.usage({breakdown:'summary'})`, which carries categories, `rawMaxTokens`, `autoCompactThreshold` and `isAutoCompactEnabled` (see context-bar's `toReading`).
 - Rendering: both paths required, as savvy-progress already splits `e.surface === 'desktop'` (SVG) from terminal (text rows). Verify both at rollout.
 - Outside references to old names: only the `enabledPlugins` entries in `~/.claude/settings.json` (savvy-progress, savvy-flow, context-bar). Replace them with flowdeck at rollout.
+
+## Additions after the first version
+- Usage: the five-hour and weekly limits with reset times, a draining bar, an even-pace mark and a burn forecast (recent ~30 min pace and window average); store key `usageShown`.
+- History: the last 50 flows across projects, newest first, saved on finish, on replacement and as open at session end; store key `history`, toggle `historyShown`, off by default.
+- Plans (ported from plan-progress): the plan model in `hooks/plan.ts` (stages or `kind: "todo"`, short ops, at most 3 plans); the main-session tool `mcp__flowdeck__plan`; the Plans panel section with `Clear finished`; up to 2 open plan rows in the band. Saved per session under store key `plans`, last 20 sessions. A `prompt.compose` section `flowdeck:plan-rule` tells the model when and how to plan; no gate, no sounds, no Stop block, no nudges.
+- Agent state colours and tool word: each agent row names its state (`Running · <tool>` blue-violet, `Needs approval` amber, `Done` green, `Error` red), the same colours as the plan states.
+- Band layout: the flow row first, then the open plan rows, then whatever other mods draw; the row shrinks and clips instead of pushing neighbours; ✕ hides the band only, the Band button or a new flow brings it back.
+- Load order: mods nest in the order of `enabledPlugins`, first outermost; flowdeck must come before next-steps, or next-steps squeezes the band.
+- Deferred: child items per agent come in the next task.
