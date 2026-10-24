@@ -1027,13 +1027,13 @@ export const register: Register = (on, options) => {
         }}
       />
     )
-    const toggles = (
-      <Box key="toggles" flexDirection="row" gap={1}>
-        {toggleCompact}
+    const topToggles = (
+      <Box key="top-toggles" flexDirection="row" gap={1}>
         {toggleContext}
         {toggleUsage}
       </Box>
     )
+    const toggles = toggleCompact
     const isEmpty = list.length === 0 && planned.length === 0
     const summary = `≈${fmtCost(t.cost)}, ${fmtTokens(t.tokens)} ${s.tokensWord}, ${fmtTime(t.time)}`
 
@@ -1046,8 +1046,8 @@ export const register: Register = (on, options) => {
         </Text>
       )
 
-      const dc = rd ? contextSvg(W, rd) : null
-      const contextSection = !p.isContextShown ? null : dc && rd ? (
+      const dc = rd ? contextSvg(W, rd, !p.isContextShown) : null
+      const contextSection = dc && rd ? (
         <Svg source={svg(W, dc.height, dc.body)} alt={`context ${rd.percent}%`} width={W} height={dc.height} />
       ) : (
         <Text dimColor>no context data yet</Text>
@@ -1064,14 +1064,16 @@ export const register: Register = (on, options) => {
         return (
           <Box flexDirection="column" gap={1}>
             <Svg source={compactSvg(W, list, planned, t)} alt={`${list.length} ${s.agentsCount}, ${summary}`} width={W} height={32} />
-            {toggles}
+            {topToggles}
             {contextSection}
             {usageSection}
+            {toggles}
           </Box>
         )
       }
       return (
         <Box flexDirection="column">
+          {topToggles}
           {contextSection}
           {usageSection}
           <Svg source={headerSvg(W, title, t)} alt={title ? `${title}: ${summary}` : summary} width={W} height={headerHeight(title)} />
@@ -1097,9 +1099,9 @@ export const register: Register = (on, options) => {
     // Terminal: the same content in text rows.
     const cols = Math.max(24, e.props.bodyColumns || 40)
     const barW = Math.max(6, Math.min(20, cols - 34))
-    const contextSection = !p.isContextShown ? null : rd && cols >= 20 ? (
+    const contextSection = rd && cols >= 20 ? (
       <Box flexDirection="column">
-        {contextRows(rd, cols).map((line, i) => (
+        {contextRows(rd, cols, !p.isContextShown).map((line, i) => (
           <Text key={`ctx-${i}`} dimColor={i > 1} wrap="truncate-end">
             {line}
           </Text>
@@ -1154,14 +1156,15 @@ export const register: Register = (on, options) => {
 
     return (
       <Box flexDirection="column">
+        {topToggles}
+        {contextSection}
+        {usageSection}
         <Box flexDirection="row" justifyContent="space-between">
           <Text bold wrap="truncate-end">
             {title}
           </Text>
           {toggles}
         </Box>
-        {contextSection}
-        {usageSection}
         <Text dimColor>
           ≈{fmtCost(t.cost)} · {fmtTokens(t.tokens)} {s.tokensWord} · {fmtTime(t.time)}
         </Text>

@@ -60,27 +60,43 @@ describe('context section in the panel', () => {
     await p.unmount()
   })
 
-  test('the Context button hides the section and the choice is stored', async ($, on) => {
+  test('the Context button collapses the section to its head line and bar, and the choice is stored', async ($, on) => {
     const { store } = engine(on)
     await start($)
     await settle()
     let p = await pane($, 'terminal')
     expect(await p.find({ type: 'Button', text: /Context/ })).toBeDefined()
+    expect(await p.find({ type: 'Text', text: /messages 186k/ })).toBeDefined()
     await p.press({ key: 'context' })
     await settle()
     expect(store.contextShown).toBe(false)
     await p.unmount()
     p = await pane($, 'terminal')
-    expect(await p.find({ type: 'Text', text: /of 1M/ })).toBeUndefined()
+    expect(await p.find({ type: 'Text', text: /189k of 1M/ })).toBeDefined() // the head line stays
+    expect(await p.find({ type: 'Text', text: /messages 186k/ })).toBeUndefined() // the legend is gone
     await p.unmount()
   })
 
-  test('a stored hidden choice starts hidden', async ($, on) => {
+  test('the Context and Usage buttons are the first thing in the panel', async ($, on) => {
+    engine(on)
+    await start($)
+    await settle()
+    const p = await pane($, 'terminal')
+    const root: any = await p.drawn()
+    const first = JSON.stringify(root.children?.[0] ?? root)
+    expect(first).toContain('Context')
+    expect(first).toContain('Usage')
+    expect(first).not.toContain('Collapse') // the compact toggle is not in the top row
+    await p.unmount()
+  })
+
+  test('a stored collapsed choice starts collapsed', async ($, on) => {
     engine(on, { store: { contextShown: false } })
     await start($)
     await settle()
     const p = await pane($, 'terminal')
-    expect(await p.find({ type: 'Text', text: /of 1M/ })).toBeUndefined()
+    expect(await p.find({ type: 'Text', text: /of 1M/ })).toBeDefined()
+    expect(await p.find({ type: 'Text', text: /messages 186k/ })).toBeUndefined()
     await p.unmount()
   })
 

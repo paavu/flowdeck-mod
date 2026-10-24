@@ -88,9 +88,10 @@ const headOf = (r: Reading) => `${tokens(r.total)} of ${tokens(r.window)}${r.com
 const esc = (s: string) => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
 
 // The terminal text: the head line, the bar, then the legend lines, none wider than `columns`.
-export function contextRows(r: Reading, columns: number): string[] {
+export function contextRows(r: Reading, columns: number, collapsed = false): string[] {
   const head = `${headOf(r)}  ${r.percent}%`
   const rows = [head.length > columns ? head.slice(0, columns) : head, cells(r, columns).map(c => c.text).join('')]
+  if (collapsed) return rows
   for (const line of legend(r, columns)) {
     rows.push(line.map(s => `${s.kind === 'used' ? '■' : GLYPH[s.kind]} ${s.name} ${tokens(s.tokens)}${s.kind === 'used' ? ` ${share(s.tokens, r.window)}` : ''}`).join(SPLIT))
   }
@@ -98,7 +99,7 @@ export function contextRows(r: Reading, columns: number): string[] {
 }
 
 // The desktop drawing, as the inside of the panel's svg (text uses its `t` and `s` classes): header, proportional bar, legend.
-export function contextSvg(width: number, r: Reading): { height: number; body: string } {
+export function contextSvg(width: number, r: Reading, collapsed = false): { height: number; body: string } {
   const barY = 24
   const barH = 12
   let x = 0
@@ -110,7 +111,7 @@ export function contextSvg(width: number, r: Reading): { height: number; body: s
       return rect
     })
     .join('\n')
-  const lines = legend(r, Math.max(20, Math.floor(width / 7)))
+  const lines = collapsed ? [] : legend(r, Math.max(20, Math.floor(width / 7)))
   const rows = lines
     .map((line, i) => {
       const y = barY + barH + 18 + i * 16
@@ -124,5 +125,5 @@ export function contextSvg(width: number, r: Reading): { height: number; body: s
 <text class="s" x="${width}" y="14" text-anchor="end" font-family="${FONT}" font-size="11" font-variant-numeric="tabular-nums">${esc(headOf(r))}  ${r.percent}%</text>
 ${rects}
 ${rows}`
-  return { height: barY + barH + 22 + Math.max(1, lines.length) * 16, body }
+  return { height: collapsed ? barY + barH + 6 : barY + barH + 22 + Math.max(1, lines.length) * 16, body }
 }

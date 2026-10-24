@@ -70,4 +70,16 @@ describe('context module', () => {
     expect(rows.every(row => row.length <= 60)).toBe(true)
     expect(rows[1]!.length).toBe(60)
   })
+
+  test('collapsed, only the head line and the bar remain', () => {
+    const r = toReading(BREAKDOWN)
+    expect(contextRows(r, 60, true).length).toBe(2)
+    expect(contextRows(r, 60).length).toBeGreaterThan(2)
+    const full = contextSvg(400, r)
+    const small = contextSvg(400, r, true)
+    expect(small.height).toBeLessThan(full.height)
+    expect(small.body).toContain('204k of 1M')
+    expect((small.body.match(/<rect /g) ?? []).length).toBe(r.slices.length)
+    expect(small.body).not.toContain('messages 186k')
+  })
 })
