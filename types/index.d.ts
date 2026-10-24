@@ -120,6 +120,7 @@ declare module 'claude-code' {
       now: number
       history: HistoryEntry[]
       flowMeta: { startedAt: number; project: string } | null
+      plans: TaskPlan[]
     }
   }
 }

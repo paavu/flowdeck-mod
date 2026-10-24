@@ -1,9 +1,10 @@
 import { atom, read, update } from 'claude-code'
 import type { EngineInterface, Register } from 'claude-code'
 
-import type { AgentRun, Flow, HistoryEntry, Panel, Phase, PlannedTask, Reading, Samples, UsageWindow } from '../types'
+import type { AgentRun, Flow, HistoryEntry, Panel, Phase, PlannedTask, Reading, Samples, TaskPlan, UsageWindow } from '../types'
 import { contextRows, contextSvg, toReading } from './context'
 import { addEntry, formatEntry, parseHistory, snapshot } from './history'
+import { isFinished, normalize, placeBar, planId, where } from './plan'
 import { record, toWindows, usageRows, usageSvg } from './usage'
 
 const flow = atom({ plugin: 'flowdeck', key: 'flow' } as const, null)
@@ -23,9 +24,12 @@ const reading = atom({ plugin: 'flowdeck', key: 'reading' } as const, null as Re
 const now = atom({ plugin: 'flowdeck', key: 'now' } as const, 0)
 const history = atom({ plugin: 'flowdeck', key: 'history' } as const, [] as HistoryEntry[])
 const flowMeta = atom({ plugin: 'flowdeck', key: 'flowMeta' } as const, null as { startedAt: number; project: string } | null)
+const plans = atom({ plugin: 'flowdeck', key: 'plans' } as const, [] as TaskPlan[])
 
 const TOOL = 'mcp__flowdeck__progress'
 const STEP_TOOL = 'mcp__flowdeck__step'
+const PLAN_TOOL = 'mcp__flowdeck__plan'
+const PLAN_SESSIONS = 20
 const PANE = 'flowdeck-agents'
 const PHASES: readonly Phase[] = ['plan', 'design', 'delegate', 'review', 'close']
 const ACCENT = '#8f8cf4'
@@ -111,6 +115,8 @@ let lang: Lang = 'en'
 const tr = () => STRINGS[lang]
 // The session's working folder, the project a history entry names; set the same way.
 let project = ''
+// The session the task plans are saved under; empty when session.start named none.
+let sessionId = ''
 
 const isRussian = (v: unknown): boolean => typeof v === 'string' && /^(ru|russian|рус)/i.test(v.trim())
 
@@ -753,6 +759,56 @@ async function recordFlow($: EngineInterface, f: Flow, status: 'finished' | 'ope
   }
 }
 
+type SavedPlans = Record<string, TaskPlan[]>
+
+// The stored plans by session; anything that is not an object of plan arrays reads as empty.
+function parsePlans(v: unknown): SavedPlans {
+  if (!v || typeof v !== 'object' || Array.isArray(v)) return {}
+  const out: SavedPlans = {}
+  for (const [sid, list] of Object.entries(v as Record<string, unknown>)) {
+    if (!Array.isArray(list)) continue
+    const valid = list.filter(
+      (p): p is TaskPlan => !!p && typeof p === 'object' && typeof p.id === 'string' && Array.isArray(p.stages) && typeof p.startedAt === 'number',
+    )
+    if (valid.length) out[sid] = valid
+  }
+  return out
+}
+
+const newest = (list: TaskPlan[]) => Math.max(...list.map(p => p.startedAt))
+
+// Re-reads the store first so other sessions' plans stay; a failed read skips the write rather than overwrite them.
+async function savePlans($: EngineInterface, list: TaskPlan[]): Promise<void> {
+  if (!sessionId) return
+  try {
+    const all = parsePlans(await $.store.get('plans'))
+    if (list.length) all[sessionId] = list
+    else delete all[sessionId]
+    const kept = Object.entries(all)
+      .sort((a, b) => newest(b[1]) - newest(a[1]))
+      .slice(0, PLAN_SESSIONS)
+    await $.store.set('plans', Object.fromEntries(kept)).catch(() => {})
+  } catch {
+    // A failing store costs the save, not the call.
+  }
+}
+
+// A plan left running with every step finished is done once the main turn ends.
+async function closeFinishedPlans($: EngineInterface): Promise<void> {
+  const list = await read($, plans)
+  const isOpen = (p: TaskPlan) => p.state === 'running' && p.stages.some(s => s.steps.length) && p.stages.every(s => s.steps.every(st => isFinished(st.status)))
+  if (!list.some(isOpen)) return
+  const at = await $.clock.now()
+  const next = await update($, plans, prev => prev.map(p => (isOpen(p) ? { ...p, state: 'done' as const, endedAt: at } : p)))
+  await savePlans($, next)
+}
+
+const planLine = (p: TaskPlan): string => {
+  const w = where(p)
+  const active = p.stages.flatMap(s => s.steps).find(st => st.status === 'active')
+  return `${p.id}: ${w.pos}/${w.total}, ${p.state}${active ? `, active "${active.title}"` : ''}`
+}
+
 export const register: Register = (on, options) => {
   on('session.start', async ($, e, next) => {
     const started = await next(e)
@@ -766,6 +822,12 @@ export const register: Register = (on, options) => {
     if (typeof storedHistoryShown === 'boolean') await update($, panel, prev => ({ ...prev, isHistoryShown: storedHistoryShown }))
     const storedHistory = await $.store.get('history').catch(() => undefined)
     await update($, history, () => parseHistory(storedHistory))
+    const sid = (started as { sessionId?: unknown }).sessionId
+    sessionId = typeof sid === 'string' ? sid : ''
+    if (sessionId) {
+      const storedPlans = await $.store.get('plans').catch(() => undefined)
+      await update($, plans, () => parsePlans(storedPlans)[sessionId] ?? [])
+    }
     void refreshContext($).catch(() => {})
     await $.tool.register({
       name: 'progress',
@@ -825,6 +887,40 @@ export const register: Register = (on, options) => {
           note: { type: 'string', description: 'The step in progress, a few words.' },
         },
         required: ['done'],
+      },
+    })
+    const planStep = {
+      type: 'object',
+      properties: {
+        title: { type: 'string', description: 'At most 4 words.' },
+        status: { type: 'string', enum: ['pending', 'active', 'done', 'error', 'skipped'] },
+      },
+      required: ['title'],
+    }
+    await $.tool.register({
+      name: 'plan',
+      description:
+        'Show a plan for any task as a progress bar: stages of steps, or a flat list with kind "todo". ' +
+        'Create it once with id, title and the whole stages list, then move it with short ops: next, done, active, failed, state, note. ' +
+        'Resend stages under the same id when the plan changes; finished steps are kept. Titles of at most 4 words.',
+      inputSchema: {
+        type: 'object',
+        properties: {
+          id: { type: 'string', description: 'Short id of the plan; every later call names it.' },
+          title: { type: 'string', description: 'At most 4 words.' },
+          kind: { type: 'string', enum: ['plan', 'todo'] },
+          stages: {
+            type: 'array',
+            items: { type: 'object', properties: { name: { type: 'string' }, steps: { type: 'array', items: planStep } }, required: ['name', 'steps'] },
+          },
+          next: { type: 'boolean', description: 'Finish the current step and start the next.' },
+          done: { type: 'array', items: { type: 'string' }, description: 'Titles of steps now finished.' },
+          active: { type: 'string', description: 'Title of the step now in progress.' },
+          failed: { type: 'string', description: 'Title of the step that failed.' },
+          state: { type: 'string', enum: ['running', 'needs_input', 'error', 'done'] },
+          note: { type: 'string', description: 'A short line under the bar.' },
+        },
+        required: ['id'],
       },
     })
     await $.command.register({
@@ -900,6 +996,23 @@ export const register: Register = (on, options) => {
       }),
     )
     return { result: 'ok' }
+  })
+
+  // A task plan of the main session; a refused call changes nothing.
+  on('tool.call', { tool: PLAN_TOOL }, async ($, e) => {
+    if (e.agentId) return { result: 'ignored: only the main session plans' }
+    try {
+      const input = e as unknown as Record<string, unknown>
+      const id = planId(input)
+      const list = await read($, plans)
+      const made = normalize(input, list.find(p => p.id === id) ?? null, await $.clock.now(), id)
+      if (typeof made === 'string') return { result: 'flowdeck plan: ' + made }
+      const placed = await update($, plans, prev => placeBar(prev, made))
+      await savePlans($, placed)
+      return { result: planLine(made) }
+    } catch {
+      return { result: 'flowdeck plan: could not update the plan' }
+    }
   })
 
   // Safety net: worker launches move the faint layer even if the orchestrator forgets to report.
@@ -1019,6 +1132,7 @@ export const register: Register = (on, options) => {
     }
     const result = await next(e)
     if (!agentId) await refreshContext($).catch(() => {}) // a subagent's turn fills its own window, not this one
+    if (!agentId) await closeFinishedPlans($).catch(() => {})
     return result
   })
 
