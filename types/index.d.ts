@@ -14,6 +14,8 @@ export type PlannedTask = {
   title: string
   tier: string
   after: number[]
+  mirrored?: boolean
+  counted?: boolean
 }
 
 export type Flow = {

@@ -13,7 +13,7 @@ Task from the user: $ARGUMENTS
 
 ## Starting: with a task, or without
 
-- **With a task** (the text above): run the flow below on that task.
+- **With a task** (the text above): run the flow below on that task. If a flow is already linked in this session, do not send a new plan: add the new task's worker tasks with `progress` `add`, keeping everything already in the flow.
 - **Without a task** (the text above is empty): adopt the work already underway in this session. Read the conversation and the session's task list, list the tasks that are open or already finished, group them into worker tasks with a tier each, and show that plan. Report it with the `progress` tool (`title`, `total`, `tasks`, and `done` for those already finished), then continue the flow from section 1 for the tasks still open. Do not redo finished work.
 
 ## Linked for the whole session
@@ -32,7 +32,7 @@ If the tool `mcp__flowdeck__progress` is available, keep it current; skip silent
 - each time a task is accepted in review: `done` (accepted so far); switch `phase` to `"review"` while reviewing;
 - if re-planning changes the tasks: the new `tasks` and `total`;
 - when a new task appears later in the session: `add: [{ title, tier }]` (appends; keeps `done`; a title already in the flow is ignored);
-- once at close: `finished: true`.
+- when the current work is complete: `phase: "close"`. Set `finished: true` only when the user ends the flow (a linked flow outlives a batch of work);
 
 When delegating, pass the task's `title` verbatim as the Agent tool's `description` (a return round reuses it too): the agents panel matches runs to planned tasks by it.
 

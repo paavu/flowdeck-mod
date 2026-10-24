@@ -58,8 +58,8 @@ const STRINGS = {
     isRunning: 'running',
     isFinished: 'finished',
     isPlanned: 'planned',
-    opened: 'Agents panel opened.',
-    closed: 'Agents panel closed.',
+    opened: 'flowdeck panel opened.',
+    closed: 'flowdeck panel closed.',
     done: 'Done',
     plan: 'Plan',
     design: 'Design',
@@ -86,8 +86,8 @@ const STRINGS = {
     isRunning: 'работает',
     isFinished: 'завершён',
     isPlanned: 'запланирована',
-    opened: 'Панель агентов открыта.',
-    closed: 'Панель агентов закрыта.',
+    opened: 'Панель flowdeck открыта.',
+    closed: 'Панель flowdeck закрыта.',
     done: 'Готово',
     plan: 'План',
     design: 'Дизайн',
@@ -138,14 +138,27 @@ const cleanTasks = (tasks: ProgressInput['tasks']): PlannedTask[] | undefined =>
       after: (t.after ?? []).filter(n => Number.isInteger(n) && n > 0),
     }))
 
+const unionTasks = (kept: PlannedTask[], incoming: PlannedTask[]): PlannedTask[] => {
+  const byTitle = new Map(incoming.map(t => [t.title.toLowerCase(), t]))
+  const old = kept.map(t => {
+    const next = byTitle.get(t.title.toLowerCase())
+    return next ? { ...t, tier: next.tier || t.tier, after: next.after } : t
+  })
+  const have = new Set(kept.map(t => t.title.toLowerCase()))
+  return [...old, ...incoming.filter(t => !have.has(t.title.toLowerCase()))]
+}
+
 const merge = (prev: Flow | null, input: ProgressInput): Flow => {
   // A new title means a new flow: never carry counters over from an earlier one.
   const base = isNewFlow(prev, input) || !prev ? blank() : { ...blank(), ...prev }
-  const planned = cleanTasks(input.tasks) ?? base.tasks
+  const incoming = cleanTasks(input.tasks)
+  // A linked flow never loses a task: a re-plan updates the tasks it names and adds the new ones.
+  const planned = !incoming ? base.tasks : base.isLinked ? unionTasks(base.tasks, incoming) : incoming
   const known = new Set(planned.map(t => t.title.toLowerCase()))
   const fresh = (cleanTasks(input.add) ?? []).filter(t => !known.has(t.title.toLowerCase()) && known.add(t.title.toLowerCase()))
   const tasks = [...planned, ...fresh]
-  const total = Math.max(0, Math.round(input.total ?? (fresh.length && !input.tasks ? base.total + fresh.length : input.tasks ? tasks.length : base.total)))
+  const asked = Math.max(0, Math.round(input.total ?? (fresh.length && !input.tasks ? base.total + fresh.length : input.tasks ? tasks.length : base.total)))
+  const total = base.isLinked ? Math.max(asked, tasks.length) : asked
   const done = Math.min(total || Infinity, Math.max(0, Math.round(input.done ?? base.done)))
   const phase = input.phase && PHASES.includes(input.phase) ? input.phase : base.phase
   return {
@@ -337,6 +350,9 @@ const costOf = (model: string, u: Usage): number => {
 const windowOf = (model: string): number => (/haiku/i.test(model) ? 200_000 : 1_000_000)
 
 // `flowdeck-careful`, or `flowdeck:flowdeck-careful` when the agents ship in a plugin.
+// A worker's type is `flowdeck-careful`, or `flowdeck:flowdeck-careful` when the agents ship in the plugin.
+const isWorker = (type: string): boolean => /^(?:[^:]*:)?flowdeck-/.test(type)
+
 const tierOf = (type: string): string => {
   const bare = type.replace(/^[^:]*:/, '')
   const t = bare.replace(/^flowdeck-/, '').toLowerCase()
@@ -637,10 +653,36 @@ async function refreshContext($: EngineInterface): Promise<void> {
   await update($, reading, () => toReading(b))
 }
 
-async function mirrorTasks($: EngineInterface, titles: string[]): Promise<void> {
-  if (!titles.length) return
-  await update($, flow, prev => (prev && prev.isLinked && !prev.isFinished ? merge(prev, { add: titles.map(title => ({ title, tier: 'medium' })) }) : prev))
+type TodoItem = { title: string; completed: boolean }
+
+// A linked flow takes the session task list's items as planned tasks (medium tier, display only) and counts one done when the list completes it.
+async function mirrorTasks($: EngineInterface, items: TodoItem[]): Promise<void> {
+  if (!items.length) return
+  await update($, flow, prev => {
+    if (!prev || !prev.isLinked || prev.isFinished) return prev
+    const tasks = [...prev.tasks]
+    let total = prev.total
+    let done = prev.done
+    for (const item of items) {
+      const at = tasks.findIndex(t => t.title.toLowerCase() === item.title.toLowerCase())
+      if (at < 0) {
+        tasks.push({ title: item.title, tier: 'medium', after: [], mirrored: true, counted: item.completed })
+        total++
+        if (item.completed) done++
+      } else if (tasks[at]!.mirrored && item.completed && !tasks[at]!.counted) {
+        tasks[at] = { ...tasks[at]!, counted: true }
+        done++
+      }
+    }
+    return { ...prev, tasks, total, done: Math.min(total, done) }
+  })
 }
+
+const todoItems = (todos: unknown): TodoItem[] =>
+  (Array.isArray(todos) ? todos : []).flatMap(t => {
+    const title = typeof t?.content === 'string' ? t.content.trim() : ''
+    return title ? [{ title, completed: t.status === 'completed' }] : []
+  })
 
 // Opens the agents pane, or closes it when it is up; true when it ends up open.
 async function togglePane($: EngineInterface): Promise<boolean> {
@@ -674,7 +716,7 @@ export const register: Register = (on, options) => {
       description:
         'Report /flowdeck progress to the progress bar above the prompt and the agents panel. ' +
         'Call it after presenting the plan (title, total, tasks, phase "delegate"), each time a task is accepted (done), ' +
-        'when switching phase or re-planning (tasks), and once at the end with finished: true. Fields left out keep their previous value.',
+        'when switching phase or re-planning (tasks), phase "close" when the current work is done, and finished: true only when the user ends the flow. Fields left out keep their previous value.',
       inputSchema: {
         type: 'object',
         properties: {
@@ -731,8 +773,8 @@ export const register: Register = (on, options) => {
     })
     await $.command.register({
       name: 'flowdeck-agents',
-      description: 'Show or hide the panel of subagents: running, finished and planned, with model, context, cost and time',
-    })
+      description: 'Show or hide the flowdeck panel: context window, subagents running, finished and planned, with model, cost and time',
+    }).catch(() => {}) // a name Claude Code already has is refused: start anyway
 
     // Ticks the running agents' clocks; quiet when nothing runs.
     $.clock.every(1000, () => {
@@ -754,7 +796,7 @@ export const register: Register = (on, options) => {
   on('tool.call', { tool: TOOL }, async ($, e) => {
     const input = e as unknown as ProgressInput
     const prev = await read($, flow)
-    if (isNewFlow(prev, input) && input.title !== undefined) {
+    if (isNewFlow(prev, input)) {
       // A new flow starts with a clean list; agents still running stay.
       await update($, agents, list => list.filter(a => a.status === 'running'))
     }
@@ -765,14 +807,16 @@ export const register: Register = (on, options) => {
 
   // A linked flow takes every task the session adds: the model's task list items are mirrored as planned tasks.
   on('tool.call', { tool: 'TodoWrite' }, async ($, e, next) => {
-    const todos = (e as unknown as { todos?: { content?: string }[] }).todos ?? []
-    await mirrorTasks($, todos.map(t => String(t.content ?? '').trim()).filter(Boolean)).catch(() => {})
-    return next(e)
+    const result = await next(e)
+    if (!e.agentId) await mirrorTasks($, todoItems((e as unknown as { todos?: unknown }).todos)).catch(() => {}) // a worker's own steps are not session tasks
+    return result
   })
   on('tool.call', { tool: 'TaskCreate' }, async ($, e, next) => {
-    const input = e as unknown as { subject?: string; title?: string }
-    await mirrorTasks($, [String(input.subject ?? input.title ?? '').trim()].filter(Boolean)).catch(() => {})
-    return next(e)
+    const result = await next(e)
+    const input = e as unknown as { subject?: unknown; title?: unknown }
+    const title = typeof input.subject === 'string' ? input.subject.trim() : typeof input.title === 'string' ? input.title.trim() : ''
+    if (!e.agentId && title) await mirrorTasks($, [{ title, completed: false }]).catch(() => {})
+    return result
   })
 
   // A worker's own progress: the call runs in the worker's loop, so agentId names it.
@@ -794,7 +838,7 @@ export const register: Register = (on, options) => {
   // Safety net: worker launches move the faint layer even if the orchestrator forgets to report.
   on('tool.call', { tool: 'Agent' }, async ($, e, next) => {
     const type = String(e.subagent_type ?? '')
-    if (!type.startsWith('flowdeck-')) return next(e)
+    if (!isWorker(type)) return next(e)
 
     await update($, flow, prev => {
       const base = prev && !prev.isFinished ? { ...blank(), ...prev } : blank()
@@ -832,7 +876,7 @@ export const register: Register = (on, options) => {
       return [...list.filter(a => a.id !== run.id), run].slice(-200)
     })
     await update($, now, () => at)
-    if (e.subagentType.startsWith('flowdeck-')) {
+    if (isWorker(e.subagentType)) {
       const f = await read($, flow)
       await autoOpen($, f && !f.isFinished ? f.title : 'flowdeck')
     }
@@ -998,9 +1042,9 @@ export const register: Register = (on, options) => {
       }
       return (
         <Box flexDirection="column">
+          {contextSection}
           <Svg source={headerSvg(W, title, t)} alt={title ? `${title}: ${summary}` : summary} width={W} height={headerHeight(title)} />
           {toggles}
-          {contextSection}
           {isEmpty && <Text dimColor>{s.empty}</Text>}
           {running.length > 0 && section('h-run', `${s.running} · ${running.length}`)}
           {running.map(a => (
