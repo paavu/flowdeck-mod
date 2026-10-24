@@ -96,6 +96,18 @@ export type HistoryEntry = {
   agents?: HistoryAgent[]
 }
 
+/** One archive file in `history-index.json`: its entries summed up. */
+export type HistorySegment = {
+  file: string // `history-<n>.json`
+  count: number
+  from: number // earliest startedAt
+  to: number // latest endedAt
+  cost: number // USD
+  tokens: number
+  time: number // ms
+  size: number // serialized characters
+}
+
 export type Panel = {
   isCompact: boolean
   isDoneCollapsed: boolean
@@ -111,6 +123,12 @@ export type Panel = {
   openFinished: string[]
   /** How many history groups are shown; this session only. */
   historyLimit: number
+  /** The list of archive files is open; this session only. */
+  historyListOpen: boolean
+  /** The archive file shown, null for the latest segment; this session only. */
+  historySegment: string | null
+  /** The archive file that could not be loaded, '' when none; this session only. */
+  historyError: string
   autoOpenedFor: string
 }
 
@@ -141,6 +159,7 @@ declare module 'claude-code' {
       usage: { windows: UsageWindow[]; samples: Samples }
       now: number
       history: HistoryEntry[]
+      segments: HistorySegment[]
       flowMeta: { startedAt: number; project: string } | null
       plans: TaskPlan[]
     }

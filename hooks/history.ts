@@ -1,5 +1,5 @@
 // A record of finished flowdeck flows, kept per project: one entry per flow with its runs, newest first.
-import type { AgentRun, AgentStatus, Flow, HistoryAgent, HistoryEntry, HistoryTask } from '../types'
+import type { AgentRun, AgentStatus, Flow, HistoryAgent, HistoryEntry, HistorySegment, HistoryTask } from '../types'
 import { itemsOf } from './agent-items'
 
 const MAX_TASKS = 100
@@ -8,6 +8,11 @@ export const MAX_TEXT = 200
 export const MAX_AGENTS = 60
 // What one history file should stay under (the engine reads and writes at most 4 MiB a file).
 export const MAX_HISTORY_CHARS = 3_000_000
+// One history file (the active `history.json` or an archive `history-<n>.json`) stays under this.
+export const SEGMENT_MAX = MAX_HISTORY_CHARS
+export const ARCHIVE_FILE = /^history-(\d+)\.json$/
+export const EXTRA_FILE = /^history-extra-\d+(?:-\d+)?\.json$/
+export const archiveNumber = (file: string): number => Number(ARCHIVE_FILE.exec(file)?.[1] ?? 0)
 
 const AGENT_STATUSES: readonly AgentStatus[] = ['running', 'done', 'failed']
 
@@ -108,6 +113,91 @@ export function splitBySize(entries: HistoryEntry[], maxChars: number = MAX_HIST
   return { kept: entries.slice(0, at), overflow: entries.slice(at) }
 }
 
+// One split that always takes at least one entry, so an entry bigger than the limit still moves on.
+const takeSegment = (entries: HistoryEntry[], maxChars: number) => {
+  const s = splitBySize(entries, maxChars)
+  return s.kept.length || !entries.length ? s : { kept: entries.slice(0, 1), overflow: entries.slice(1) }
+}
+
+// Under the limit, nothing moves. Over it, the newest entries within `keepChars` stay active and the rest is cut into
+// archive segments under the limit, oldest first. Keeping half, not all, leaves room: else every later save would
+// push one entry out into an archive of its own.
+export function rotate(entries: HistoryEntry[], maxChars: number = SEGMENT_MAX, keepChars: number = maxChars / 2): { kept: HistoryEntry[]; archives: HistoryEntry[][] } {
+  if (JSON.stringify(entries).length < maxChars) return { kept: entries, archives: [] }
+  const { kept, overflow } = takeSegment(entries, keepChars)
+  const archives: HistoryEntry[][] = []
+  let rest = overflow
+  while (rest.length) {
+    const s = takeSegment(rest, maxChars)
+    archives.unshift(s.kept)
+    rest = s.overflow
+  }
+  return { kept, archives }
+}
+
+export function summarize(file: string, entries: HistoryEntry[], size: number = JSON.stringify(entries).length): HistorySegment {
+  return {
+    file,
+    count: entries.length,
+    from: entries.length ? Math.min(...entries.map(e => e.startedAt)) : 0,
+    to: entries.length ? Math.max(...entries.map(e => e.endedAt)) : 0,
+    cost: entries.reduce((s, e) => s + e.cost, 0),
+    tokens: entries.reduce((s, e) => s + e.tokens, 0),
+    time: entries.reduce((s, e) => s + e.time, 0),
+    size,
+  }
+}
+
+function parseSegment(v: unknown): HistorySegment | null {
+  if (!v || typeof v !== 'object') return null
+  const o = v as Record<string, unknown>
+  const nums = [o.count, o.from, o.to, o.cost, o.tokens, o.time, o.size].map(num)
+  if (typeof o.file !== 'string' || !ARCHIVE_FILE.test(o.file) || nums.some(n => n === null)) return null
+  const [count, from, to, cost, tokens, time, size] = nums as number[]
+  return { file: o.file, count: count!, from: from!, to: to!, cost: cost!, tokens: tokens!, time: time!, size: size! }
+}
+
+// `history-index.json`: the archives' summaries and the side files already merged into the active segment; null when it is no index.
+export function parseIndex(raw: unknown): { segments: HistorySegment[]; merged: string[] } | null {
+  if (!raw || typeof raw !== 'object' || !Array.isArray((raw as { segments?: unknown }).segments)) return null
+  const o = raw as { segments: unknown[]; merged?: unknown }
+  const segments = o.segments.flatMap(v => {
+    const s = parseSegment(v)
+    return s ? [s] : []
+  })
+  const merged = Array.isArray(o.merged) ? o.merged.filter((n): n is string => typeof n === 'string' && EXTRA_FILE.test(n)) : []
+  return { segments, merged }
+}
+
+// The lists as one, each id once, in first-seen order; of two copies the later-ended one is kept.
+export function mergeEntries(...lists: HistoryEntry[][]): HistoryEntry[] {
+  const out: HistoryEntry[] = []
+  const at = new Map<string, number>()
+  for (const e of lists.flat()) {
+    const i = at.get(e.id)
+    if (i === undefined) {
+      at.set(e.id, out.length)
+      out.push(e)
+    } else if (e.endedAt > out[i]!.endedAt) out[i] = e
+  }
+  return out
+}
+
+const canonical = (e: HistoryEntry): string => JSON.stringify(parseHistory([e])[0] ?? e)
+
+// The list without the entries an archive already holds exactly (left behind by a rotation cut short); a changed copy stays.
+export function withoutCopies(list: HistoryEntry[], archived: HistoryEntry[]): { list: HistoryEntry[]; removed: number } {
+  const held = new Map(archived.map(e => [e.id, canonical(e)]))
+  const next = list.filter(e => held.get(e.id) !== canonical(e))
+  return { list: next, removed: list.length - next.length }
+}
+
+// The earliest start and the latest end of the entries.
+export const spanOf = (entries: HistoryEntry[]): { from: number; to: number } => ({
+  from: entries.length ? Math.min(...entries.map(e => e.startedAt)) : 0,
+  to: entries.length ? Math.max(...entries.map(e => e.endedAt)) : 0,
+})
+
 function parseEntry(v: unknown): HistoryEntry | null {
   if (!v || typeof v !== 'object') return null
   const o = v as Record<string, unknown>
@@ -156,6 +246,14 @@ export function entryDate(entry: HistoryEntry, tz?: string): string {
   const isSameDay = start.day === end.day && start.year === end.year
   const from = isSameDay ? '' : `${start.year === end.year ? start.day : `${start.day}, ${start.year}`} → `
   return `${from}${end.day}, ${end.year} · ${end.time}`
+}
+
+// A span of days, `Oct 20 – Oct 26, 2026`; `Dec 28, 2025 – Jan 3, 2026` across a year; `Oct 26, 2026` within one day.
+export function spanText(from: number, to: number, tz?: string): string {
+  const a = partsOf(from, tz)
+  const b = partsOf(to, tz)
+  if (a.day === b.day && a.year === b.year) return `${b.day}, ${b.year}`
+  return a.year === b.year ? `${a.day} – ${b.day}, ${b.year}` : `${a.day}, ${a.year} – ${b.day}, ${b.year}`
 }
 
 // The group's title, its short line (date, done/total, how it ended) and the task lines for an entry without runs.

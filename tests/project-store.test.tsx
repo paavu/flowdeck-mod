@@ -57,6 +57,16 @@ function engine(on: any, opts: Opts = {}) {
     files[e.path] = e.text
     return { value: undefined }
   })
+  on('fs.stat', (_$: any, e: any) => {
+    if (fail.fs || !(e.path in files)) throw new Error('ENOENT')
+    return { value: { kind: 'file', size: files[e.path]!.length, mtimeMs: 0, isLink: false } }
+  })
+  on('fs.list', (_$: any, e: any) => {
+    const pre = `${String(e.path).replace(/\/$/, '')}/`
+    const names = Object.keys(files).filter(p => p.startsWith(pre) && !p.slice(pre.length).includes('/'))
+    if (fail.fs || !names.length) throw new Error('ENOENT')
+    return { value: names.map(p => ({ name: p.slice(pre.length), kind: 'file', size: 0, mtimeMs: 0, isLink: false })) }
+  })
   on('session.usage', () => ({ value: { startedAt: 0, context: { tokens: 0, window: 0, percent: 0 }, rateLimits: [], cost: { usd: 0 } } }))
   return { store, files, writes, clock, fail }
 }
@@ -160,7 +170,7 @@ describe('history in the project folder', () => {
     expect(saved[60]).toBe('Flow 60')
   })
 
-  test('a corrupt file leaves the history empty and the next flow replaces it', async ($, on) => {
+  test('a corrupt file shows no history, is kept as it is, and the next flow goes to a side file and the store', async ($, on) => {
     const { files, store } = engine(on, { store: { historyShown: true, history: [entry(9, '/work/app', 'Mine')] }, files: { [HISTORY]: 'nope' } })
     await start($)
     await settle()
@@ -168,19 +178,22 @@ describe('history in the project folder', () => {
     expect(await p.find({ type: 'Text', text: /no history yet/ })).toBeDefined()
     await p.unmount()
     await flow($)
-    expect(titles(files[HISTORY])).toEqual(['Ship it'])
-    expect((store.history as any[]).length).toBe(1)
+    expect(files[HISTORY]).toBe('nope')
+    expect(titles(files[`${DIR}/history-extra-${NOW}.json`])).toEqual(['Ship it'])
+    expect((store.history as any[]).map(e => e.title)).toEqual(['Ship it', 'Mine'])
   })
 
-  test('a read that rejects (oversized) is treated as empty', async ($, on) => {
-    const { files } = engine(on, { store: { historyShown: true }, tooBig: [HISTORY, PLANS] })
+  test('a file that is there but cannot be read (oversized) is never overwritten', async ($, on) => {
+    const big = JSON.stringify([entry(1)])
+    const { files } = engine(on, { store: { historyShown: true }, files: { [HISTORY]: big }, tooBig: [HISTORY, PLANS] })
     await start($)
     await settle()
     const p = await pane($)
     expect(await p.find({ type: 'Text', text: /no history yet/ })).toBeDefined()
     await p.unmount()
     expect(String((await flow($)).result)).toContain('ok')
-    expect(titles(files[HISTORY])).toEqual(['Ship it'])
+    expect(files[HISTORY]).toBe(big)
+    expect(titles(files[`${DIR}/history-extra-${NOW}.json`])).toEqual(['Ship it'])
   })
 
   test('a missing file imports only this project’s entries from the old store, which stays untouched', async ($, on) => {
