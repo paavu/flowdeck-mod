@@ -37,6 +37,8 @@ const numbers = (body: string) => [...body.matchAll(/\s(?:x|y|width|height|rx|cx
 
 const visibleText = (body: string) => [...body.matchAll(/<text[^>]*>([\s\S]*?)<\/text>/g)].map(m => m[1]!.replace(/<[^>]+>/g, ''))
 
+const PLAN_FOR_PILL = { id: 'p', title: 'T', kind: 'plan', stages: [{ name: 'S', steps: [{ title: 'a', status: 'active', substeps: [] }] }], state: 'running', note: null, startedAt: 0 }
+
 describe('plan state', () => {
   test('each state has its name and colour', () => {
     const cases: [PlanState, string, string][] = [
@@ -248,5 +250,16 @@ describe('planRows', () => {
       expect(rows[0]!.line.length).toBeLessThanOrEqual(Math.max(0, Number.isFinite(columns) ? columns : 0))
     }
     expect(planRows(mid(), NOW, 8)[0]!.line).toBe('42%')
+  })
+
+  test('the pill text is dark on the light pills (amber, green) and white on violet and red', () => {
+    const textFill = (state: string) => {
+      const { body } = planSvg(400, { ...PLAN_FOR_PILL, state } as any, 0)
+      return /<text[^>]*font-weight="600" fill="(#[0-9a-f]{6})">[A-Z]/.exec(body)![1]
+    }
+    expect(textFill('needs_input')).not.toBe('#ffffff')
+    expect(textFill('done')).not.toBe('#ffffff')
+    expect(textFill('running')).toBe('#ffffff')
+    expect(textFill('error')).toBe('#ffffff')
   })
 })

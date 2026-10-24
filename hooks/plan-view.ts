@@ -4,6 +4,7 @@ import type { PlanState, TaskPlan, Where } from './plan'
 
 // the state is drawn by name and colour; these are the only colours on the bar and the pill
 export const STATE_COLOR: Record<PlanState, string> = { running: '#8f8cf4', needs_input: '#e8b13c', error: '#e5534b', done: '#5fbf8f' }
+const PILL_TEXT: Record<PlanState, string> = { running: '#ffffff', needs_input: '#1f1f1f', error: '#ffffff', done: '#1f1f1f' } // dark text on the light pills
 const STATE_NAME: Record<PlanState, string> = { running: 'Running', needs_input: 'Needs input', error: 'Error', done: 'Done' }
 const STATES = Object.keys(STATE_COLOR) as PlanState[]
 
@@ -135,7 +136,7 @@ export function planSvg(width: number, p: TaskPlan, now: number): { height: numb
 
   const pillX = W - pillW
   const body = `${title ? `<text class="t" x="0" y="15" font-family="${FONT}" font-size="13" font-weight="600">${esc(title)}</text>\n` : ''}<rect data-pill="${state}" x="${pillX}" y="1" width="${pillW}" height="${PILL_H}" rx="${PILL_H / 2}" fill="${color}"/>
-<text x="${n1(pillX + pillW / 2)}" y="14" text-anchor="middle" font-family="${FONT}" font-size="11" font-weight="600" fill="#ffffff">${esc(pillLabel)}</text>
+<text x="${n1(pillX + pillW / 2)}" y="14" text-anchor="middle" font-family="${FONT}" font-size="11" font-weight="600" fill="${PILL_TEXT[state]}">${esc(pillLabel)}</text>
 <rect data-track="1" class="k" x="0" y="${TRACK_Y}" width="${trackW}" height="${TRACK_H}" rx="${TRACK_H / 2}"/>
 <rect data-fill="${state}" x="0" y="${TRACK_Y}" width="${n1(fx)}" height="${TRACK_H}" rx="${n1(Math.min(TRACK_H, fx) / 2)}" fill="${color}"/>
 ${ticks}${mark}
