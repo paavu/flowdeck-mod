@@ -12,7 +12,7 @@
 
 ## Global Constraints
 
-- Location: `/Users/user/www/paavu/claude/server-setup/claude-mods/flowdeck/`, listed in `claude-mods/.claude-plugin/marketplace.json` (marketplace `coooloz-mods`), row added to `claude-mods/README.md`.
+- Location: `/Users/user/www/paavu/claude/server-setup/claude-mods/flowdeck/`, listed in `claude-mods/.claude-plugin/marketplace.json` (marketplace `paavu-mods`), row added to `claude-mods/README.md`.
 - Commands exactly `/flowdeck` (skill, `argument-hint: [task]`) and `/flowdeck-agents` (command). No `/context-bar`, no `/agents-info`, never `/context`.
 - Tools `mcp__flowdeck__progress` and `mcp__flowdeck__step`; pane id `flowdeck-agents`, pane title `flowdeck` (shown on the side panel's tab, in every language); atom plugin key `flowdeck`; store key `contextShown` (global, default shown).
 - Agents renamed `flowdeck-fable|heavy|careful|medium|light` with unchanged models and efforts.
@@ -103,6 +103,6 @@
 - Modify: `~/.claude/settings.json` (`enabledPlugins`), `~/.claude/projects/-Users-user-www-paavu-claude-server-setup/memory/reference_claude_inventory.md`, `reference_claude_mods.md`
 
 - [ ] **Step 1: Back up** `~/.claude/settings.json` to `settings.json.pre-flowdeck`.
-- [ ] **Step 2: Install** `claude plugin marketplace add /Users/user/www/paavu/claude/server-setup/claude-mods` (if not already added) then `claude plugin disable savvy-flow@claude-kit savvy-progress@claude-kit context-bar@claude-code-mods` one at a time, then `claude plugin install flowdeck@coooloz-mods --scope user`.
+- [ ] **Step 2: Install** `claude plugin marketplace add /Users/user/www/paavu/claude/server-setup/claude-mods` (if not already added) then `claude plugin disable savvy-flow@claude-kit savvy-progress@claude-kit context-bar@claude-code-mods` one at a time, then `claude plugin install flowdeck@paavu-mods --scope user`.
 - [ ] **Step 3: Verify** in a new session (user): `/flowdeck-agents` opens the panel with the context section at the top, the Context button hides and shows it and the choice survives a restart, `/flowdeck <task>` starts a flow, a bare `/flowdeck` adopts the running tasks, a task added afterwards appears in the panel, both desktop and terminal views, and `/remote-control` still connects.
 - [ ] **Step 4: After the user's go-ahead**, uninstall the three originals (`claude plugin uninstall ...`) and log flowdeck as kept and the three as replaced in the mod ledger; add flowdeck to `reference_claude_mods.md`.

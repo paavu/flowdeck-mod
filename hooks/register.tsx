@@ -1,15 +1,18 @@
 import { atom, read, update } from 'claude-code'
 import type { EngineInterface, Register } from 'claude-code'
 
-import type { AgentRun, Flow, Panel, Phase, PlannedTask } from '../types'
+import type { AgentRun, Flow, Panel, Phase, PlannedTask, Reading } from '../types'
+import { contextRows, contextSvg, toReading } from './context'
 
 const flow = atom({ plugin: 'flowdeck', key: 'flow' } as const, null)
 const agents = atom({ plugin: 'flowdeck', key: 'agents' } as const, [])
 const panel = atom({ plugin: 'flowdeck', key: 'panel' } as const, {
   isCompact: false,
   isDoneCollapsed: false,
+  isContextShown: true,
   autoOpenedFor: '',
 })
+const reading = atom({ plugin: 'flowdeck', key: 'reading' } as const, null as Reading | null)
 const now = atom({ plugin: 'flowdeck', key: 'now' } as const, 0)
 
 const TOOL = 'mcp__flowdeck__progress'
@@ -620,6 +623,14 @@ const ctxBar = (pct: number, width: number): string => {
 
 const STATUS_GLYPH: Record<string, string> = { running: '●', done: '✓', failed: '✗', planned: '◷' }
 
+// Asks the engine for /context's breakdown, estimated locally (no token-count calls).
+async function refreshContext($: EngineInterface): Promise<void> {
+  const usage = await $.session.usage({ breakdown: 'summary' })
+  const b = usage.context.breakdown
+  if (!b || !(b.rawMaxTokens > 0)) return // no window to measure against
+  await update($, reading, () => toReading(b))
+}
+
 // Opens the agents pane, or closes it when it is up; true when it ends up open.
 async function togglePane($: EngineInterface): Promise<boolean> {
   const isOpen = (await $.ui.panes()).some(p => p.id === PANE)
@@ -644,6 +655,9 @@ export const register: Register = (on, options) => {
   on('session.start', async ($, e, next) => {
     const started = await next(e)
     lang = await detectLang($, options.language)
+    const stored = await $.store.get('contextShown').catch(() => undefined)
+    if (typeof stored === 'boolean') await update($, panel, prev => ({ ...prev, isContextShown: stored }))
+    void refreshContext($).catch(() => {})
     await $.tool.register({
       name: 'progress',
       description:
@@ -856,7 +870,15 @@ export const register: Register = (on, options) => {
       )
       await update($, now, () => at)
     }
-    return next(e)
+    const result = await next(e)
+    if (!agentId) await refreshContext($).catch(() => {}) // a subagent's turn fills its own window, not this one
+    return result
+  })
+
+  on('session.compact', async ($, e, next) => {
+    const result = await next(e)
+    if (!e.agentId && 'messages' in result) void refreshContext($).catch(() => {}) // a /compact empties the window without a turn ending
+    return result
   })
 
   on('ui.render', { component: 'Pane', requestId: PANE }, async ($, e) => {
@@ -866,6 +888,7 @@ export const register: Register = (on, options) => {
     const list = await read($, agents)
     const f = await read($, flow)
     const p: Panel = await read($, panel)
+    const rd = await read($, reading)
     const at = Math.max(await read($, now), ...list.map(a => a.startedAt), 0)
 
     const running = list.filter(a => a.status === 'running').reverse()
@@ -891,6 +914,24 @@ export const register: Register = (on, options) => {
         onPress={() => update($, panel, prev => ({ ...prev, isDoneCollapsed: !prev.isDoneCollapsed }))}
       />
     )
+    const toggleContext = (
+      <Button
+        key="context"
+        label={`${p.isContextShown ? '▾' : '▸'} Context`}
+        plain
+        onPress={async () => {
+          const shown = !p.isContextShown
+          await update($, panel, prev => ({ ...prev, isContextShown: shown }))
+          await $.store.set('contextShown', shown).catch(() => {})
+        }}
+      />
+    )
+    const toggles = (
+      <Box key="toggles" flexDirection="row" gap={1}>
+        {toggleCompact}
+        {toggleContext}
+      </Box>
+    )
     const isEmpty = list.length === 0 && planned.length === 0
     const summary = `≈${fmtCost(t.cost)}, ${fmtTokens(t.tokens)} ${s.tokensWord}, ${fmtTime(t.time)}`
 
@@ -903,18 +944,27 @@ export const register: Register = (on, options) => {
         </Text>
       )
 
+      const dc = rd ? contextSvg(W, rd) : null
+      const contextSection = !p.isContextShown ? null : dc && rd ? (
+        <Svg source={svg(W, dc.height, dc.body)} alt={`context ${rd.percent}%`} width={W} height={dc.height} />
+      ) : (
+        <Text dimColor>no context data yet</Text>
+      )
+
       if (p.isCompact) {
         return (
           <Box flexDirection="column" gap={1}>
             <Svg source={compactSvg(W, list, planned, t)} alt={`${list.length} ${s.agentsCount}, ${summary}`} width={W} height={32} />
-            {toggleCompact}
+            {toggles}
+            {contextSection}
           </Box>
         )
       }
       return (
         <Box flexDirection="column">
           <Svg source={headerSvg(W, title, t)} alt={title ? `${title}: ${summary}` : summary} width={W} height={headerHeight(title)} />
-          {toggleCompact}
+          {toggles}
+          {contextSection}
           {isEmpty && <Text dimColor>{s.empty}</Text>}
           {running.length > 0 && section('h-run', `${s.running} · ${running.length}`)}
           {running.map(a => (
@@ -936,6 +986,17 @@ export const register: Register = (on, options) => {
     // Terminal: the same content in text rows.
     const cols = Math.max(24, e.props.bodyColumns || 40)
     const barW = Math.max(6, Math.min(20, cols - 34))
+    const contextSection = !p.isContextShown ? null : rd && cols >= 20 ? (
+      <Box flexDirection="column">
+        {contextRows(rd, cols).map((line, i) => (
+          <Text key={`ctx-${i}`} dimColor={i > 1} wrap="truncate-end">
+            {line}
+          </Text>
+        ))}
+      </Box>
+    ) : (
+      <Text dimColor>no context data yet</Text>
+    )
     const row = (a: AgentRun) => {
       const tier = tierOf(a.type)
       const color = colorOf(tier)
@@ -975,8 +1036,9 @@ export const register: Register = (on, options) => {
           <Text bold wrap="truncate-end">
             {title}
           </Text>
-          {toggleCompact}
+          {toggles}
         </Box>
+        {contextSection}
         <Text dimColor>
           ≈{fmtCost(t.cost)} · {fmtTokens(t.tokens)} {s.tokensWord} · {fmtTime(t.time)}
         </Text>

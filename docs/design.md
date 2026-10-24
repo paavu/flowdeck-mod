@@ -25,7 +25,7 @@ One personal Claude Code mod that replaces three installed ones: **savvy-flow** 
 - Any change that leaves `ANTHROPIC_BASE_URL` set or blocks Remote Control.
 
 ## Constraints
-- Lives in `server-setup/claude-mods/flowdeck/`, registered in that marketplace (`coooloz-mods`), same layout as the other mods there.
+- Lives in `server-setup/claude-mods/flowdeck/`, registered in that marketplace (`paavu-mods`), same layout as the other mods there.
 - Built from the sources in `~/.claude/plugins/cache/claude-kit/{savvy-flow,savvy-progress}/1.2.0` (MIT, johnnyvizz) and `claude-code-mods/context-bar/0.1.2` (hamzafer, MIT, checked 2026-10-24; keep both copyright notices in a LICENSE/NOTICE file).
 - Context data comes from `$.session.usage({breakdown:'summary'})`, as context-bar does.
 

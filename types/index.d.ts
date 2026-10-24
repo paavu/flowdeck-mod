@@ -53,6 +53,7 @@ export type AgentRun = {
 export type Panel = {
   isCompact: boolean
   isDoneCollapsed: boolean
+  isContextShown: boolean
   autoOpenedFor: string
 }
 
@@ -62,6 +63,7 @@ declare module 'claude-code' {
       flow: Flow | null
       agents: AgentRun[]
       panel: Panel
+      reading: Reading | null
       now: number
     }
   }

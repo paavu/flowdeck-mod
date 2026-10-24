@@ -22,8 +22,8 @@ An orchestrated delivery flow for Claude Code with a live side panel. The sessio
 
 ## Install (fresh machine)
 ```
-claude plugin marketplace add <owner>/<repo>      # the coooloz-mods marketplace
-claude plugin install flowdeck@coooloz-mods
+claude plugin marketplace add <owner>/<repo>      # the paavu-mods marketplace
+claude plugin install flowdeck@paavu-mods
 ```
 Disable or uninstall savvy-flow, savvy-progress and context-bar first: flowdeck replaces all three.
 
