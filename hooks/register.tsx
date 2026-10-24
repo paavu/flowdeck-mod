@@ -4,7 +4,8 @@ import type { EngineInterface, Register } from 'claude-code'
 import type { AgentRun, Flow, HistoryEntry, Panel, Phase, PlannedTask, Reading, Samples, TaskPlan, UsageWindow } from '../types'
 import { contextRows, contextSvg, toReading } from './context'
 import { addEntry, formatEntry, parseHistory, snapshot } from './history'
-import { importPlan, isFinished, normalize, PLAN_ID, placeBar, planId, str, where } from './plan'
+import { importPlan, isFinished, normalize, percent, PLAN_ID, placeBar, planId, str, where } from './plan'
+import { planRows, planSvg, stateLabel } from './plan-view'
 import { record, toWindows, usageRows, usageSvg } from './usage'
 
 const flow = atom({ plugin: 'flowdeck', key: 'flow' } as const, null)
@@ -14,6 +15,7 @@ const panel = atom({ plugin: 'flowdeck', key: 'panel' } as const, {
   isDoneCollapsed: false,
   isContextShown: true,
   isUsageShown: true,
+  isPlansShown: true,
   isBandHidden: false,
   isHistoryShown: false,
   openEntries: [] as string[],
@@ -818,6 +820,8 @@ export const register: Register = (on, options) => {
     if (typeof stored === 'boolean') await update($, panel, prev => ({ ...prev, isContextShown: stored }))
     const storedUsage = await $.store.get('usageShown').catch(() => undefined)
     if (typeof storedUsage === 'boolean') await update($, panel, prev => ({ ...prev, isUsageShown: storedUsage }))
+    const storedPlansShown = await $.store.get('plansShown').catch(() => undefined)
+    if (typeof storedPlansShown === 'boolean') await update($, panel, prev => ({ ...prev, isPlansShown: storedPlansShown }))
     const storedHistoryShown = await $.store.get('historyShown').catch(() => undefined)
     if (typeof storedHistoryShown === 'boolean') await update($, panel, prev => ({ ...prev, isHistoryShown: storedHistoryShown }))
     const storedHistory = await $.store.get('history').catch(() => undefined)
@@ -1220,6 +1224,7 @@ export const register: Register = (on, options) => {
     const rd = await read($, reading)
     const us = await read($, usageState)
     const hist = await read($, history)
+    const planList = await read($, plans)
     const clockNow = await $.clock.now()
     const at = Math.max(await read($, now), ...list.map(a => a.startedAt), 0)
 
@@ -1270,6 +1275,29 @@ export const register: Register = (on, options) => {
         }}
       />
     )
+    const togglePlans = (
+      <Button
+        key="plans"
+        label={`${p.isPlansShown ? '▾' : '▸'} Plans`}
+        plain
+        onPress={async () => {
+          const shown = !p.isPlansShown
+          await update($, panel, prev => ({ ...prev, isPlansShown: shown }))
+          await $.store.set('plansShown', shown).catch(() => {})
+        }}
+      />
+    )
+    const clearPlans = planList.some(pl => pl.state === 'done') ? (
+      <Button
+        key="plans-clear"
+        label="Clear finished"
+        plain
+        onPress={async () => {
+          const next = await update($, plans, prev => prev.filter(pl => pl.state !== 'done'))
+          await savePlans($, next)
+        }}
+      />
+    ) : null
     const toggleBand = (
       <Button
         key="band"
@@ -1297,6 +1325,7 @@ export const register: Register = (on, options) => {
       <Box key="top-toggles" flexDirection="row" gap={1}>
         {toggleContext}
         {toggleUsage}
+        {togglePlans}
         {toggleBand}
         {toggleHistory}
       </Box>
@@ -1362,6 +1391,18 @@ export const register: Register = (on, options) => {
         <Text dimColor>no usage data yet</Text>
       )
 
+      const plansSection = !p.isPlansShown ? null : planList.length ? (
+        <Box key="plans-section" flexDirection="column" gap={1}>
+          {planList.map(pl => {
+            const d = planSvg(W, pl, clockNow)
+            return <Svg key={`plan-view-${pl.id}`} source={svg(W, d.height, d.body)} alt={`${pl.title}: ${stateLabel(pl)}, ${percent(pl, where(pl))}%`} width={W} height={d.height} />
+          })}
+          {clearPlans}
+        </Box>
+      ) : (
+        <Text dimColor>no plans yet</Text>
+      )
+
       if (p.isCompact) {
         return (
           <Box flexDirection="column" gap={1}>
@@ -1369,6 +1410,7 @@ export const register: Register = (on, options) => {
             {topToggles}
             {contextSection}
             {usageSection}
+            {plansSection}
             {toggles}
             {historySection}
           </Box>
@@ -1379,6 +1421,7 @@ export const register: Register = (on, options) => {
           {topToggles}
           {contextSection}
           {usageSection}
+          {plansSection}
           <Svg source={headerSvg(W, title, t)} alt={title ? `${title}: ${summary}` : summary} width={W} height={headerHeight(title)} />
           {toggles}
           {isEmpty && <Text dimColor>{s.empty}</Text>}
@@ -1425,6 +1468,22 @@ export const register: Register = (on, options) => {
     ) : (
       <Text dimColor>no usage data yet</Text>
     )
+    const plansSection = !p.isPlansShown ? null : planList.length ? (
+      <Box flexDirection="column">
+        {planList.map(pl => (
+          <Box key={`plan-view-${pl.id}`} flexDirection="column">
+            {planRows(pl, clockNow, cols).map((r, i) => (
+              <Text key={`plan-${pl.id}-${i}`} bold={r.kind === 'head'} dimColor={r.kind === 'note'} color={r.kind === 'bar' ? r.color : undefined} wrap="truncate-end">
+                {r.line}
+              </Text>
+            ))}
+          </Box>
+        ))}
+        {clearPlans}
+      </Box>
+    ) : (
+      <Text dimColor>no plans yet</Text>
+    )
     const row = (a: AgentRun) => {
       const tier = tierOf(a.type)
       const color = colorOf(tier)
@@ -1463,6 +1522,7 @@ export const register: Register = (on, options) => {
         {topToggles}
         {contextSection}
         {usageSection}
+        {plansSection}
         <Box flexDirection="row" justifyContent="space-between">
           <Text bold wrap="truncate-end">
             {title}

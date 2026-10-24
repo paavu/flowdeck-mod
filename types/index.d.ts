@@ -86,6 +86,7 @@ export type Panel = {
   isDoneCollapsed: boolean
   isContextShown: boolean
   isUsageShown: boolean
+  isPlansShown: boolean
   isBandHidden: boolean
   isHistoryShown: boolean
   openEntries: string[]
