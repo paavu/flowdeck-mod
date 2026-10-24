@@ -37,7 +37,7 @@ describe('the band above the prompt', () => {
     await b.unmount()
   })
 
-  test('fills the available width, leaves the right edge clear and can still give way', async ($, on) => {
+  test('fills the available width, runs to the right edge and can still give way', async ($, on) => {
     engine(on)
     await start($)
     await plan($)
@@ -45,24 +45,23 @@ describe('the band above the prompt', () => {
       const b = await band($, 'desktop', columns)
       const json = JSON.stringify(await b.drawn())
       const w = Number(/"width":(\d+),"height":\d+/.exec(json)?.[1] ?? /width="?(\d+)/.exec(json)?.[1])
-      const slot = Math.min(1600, columns * 8 - 150)
+      const slot = Math.min(1600, columns * 8 - 96)
       expect(w).toBeLessThanOrEqual(slot)
       expect(w).toBeGreaterThanOrEqual(slot - 1) // it fills the width that is there, like the other bars
-      expect(w).toBeLessThanOrEqual(columns * 8 - 150) // never wider than the slot minus the buttons and the collapse mark
-      expect(json).toContain('"paddingRight":5')
+            expect(json).not.toContain('"paddingRight"') // the row runs to the right edge like the other bars
       expect(json).toContain('"flexShrink":1') // it gives way instead of pushing a neighbour out
       expect(json).toContain('"overflow":"hidden"')
       await b.unmount()
     }
   })
 
-  test('the terminal band keeps the right edge clear and stacks with the rest', async ($, on) => {
+  test('the terminal band stacks with the rest and runs to the right edge', async ($, on) => {
     engine(on)
     await start($)
     await plan($)
     const b = await band($, 'terminal', 60)
     const json = JSON.stringify(await b.drawn())
-    expect(json).toContain('"paddingRight":5')
+    expect(json).not.toContain('"paddingRight"')
     expect(json).toContain('band below')
     await b.unmount()
   })

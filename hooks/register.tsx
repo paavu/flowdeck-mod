@@ -1369,12 +1369,12 @@ export const register: Register = (on, options) => {
 
     if ('Svg' in ui) {
       const { Svg } = ui
-      // About 8 CSS px per reported column; the count, the dismiss, their gaps and the host's collapse mark
-      // (the right edge stays clear) take the rest. Capped so a wide window does not stretch the row.
-      const width = Math.max(180, Math.min(MAX_BAND_W, (e.props.bodyColumns || 100) * 8 - 150))
+      // About 8 CSS px per reported column; the count, the dismiss and their gaps take the rest, so the row
+      // runs to the right edge like the other bars.
+      const width = Math.max(180, Math.min(MAX_BAND_W, (e.props.bodyColumns || 100) * 8 - 96))
       return (
         <Box flexDirection="column">
-          <Box flexDirection="row" alignItems="center" gap={1} paddingRight={5} flexShrink={1} minWidth={0} overflow="hidden">
+          <Box flexDirection="row" alignItems="center" gap={1} flexShrink={1} minWidth={0} overflow="hidden">
             <Svg source={rowSvg(f, width, isWorking)} alt={`${f.title}: ${label(f)}, ${percent}`} width={width} height={H} />
             {crewButton}
             {dismiss}
@@ -1386,10 +1386,10 @@ export const register: Register = (on, options) => {
 
     const cols = e.props.bodyColumns
     const titleW = Math.max(8, Math.min(30, f.title.length + 2, Math.floor(cols / 3)))
-    const width = Math.max(6, Math.min(30, cols - titleW - 37))
+    const width = Math.max(6, Math.min(40, cols - titleW - 32))
     return (
       <Box flexDirection="column">
-      <Box flexDirection="row" gap={2} paddingRight={5} flexShrink={1} minWidth={0} overflow="hidden">
+      <Box flexDirection="row" gap={2} flexShrink={1} minWidth={0} overflow="hidden">
         <Box width={titleW} flexShrink={0}>
           <Text color={f.isFinished ? DONE : ACCENT}>● </Text>
           <Text wrap="truncate-end">{f.title}</Text>
