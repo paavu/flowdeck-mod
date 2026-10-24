@@ -1,15 +1,9 @@
+import type { Sample, Samples, UsageWindow } from '../types'
+export type { Sample, Samples, UsageWindow }
+
 // Rate-limit usage for the flowdeck panel: the session and weekly windows, and a forecast of whether the pace burns them before the reset.
 
 export type Rate = { kind: string; percentUsed: number; resetsAt?: string }
-export type UsageWindow = {
-  kind: 'five_hour' | 'seven_day'
-  label: string
-  percent: number
-  resetsAt: number | null
-  length: number
-}
-export type Sample = { at: number; pct: number }
-export type Samples = Record<string, Sample[]>
 export type Projection = { atReset: number; hitsAt?: number }
 export type Forecast = {
   expected: number // percent used if the pace were perfectly even

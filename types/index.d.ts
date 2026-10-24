@@ -8,6 +8,16 @@ export type Reading = {
   compactsAt?: number // where auto-compaction runs, when it is on
 }
 
+export type UsageWindow = {
+  kind: 'five_hour' | 'seven_day'
+  label: string
+  percent: number
+  resetsAt: number | null
+  length: number
+}
+export type Sample = { at: number; pct: number }
+export type Samples = Record<string, Sample[]>
+
 export type Phase = 'plan' | 'design' | 'delegate' | 'review' | 'close'
 
 export type PlannedTask = {
@@ -57,6 +67,7 @@ export type Panel = {
   isCompact: boolean
   isDoneCollapsed: boolean
   isContextShown: boolean
+  isUsageShown: boolean
   autoOpenedFor: string
 }
 
@@ -67,6 +78,7 @@ declare module 'claude-code' {
       agents: AgentRun[]
       panel: Panel
       reading: Reading | null
+      usage: { windows: UsageWindow[]; samples: Samples }
       now: number
     }
   }

@@ -1,8 +1,9 @@
 import { atom, read, update } from 'claude-code'
 import type { EngineInterface, Register } from 'claude-code'
 
-import type { AgentRun, Flow, Panel, Phase, PlannedTask, Reading } from '../types'
+import type { AgentRun, Flow, Panel, Phase, PlannedTask, Reading, Samples, UsageWindow } from '../types'
 import { contextRows, contextSvg, toReading } from './context'
+import { record, toWindows, usageRows, usageSvg } from './usage'
 
 const flow = atom({ plugin: 'flowdeck', key: 'flow' } as const, null)
 const agents = atom({ plugin: 'flowdeck', key: 'agents' } as const, [])
@@ -10,8 +11,10 @@ const panel = atom({ plugin: 'flowdeck', key: 'panel' } as const, {
   isCompact: false,
   isDoneCollapsed: false,
   isContextShown: true,
+  isUsageShown: true,
   autoOpenedFor: '',
 })
+const usageState = atom({ plugin: 'flowdeck', key: 'usage' } as const, { windows: [] as UsageWindow[], samples: {} as Samples })
 const reading = atom({ plugin: 'flowdeck', key: 'reading' } as const, null as Reading | null)
 const now = atom({ plugin: 'flowdeck', key: 'now' } as const, 0)
 
@@ -645,12 +648,14 @@ const ctxBar = (pct: number, width: number): string => {
 
 const STATUS_GLYPH: Record<string, string> = { running: '●', done: '✓', failed: '✗', planned: '◷' }
 
-// Asks the engine for /context's breakdown, estimated locally (no token-count calls).
+// Asks the engine for /context's breakdown (estimated locally, no token-count calls) and the rate-limit windows, in one call.
 async function refreshContext($: EngineInterface): Promise<void> {
-  const usage = await $.session.usage({ breakdown: 'summary' })
-  const b = usage.context.breakdown
-  if (!b || !(b.rawMaxTokens > 0)) return // no window to measure against
-  await update($, reading, () => toReading(b))
+  const u = await $.session.usage({ breakdown: 'summary' })
+  const b = u.context.breakdown
+  if (b && b.rawMaxTokens > 0) await update($, reading, () => toReading(b)) // otherwise there is no window to measure against
+  const windows = toWindows(Array.isArray(u.rateLimits) ? u.rateLimits : [])
+  const at = await $.clock.now()
+  await update($, usageState, prev => ({ windows, samples: record(prev.samples, windows, at) }))
 }
 
 type TodoItem = { title: string; completed: boolean }
@@ -710,6 +715,8 @@ export const register: Register = (on, options) => {
     lang = await detectLang($, options.language)
     const stored = await $.store.get('contextShown').catch(() => undefined)
     if (typeof stored === 'boolean') await update($, panel, prev => ({ ...prev, isContextShown: stored }))
+    const storedUsage = await $.store.get('usageShown').catch(() => undefined)
+    if (typeof storedUsage === 'boolean') await update($, panel, prev => ({ ...prev, isUsageShown: storedUsage }))
     void refreshContext($).catch(() => {})
     await $.tool.register({
       name: 'progress',
@@ -969,6 +976,8 @@ export const register: Register = (on, options) => {
     const f = await read($, flow)
     const p: Panel = await read($, panel)
     const rd = await read($, reading)
+    const us = await read($, usageState)
+    const clockNow = await $.clock.now()
     const at = Math.max(await read($, now), ...list.map(a => a.startedAt), 0)
 
     const running = list.filter(a => a.status === 'running').reverse()
@@ -1006,10 +1015,23 @@ export const register: Register = (on, options) => {
         }}
       />
     )
+    const toggleUsage = (
+      <Button
+        key="usage"
+        label={`${p.isUsageShown ? '▾' : '▸'} Usage`}
+        plain
+        onPress={async () => {
+          const shown = !p.isUsageShown
+          await update($, panel, prev => ({ ...prev, isUsageShown: shown }))
+          await $.store.set('usageShown', shown).catch(() => {})
+        }}
+      />
+    )
     const toggles = (
       <Box key="toggles" flexDirection="row" gap={1}>
         {toggleCompact}
         {toggleContext}
+        {toggleUsage}
       </Box>
     )
     const isEmpty = list.length === 0 && planned.length === 0
@@ -1031,18 +1053,27 @@ export const register: Register = (on, options) => {
         <Text dimColor>no context data yet</Text>
       )
 
+      const du = us.windows.length ? usageSvg(W, us.windows, us.samples, clockNow) : null
+      const usageSection = !p.isUsageShown ? null : du ? (
+        <Svg source={svg(W, du.height, du.body)} alt={us.windows.map(w => `${w.label} ${w.percent}% used`).join(', ')} width={W} height={du.height} />
+      ) : (
+        <Text dimColor>no usage data yet</Text>
+      )
+
       if (p.isCompact) {
         return (
           <Box flexDirection="column" gap={1}>
             <Svg source={compactSvg(W, list, planned, t)} alt={`${list.length} ${s.agentsCount}, ${summary}`} width={W} height={32} />
             {toggles}
             {contextSection}
+            {usageSection}
           </Box>
         )
       }
       return (
         <Box flexDirection="column">
           {contextSection}
+          {usageSection}
           <Svg source={headerSvg(W, title, t)} alt={title ? `${title}: ${summary}` : summary} width={W} height={headerHeight(title)} />
           {toggles}
           {isEmpty && <Text dimColor>{s.empty}</Text>}
@@ -1076,6 +1107,17 @@ export const register: Register = (on, options) => {
       </Box>
     ) : (
       <Text dimColor>no context data yet</Text>
+    )
+    const usageSection = !p.isUsageShown ? null : us.windows.length ? (
+      <Box flexDirection="column">
+        {usageRows(us.windows, us.samples, clockNow, cols).map((line, i) => (
+          <Text key={`use-${i}`} dimColor={i % 3 !== 1} wrap="truncate-end">
+            {line}
+          </Text>
+        ))}
+      </Box>
+    ) : (
+      <Text dimColor>no usage data yet</Text>
     )
     const row = (a: AgentRun) => {
       const tier = tierOf(a.type)
@@ -1119,6 +1161,7 @@ export const register: Register = (on, options) => {
           {toggles}
         </Box>
         {contextSection}
+        {usageSection}
         <Text dimColor>
           ≈{fmtCost(t.cost)} · {fmtTokens(t.tokens)} {s.tokensWord} · {fmtTime(t.time)}
         </Text>

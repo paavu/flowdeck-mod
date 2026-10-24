@@ -14,6 +14,7 @@ An orchestrated delivery flow for Claude Code with a live side panel. The sessio
 
 ## The panel
 - Context section at the top: the context window as a stacked bar with tokens per category and where auto-compaction runs. The Context button in the panel shows or hides it; the choice is remembered.
+- Usage section: the current session (five-hour) and the week, each with its reset time, a bar and the percent used, plus a burn forecast under each bar: an even-pace mark, and two projections to the reset (recent pace over the last ~30 minutes, and the average since the window started) with a verdict such as `recent: 100% at 1:36 PM, 1h 3m early` or `on pace`. The Usage button shows or hides it; the choice is remembered. Needs a subscription with rate-limit readings.
 - Agents: running, finished and planned, with model, task progress, context, estimated cost and time.
 
 ## Requirements
