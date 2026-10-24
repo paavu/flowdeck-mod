@@ -1110,9 +1110,9 @@ export const register: Register = (on, options) => {
     )
     const usageSection = !p.isUsageShown ? null : us.windows.length ? (
       <Box flexDirection="column">
-        {usageRows(us.windows, us.samples, clockNow, cols).map((line, i) => (
-          <Text key={`use-${i}`} dimColor={i % 3 !== 1} wrap="truncate-end">
-            {line}
+        {usageRows(us.windows, us.samples, clockNow, cols).map((r, i) => (
+          <Text key={`use-${i}`} dimColor={r.kind !== 'bar'} color={r.kind === 'bar' ? (r.over ? 'red' : us.windows[r.window]?.kind === 'seven_day' ? 'blue' : 'yellow') : undefined} wrap="truncate-end">
+            {r.line}
           </Text>
         ))}
       </Box>

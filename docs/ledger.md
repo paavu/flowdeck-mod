@@ -21,3 +21,14 @@ Final: minor (deferred): "Context" and "no context data yet" are English only
 Final: minor (deferred): terminal context section sits under the title row, not above it
 Final: minor (deferred): tsconfig.json extends a types path that does not exist (editor type-check only; same as safety-guard)
 Final: Ruling: a linked flow cannot drop a task by re-plan (cancelled tasks stay in the list until finished:true) — keeps 'none dropped' — cost if wrong: a cancelled task shows as planned
+Usage: built usage module + panel section (tests: claude plugin test flowdeck → 56/56 pass, validate passes). Note: usage.test.tsx was run after the module existed (tests were written first, but the first run was GREEN apart from the harness lacking toBeCloseTo) — cost if wrong: none.
+Usage review: fixed expired window shown as current (live()) — test RED→GREEN, suite 63/63
+Usage review: fixed week row turning red from a short burst — the week has no recent projection, only the average — test RED→GREEN
+Usage review: fixed hit times without a day and spans in hours instead of days — tests RED→GREEN
+Usage review: fixed terminal never red (rows carry kind/over; bar row coloured) and verdict cut off (split over two rows)
+Usage review: fixed even-pace mark colour (#6b6b6b, readable on light and dark), mark at 0% off the bar, week reset date shown when a week away
+Usage: Ruling: the week shows only the average projection (recent pace over days assumes round-the-clock work); the user asked for both paces mainly for the session — cost if wrong: no 'recent' line on the week row
+Usage: minor (deferred): label and reset text can overlap in narrow desktop panels (under ~340px)
+Usage: minor (deferred): recent pace stays frozen after a burst until the next reading; reset detection only by a falling percent (not resetsAt change)
+Usage: minor (deferred): compact terminal mode still shows all usage rows; a third toggle crowds the title row at 40 columns; no-subscription users see "no usage data yet"
+Usage: not verified in a real session: rateLimits shape/percent scale (0-100) and whether the engine returns stale resetsAt after expiry — check after first new session

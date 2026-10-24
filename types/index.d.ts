@@ -14,6 +14,7 @@ export type UsageWindow = {
   percent: number
   resetsAt: number | null
   length: number
+  expired?: boolean
 }
 export type Sample = { at: number; pct: number }
 export type Samples = Record<string, Sample[]>

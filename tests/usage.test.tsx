@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'claude-code/testing'
 
-import { forecast, record, toWindows, usageRows, usageSvg, fmtReset } from '../hooks/usage'
+import { forecast, record, toWindows, usageRows, usageSvg, fmtReset, live } from '../hooks/usage'
 
 const MIN = 60_000
 const HOUR = 60 * MIN
@@ -115,7 +115,7 @@ describe('record', () => {
 describe('drawings', () => {
   test('terminal rows show the label, reset time, percent and the verdict', () => {
     const ws = toWindows(limits(76, 33))
-    const rows = usageRows(ws, {}, NOW, 60, 'UTC')
+    const rows = usageRows(ws, {}, NOW, 60, 'UTC').map(r => r.line)
     const text = rows.join('\n')
     expect(text).toContain('Current session')
     expect(text).toContain('Resets at 2:40 PM')
@@ -128,12 +128,12 @@ describe('drawings', () => {
   })
 
   test('an on-pace row says so', () => {
-    const rows = usageRows(toWindows(limits(30, 10)), {}, NOW, 80, 'UTC').join('\n')
+    const rows = usageRows(toWindows(limits(30, 10)), {}, NOW, 80, 'UTC').map(r => r.line).join('\n')
     expect(rows).toContain('on pace')
   })
 
   test('a full window says the limit is reached', () => {
-    const rows = usageRows(toWindows(limits(100, 10)), {}, NOW, 80, 'UTC').join('\n')
+    const rows = usageRows(toWindows(limits(100, 10)), {}, NOW, 80, 'UTC').map(r => r.line).join('\n')
     expect(rows).toContain('limit reached')
   })
 
@@ -149,5 +149,63 @@ describe('drawings', () => {
     const { body } = usageSvg(400, toWindows(limits(76, 33)), {}, NOW, 'UTC')
     expect(body).toContain('data-bar="five_hour" data-state="over"')
     expect(body).toContain('data-bar="seven_day" data-state="ok"')
+  })
+})
+
+describe('review fixes', () => {
+  test('a window whose reset time has passed is treated as reset, not as the old window', () => {
+    const w = toWindows(limits(76, 33))[0]!
+    const stale = live(w, RESET_5H + 20 * MIN)
+    expect(stale.percent).toBe(0)
+    expect(stale.resetsAt).toBeNull()
+    const rows = usageRows([w], {}, RESET_5H + 20 * MIN, 80, 'UTC').map(r => r.line).join('\n')
+    expect(rows).toContain('window reset')
+    expect(rows).not.toContain('76% used')
+  })
+
+  test('the week has no recent projection and a busy hour does not make it red', () => {
+    const week = toWindows(limits(10, 20))[1]!
+    // 20% used 4 days into the week is on pace; a recent burst must not matter
+    const samples = { seven_day: [{ at: NOW - 30 * MIN, pct: 15 }, { at: NOW, pct: 20 }] }
+    const f = forecast(week, samples, NOW)
+    expect(f.recent).toBeNull()
+    expect(f.gathering).toBe(false)
+    const rows = usageRows([week], samples, NOW, 80, 'UTC')
+    expect(rows.every(r => !r.over)).toBe(true)
+    expect(rows.map(r => r.line).join('\n')).not.toContain('recent')
+  })
+
+  test('a hit time on another day names the day and long spans are in days', () => {
+    const day1 = Date.UTC(2026, 9, 23, 11, 30) // one day into the week
+    const week = toWindows(limits(10, 40))[1]! // 40% in a day: 100% after 2.5 days, 4d 12h before the reset
+    const text = usageRows([week], {}, day1, 100, 'UTC').map(r => r.line).join('\n')
+    expect(text).toContain('100% at Saturday 11:30 PM')
+    expect(text).toContain('4d 12h early')
+  })
+
+  test('the verdict is split over two rows so the average is not cut off', () => {
+    const ws = toWindows(limits(76, 33))
+    const rows = usageRows(ws, {}, NOW, 40, 'UTC')
+    const joined = rows.map(r => r.line).join('\n')
+    expect(joined).toContain('average: 100% at 1:36 PM')
+    expect(rows.every(r => r.line.length <= 40)).toBe(true)
+  })
+
+  test('rows say which are over so the terminal can colour them', () => {
+    const rows = usageRows(toWindows(limits(76, 33)), {}, NOW, 80, 'UTC')
+    const session = rows.filter(r => r.window === 0)
+    expect(session.some(r => r.kind === 'bar' && r.over)).toBe(true)
+    expect(rows.filter(r => r.window === 1).every(r => !r.over)).toBe(true)
+  })
+
+  test('a reset a week away names the date, not just the weekday', () => {
+    expect(fmtReset(NOW + 7 * 24 * HOUR - 30 * MIN, NOW, 'UTC')).toMatch(/Nov 2/)
+  })
+
+  test('the even-pace mark at zero is not drawn off the bar', () => {
+    const w = toWindows(limits(0, 0))[0]!
+    const { body } = usageSvg(400, [w], {}, w.resetsAt! - 5 * HOUR, 'UTC')
+    const x = Number(/data-mark="five_hour" x="(-?[\d.]+)"/.exec(body)![1])
+    expect(x).toBeGreaterThanOrEqual(0)
   })
 })
