@@ -8,7 +8,7 @@ export type Where = { pos: number; total: number; stage: number; step: number; s
 export const MAX_PLANS = 3
 // the plan an approved plan-mode plan lands on; a revised plan updates it instead of opening a second one
 export const PLAN_ID = 'plan'
-const STATUSES: StepStatus[] = ['pending', 'active', 'done', 'error', 'skipped']
+export const STATUSES: StepStatus[] = ['pending', 'active', 'done', 'error', 'skipped']
 const STATES: PlanState[] = ['running', 'needs_input', 'error', 'done']
 
 // the cut drops half a character left at the edge (an emoji is two UTF-16 units)
@@ -233,6 +233,7 @@ export const elapsed = (ms: number) => {
 }
 
 // how long each finished step took (from the previous finish, or the plan's start) and each finished stage
+// kept for the planned hover overlay; only the tests call it for now
 export function stepTimes(p: TaskPlan): { steps: Map<PlanStep, number>; stages: (number | undefined)[] } {
   const ends = p.stages.flatMap(s => s.steps).flatMap(st => (st.doneAt === undefined ? [] : [st.doneAt])).sort((a, b) => a - b)
   const startOf = (at: number) => Math.max(p.startedAt, ...ends.filter(t => t < at))

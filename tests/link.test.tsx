@@ -1,7 +1,7 @@
 import { describe, expect, test } from 'claude-code/testing'
 
-function engine(on: any, opts: { refuseCommand?: boolean } = {}) {
-  const state = { ticked: false }
+function engine(on: any, opts: { refuseCommand?: boolean; refuseTool?: string } = {}) {
+  const state = { ticked: false, tools: [] as string[], commands: [] as string[] }
   on('env.get', () => ({ value: undefined }))
   on('settings.read', () => ({ value: {} }))
   on('clock.every', () => {
@@ -10,9 +10,14 @@ function engine(on: any, opts: { refuseCommand?: boolean } = {}) {
   })
   on('clock.now', () => ({ value: 1 }))
   on('session.start', (_$: any, e: any) => ({ sessionId: 's', cwd: e.cwd }))
-  on('tool.register', () => ({ value: undefined }))
-  on('command.register', () => {
+  on('tool.register', (_$: any, e: any) => {
+    if (e?.name === opts.refuseTool) throw new Error('tool refused')
+    state.tools.push(e?.name)
+    return { value: undefined }
+  })
+  on('command.register', (_$: any, e: any) => {
     if (opts.refuseCommand) throw new Error('name already taken')
+    state.commands.push(e?.name)
     return { value: undefined }
   })
   on('ui.panes', () => ({ value: [] }))
@@ -150,5 +155,13 @@ describe('linked session flow', () => {
     const state = engine(on, { refuseCommand: true })
     await start($)
     expect(state.ticked).toBe(true) // the clock ticker is set up after the registration
+  })
+
+  test('a refused step tool registration still registers the plan tool, the command and the clock', async ($, on) => {
+    const state = engine(on, { refuseTool: 'step' })
+    await start($)
+    expect(state.tools).toEqual(['progress', 'plan'])
+    expect(state.commands).toEqual(['flowdeck-agents'])
+    expect(state.ticked).toBe(true)
   })
 })

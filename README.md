@@ -13,7 +13,7 @@ An orchestrated delivery flow for Claude Code with a live side panel. The sessio
 | Tool | Used by | Purpose |
 |---|---|---|
 | `mcp__flowdeck__progress` | orchestrator in a flow | Flow title, planned worker tasks, accepted count, phase (`plan`, `design`, `delegate`, `review`, `close`), `finished`. |
-| `mcp__flowdeck__step` | workers | A worker's own step bar on its agent row (`total`, `done`, `note`). |
+| `mcp__flowdeck__step` | workers | A worker's own steps on its agent row: the plan sent once as a `steps` list, then moved with `next`, `done`, `active`, `failed`. The older `total`, `done`, `note` counts still work. |
 | `mcp__flowdeck__plan` | main session | A task plan for any work: stages of steps, or `kind: "todo"` for a flat list. Created once, then moved with short ops (`next`, `done`, `active`, `failed`, `state`, `note`); calls from subagents are ignored. |
 
 A short rule in the system prompt (`flowdeck:plan-rule`) tells the model when to make a plan and how to move it. It never blocks an edit.

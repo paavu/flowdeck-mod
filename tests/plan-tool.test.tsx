@@ -2,14 +2,15 @@ import { describe, expect, test } from 'claude-code/testing'
 
 const NOW = Date.UTC(2026, 9, 26, 12, 40)
 
-function engine(on: any, opts: { store?: Record<string, unknown>; storeFails?: boolean; sessionId?: string } = {}) {
+function engine(on: any, opts: { store?: Record<string, unknown>; storeFails?: boolean; sessionId?: string; id?: { value: string }; startHasId?: boolean } = {}) {
   const store = opts.store ?? {}
   const clock = { now: NOW }
   on('env.get', () => ({ value: undefined }))
   on('settings.read', () => ({ value: {} }))
   on('clock.every', () => ({ value: undefined }))
   on('clock.now', () => ({ value: clock.now }))
-  on('session.start', (_$: any, e: any) => ({ sessionId: opts.sessionId ?? 's', cwd: e.cwd }))
+  on('session.start', (_$: any, e: any) => (opts.startHasId === false ? { cwd: e.cwd } : { sessionId: opts.sessionId ?? 's', cwd: e.cwd }))
+  if (opts.id) on('session.id', () => ({ value: opts.id?.value }))
   on('session.end', () => ({ sessionId: opts.sessionId ?? 's' }))
   on('tool.register', () => ({ value: undefined }))
   on('command.register', () => ({ value: undefined }))
@@ -126,6 +127,50 @@ describe('plan tool', () => {
     expect(saved(store, 'abc')).toHaveLength(1)
     await start($)
     expect(await plan($, { id: 'work', next: true })).toBe('work: 2/3, running, active "commit"')
+  })
+
+  test('the session id comes from $.session.id() when the start result names none', async ($, on) => {
+    const { store } = engine(on, { id: { value: 'abc' }, startHasId: false })
+    await start($)
+    await create($)
+    await plan($, { id: 'work', next: true })
+    expect(saved(store, 'abc')).toHaveLength(1)
+    expect(Object.keys(store.plans as object)).toEqual(['abc'])
+  })
+
+  test('a start whose result names no id restores the plans saved under $.session.id()', async ($, on) => {
+    const mine = { id: 'mine', title: 't', kind: 'plan', stages: [{ name: 'S', steps: [{ title: 'a', status: 'active', substeps: [] }] }], state: 'running', note: null, startedAt: 1 }
+    engine(on, { id: { value: 'abc' }, startHasId: false, store: { plans: { abc: [mine] } } })
+    await start($)
+    expect(await plan($, { id: 'mine', next: true })).toBe('mine: 1/1, done')
+  })
+
+  test('after /clear changes the session id, a plan is saved under the new id', async ($, on) => {
+    const id = { value: 'abc' }
+    const { store } = engine(on, { id, startHasId: false })
+    await start($)
+    await create($)
+    id.value = 'def'
+    await plan($, { id: 'work', next: true })
+    expect(saved(store, 'def')).toHaveLength(1)
+    expect(saved(store, 'def')[0].stages[0].steps[0].status).toBe('done')
+  })
+
+  test('a corrupt stored plan (a stage without steps) is dropped and breaks neither the panel nor the tool', async ($, on) => {
+    const good = { id: 'good', title: 't', kind: 'plan', stages: [{ name: 'S', steps: [{ title: 'a', status: 'active', substeps: [] }] }], state: 'running', note: null, startedAt: 1 }
+    const bad = { ...good, id: 'bad', stages: [{ name: 'S' }] }
+    const badStep = { ...good, id: 'badstep', stages: [{ name: 'S', steps: [{ title: 'x', status: 'weird' }] }] }
+    const mixed = { ...good, id: 'mixed', stages: [{ name: 'Broken', steps: 'no' }, { name: 'Fine', steps: [{ title: 'b', status: 'active', substeps: [] }] }] }
+    engine(on, { store: { plans: { s: [bad, badStep, mixed, good] } } })
+    await start($)
+    for (const surface of ['terminal', 'desktop'] as const) {
+      const p = await $.ui.mount({ plugin: 'flowdeck', surface, component: 'Pane', requestId: 'flowdeck-agents', props: { bodyColumns: 80 } } as any)
+      await p.unmount()
+    }
+    expect(await plan($, { id: 'bad', next: true })).toMatch(/^flowdeck plan: no plan "bad" yet/)
+    expect(await plan($, { id: 'badstep', next: true })).toMatch(/^flowdeck plan: no plan "badstep" yet/)
+    expect(await plan($, { id: 'mixed', next: true })).toBe('mixed: 1/1, done')
+    expect(await plan($, { id: 'good', next: true })).toBe('good: 1/1, done')
   })
 
   test('a fresh start restores only its own session from the store', async ($, on) => {

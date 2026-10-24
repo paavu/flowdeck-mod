@@ -59,6 +59,26 @@ const entry = (i: number, extra: Record<string, unknown> = {}) => ({
 
 const stored = (store: Record<string, unknown>): any[] => (Array.isArray(store.history) ? (store.history as any[]) : [])
 
+const USAGE = { model: 'claude-opus-5-5', input_tokens: 1_000_000, output_tokens: 0, cache_read_input_tokens: 0, cache_creation_input_tokens: 0 }
+const workers = (on: any) => {
+  on('tool.call', () => ({ result: 'ok' }))
+  on('agent.spawn', (_$: any, e: any) => ({ agentId: e.tool_use_id, model: 'claude-opus-5-5' }))
+  on('turn.step', async function* (_$: any, e: any) {
+    return { turnId: e.turnId, index: e.index, answer: '', toolUses: [], usage: USAGE }
+  })
+}
+const spawn = ($: any, id: string, description: string) => $.agent.spawn({ subagentType: 'flowdeck-light', description, tool_use_id: id } as any)
+const turnStep = async ($: any, agentId: string) => {
+  const s = $.turn.step({ agentId, model: 'claude-opus-5-5', turnId: 't', index: 0, messageCount: 1 } as any)
+  for await (const _ of s);
+}
+const terminalText = async ($: any) => {
+  const p = await pane($)
+  const texts = await p.findAll({ type: 'Text' })
+  await p.unmount()
+  return texts.map((t: any) => t.text).join('\n')
+}
+
 describe('history of flows', () => {
   test('finishing a flow stores one entry, and finishing again does not duplicate it', async ($, on) => {
     const { store } = engine(on)
@@ -76,6 +96,46 @@ describe('history of flows', () => {
     await progress($, { finished: true })
     expect(stored(store).length).toBe(1)
     expect(stored(store)[0].title).toBe('Ship it')
+  })
+
+  test('finishing an already finished flow is a no-op: the panel keeps its agents and no blank entry is stored', async ($, on) => {
+    const { store, clock } = engine(on)
+    workers(on)
+    await start($)
+    await plan($)
+    await spawn($, 'w1', 'write tests')
+    await spawn($, 'w2', 'wire it')
+    await turnStep($, 'w2')
+    await $.turn.complete({ reason: 'answer', answer: 'ok', durationMs: 1, agentId: 'w1', usage: USAGE } as any)
+    clock.now = NOW + 60_000
+    expect(String((await progress($, { finished: true })).result)).toBe('ok: Done')
+    clock.now = NOW + 120_000
+    expect(String((await progress($, { finished: true })).result)).toBe('ok: Done')
+    expect(stored(store).map((x: any) => x.title)).toEqual(['Ship it'])
+    expect(await terminalText($)).toContain('write tests')
+  })
+
+  test('an agent still running when its flow is replaced is counted only in the flow it started in', async ($, on) => {
+    const { store, clock } = engine(on)
+    workers(on)
+    await start($)
+    await plan($, 'First')
+    clock.now = NOW + 1000
+    await spawn($, 'w1', 'write tests')
+    await turnStep($, 'w1')
+    clock.now = NOW + 60_000
+    await progress($, { finished: true })
+    clock.now = NOW + 120_000
+    await plan($, 'Second')
+    clock.now = NOW + 180_000
+    await progress($, { finished: true })
+    const [second, first] = stored(store)
+    expect(first.title).toBe('First')
+    expect(Math.round(first.cost * 100)).toBe(400)
+    expect(second.title).toBe('Second')
+    expect(second.cost).toBe(0)
+    expect(second.tokens).toBe(0)
+    expect(second.time).toBe(0)
   })
 
   test('a new flow after a finished one keeps both, newest first', async ($, on) => {

@@ -1,13 +1,13 @@
 import { atom, read, update } from 'claude-code'
 import type { EngineInterface, Register } from 'claude-code'
 
-import type { AgentRun, Flow, HistoryEntry, Panel, Phase, PlannedTask, Reading, Samples, TaskPlan, UsageWindow } from '../types'
+import type { AgentRun, Flow, HistoryEntry, Panel, Phase, PlannedTask, PlanStage, Reading, Samples, StepStatus, TaskPlan, UsageWindow } from '../types'
 import { derive, finishItems, hasItemOps, ITEM_H, itemAlt, itemLine, itemsOf, itemSvg, stepItems } from './agent-items'
 import type { StepInput } from './agent-items'
 import { agentState, HOUSEKEEPING, splitHead, stateText } from './agent-state'
 import { contextRows, contextSvg, toReading } from './context'
 import { addEntry, formatEntry, parseHistory, snapshot } from './history'
-import { importPlan, isFinished, normalize, percent, PLAN_ID, placeBar, planId, str, where } from './plan'
+import { importPlan, isFinished, normalize, percent, PLAN_ID, placeBar, planId, STATUSES, str, where } from './plan'
 import { planBandSvg, planBandText, planRows, planSvg, STATE_COLOR, stateLabel } from './plan-view'
 import { record, toWindows, usageRows, usageSvg } from './usage'
 
@@ -123,8 +123,16 @@ let lang: Lang = 'en'
 const tr = () => STRINGS[lang]
 // The session's working folder, the project a history entry names; set the same way.
 let project = ''
-// The session the task plans are saved under; empty when session.start named none.
+// The session the task plans are saved under; empty when the engine names none.
 let sessionId = ''
+
+// The engine's current session id, '' when it cannot say; a /clear changes it without a new session.start.
+const currentSessionId = async ($: EngineInterface): Promise<string> => {
+  const id: unknown = await Promise.resolve()
+    .then(() => $.session.id())
+    .catch(() => '')
+  return typeof id === 'string' ? id : ''
+}
 
 const isRussian = (v: unknown): boolean => typeof v === 'string' && /^(ru|russian|рус)/i.test(v.trim())
 
@@ -375,7 +383,6 @@ const costOf = (model: string, u: Usage): number => {
 
 const windowOf = (model: string): number => (/haiku/i.test(model) ? 200_000 : 1_000_000)
 
-// `flowdeck-careful`, or `flowdeck:flowdeck-careful` when the agents ship in a plugin.
 // A worker's type is `flowdeck-careful`, or `flowdeck:flowdeck-careful` when the agents ship in the plugin.
 const isWorker = (type: string): boolean => /^(?:[^:]*:)?flowdeck-/.test(type)
 
@@ -761,13 +768,16 @@ async function recordFlow($: EngineInterface, f: Flow, status: 'finished' | 'ope
   try {
     const endedAt = await $.clock.now()
     let meta = await read($, flowMeta)
+    const isFresh = !meta
     if (!meta) {
       // A flow no progress call created (a worker launch): it starts its record now, under one id from here on.
       const fresh = { startedAt: endedAt, project }
       meta = fresh
       await update($, flowMeta, () => fresh)
     }
-    const list = await read($, agents)
+    const start = meta.startedAt
+    // Only the agents that began during this flow: one still running from the flow before is counted there.
+    const list = (await read($, agents)).filter(a => isFresh || a.startedAt >= start)
     await saveHistory($, snapshot({ flow: f, agents: list, project: meta.project, startedAt: meta.startedAt, endedAt, status }))
   } catch {
     // A failing store or clock costs the record, not the call.
@@ -776,15 +786,24 @@ async function recordFlow($: EngineInterface, f: Flow, status: 'finished' | 'ope
 
 type SavedPlans = Record<string, TaskPlan[]>
 
+const isStoredStep = (st: unknown): boolean =>
+  !!st && typeof st === 'object' && typeof (st as { title?: unknown }).title === 'string' && STATUSES.includes((st as { status?: unknown }).status as StepStatus)
+
+const isStoredStage = (s: unknown): s is PlanStage =>
+  !!s && typeof s === 'object' && typeof (s as { name?: unknown }).name === 'string' && Array.isArray((s as { steps?: unknown }).steps) && (s as { steps: unknown[] }).steps.every(isStoredStep)
+
 // The stored plans by session; anything that is not an object of plan arrays reads as empty.
+// A broken stage is dropped; a plan left with none of the stages it had is dropped too.
 function parsePlans(v: unknown): SavedPlans {
   if (!v || typeof v !== 'object' || Array.isArray(v)) return {}
   const out: SavedPlans = {}
   for (const [sid, list] of Object.entries(v as Record<string, unknown>)) {
     if (!Array.isArray(list)) continue
-    const valid = list.filter(
-      (p): p is TaskPlan => !!p && typeof p === 'object' && typeof p.id === 'string' && Array.isArray(p.stages) && typeof p.startedAt === 'number',
-    )
+    const valid = list.flatMap((p): TaskPlan[] => {
+      if (!p || typeof p !== 'object' || typeof p.id !== 'string' || !Array.isArray(p.stages) || typeof p.startedAt !== 'number') return []
+      const stages = (p.stages as unknown[]).filter(isStoredStage)
+      return stages.length || !p.stages.length ? [{ ...(p as TaskPlan), stages }] : []
+    })
     if (valid.length) out[sid] = valid
   }
   return out
@@ -794,6 +813,7 @@ const newest = (list: TaskPlan[]) => Math.max(...list.map(p => p.startedAt))
 
 // Re-reads the store first so other sessions' plans stay; a failed read skips the write rather than overwrite them.
 async function savePlans($: EngineInterface, list: TaskPlan[]): Promise<void> {
+  sessionId = (await currentSessionId($)) || sessionId
   if (!sessionId) return
   try {
     const all = parsePlans(await $.store.get('plans'))
@@ -861,7 +881,7 @@ async function showAgent($: EngineInterface, agentId: string, endedTool?: string
 export const register: Register = (on, options) => {
   on('session.start', async ($, e, next) => {
     const started = await next(e)
-    lang = await detectLang($, options.language)
+    lang = await detectLang($, options.language).catch((): Lang => 'en')
     project = typeof e.cwd === 'string' ? e.cwd : ''
     const stored = await $.store.get('contextShown').catch(() => undefined)
     if (typeof stored === 'boolean') await update($, panel, prev => ({ ...prev, isContextShown: stored }))
@@ -874,7 +894,7 @@ export const register: Register = (on, options) => {
     const storedHistory = await $.store.get('history').catch(() => undefined)
     await update($, history, () => parseHistory(storedHistory))
     const sid = (started as { sessionId?: unknown }).sessionId
-    sessionId = typeof sid === 'string' ? sid : ''
+    sessionId = (await currentSessionId($)) || (typeof sid === 'string' ? sid : '')
     if (sessionId) {
       const storedPlans = await $.store.get('plans').catch(() => undefined)
       await update($, plans, () => parsePlans(storedPlans)[sessionId] ?? [])
@@ -923,7 +943,7 @@ export const register: Register = (on, options) => {
           },
         },
       },
-    })
+    }).catch(() => {}) // each registration on its own: one refused never stops the others
     await $.tool.register({
       name: 'step',
       description:
@@ -958,7 +978,7 @@ export const register: Register = (on, options) => {
           note: { type: 'string', description: 'The step in progress, a few words; with a list, its active title is used.' },
         },
       },
-    })
+    }).catch(() => {})
     const planStep = {
       type: 'object',
       properties: {
@@ -992,7 +1012,7 @@ export const register: Register = (on, options) => {
         },
         required: ['id'],
       },
-    })
+    }).catch(() => {})
     await $.command.register({
       name: 'flowdeck-agents',
       description: 'Show or hide the flowdeck panel: context window, subagents running, finished and planned, with model, cost and time',
@@ -1025,6 +1045,8 @@ export const register: Register = (on, options) => {
   on('tool.call', { tool: TOOL }, async ($, e) => {
     const input = e as unknown as ProgressInput
     const prev = await read($, flow)
+    // Finishing a flow that is already finished changes nothing; it would otherwise open a blank one.
+    if (prev?.isFinished && input.finished === true) return { result: `ok: ${label(prev)}` }
     if (isNewFlow(prev, input)) {
       // The flow being replaced goes to the history first, with its own agents; a finished one is there already.
       if (prev && !prev.isFinished) await recordFlow($, prev, 'finished')

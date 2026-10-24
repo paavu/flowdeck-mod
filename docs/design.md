@@ -58,4 +58,4 @@ Build, run the mod tests, disable savvy-flow, savvy-progress and context-bar, en
 - Agent state colours and tool word: each agent row names its state (`Running · <tool>` blue-violet, `Needs approval` amber, `Done` green, `Error` red), the same colours as the plan states.
 - Band layout: the flow row first, then the open plan rows, then whatever other mods draw; the row shrinks and clips instead of pushing neighbours; ✕ hides the band only, the Band button or a new flow brings it back.
 - Load order: mods nest in the order of `enabledPlugins`, first outermost; flowdeck must come before next-steps, or next-steps squeezes the band.
-- Deferred: child items per agent come in the next task.
+- Child items per agent: done; a worker's `step` list shows as foldable items on its agent row.
