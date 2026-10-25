@@ -88,11 +88,12 @@ describe('plans section in the panel', () => {
     await p.unmount()
   })
 
-  test('without plans it says there are no plans yet', async ($, on) => {
+  test('without plans the Plans section takes no place', async ($, on) => {
     engine(on)
     await start($)
     const p = await pane($, 'terminal')
-    expect(await p.find({ type: 'Text', text: /no plans yet/ })).toBeDefined()
+    expect(await p.find({ type: 'Button', text: /▾ Plans/ })).toBeDefined()
+    expect(await p.find({ type: 'Text', text: /no plans yet/ })).toBeUndefined()
     expect(await p.find({ type: 'Button', text: /Clear finished/ })).toBeUndefined()
     await p.unmount()
   })
@@ -138,6 +139,7 @@ describe('plans section in the panel', () => {
     engine(on)
     await start($)
     await create($, 'alpha', 'Alpha rollout')
+    await $.tool.call({ tool: 'mcp__flowdeck__progress', title: 'Ship it', total: 1, tasks: [{ title: 'a', tier: 'light' }] } as any) // Collapse belongs to the flow block
     let p = await pane($, 'terminal')
     await p.press({ key: 'compact' })
     await settle()

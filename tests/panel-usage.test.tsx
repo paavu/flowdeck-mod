@@ -105,7 +105,7 @@ describe('usage section in the panel', () => {
     await start($)
     await settle()
     const p = await pane($, 'desktop', 80)
-    expect((await p.findAll({ type: 'Svg' })).length).toBeGreaterThanOrEqual(2)
+    expect((await p.findAll({ type: 'Svg' })).some((n: any) => /% left/.test(String(n.props?.alt ?? '')))).toBe(true)
     await p.unmount()
   })
 })

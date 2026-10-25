@@ -9,7 +9,7 @@ const SIDE = `${DIR}/history-extra-${NOW}.json`
 const ID = `${NOW}-/work/app`
 
 function engine(on: any, opts: { store?: Record<string, unknown> } = {}) {
-  const store = opts.store ?? {}
+  const store = opts.store ?? { historyShown: false } // these tests start with the Archive hidden, as they press it open
   const fail = { store: false }
   const fs = fakeFs(on)
   const clock = { now: NOW }

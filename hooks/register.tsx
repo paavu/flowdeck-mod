@@ -1,5 +1,5 @@
 import { atom, read, update } from 'claude-code'
-import type { EngineInterface, Register } from 'claude-code'
+import type { Elements, EngineInterface, Register, RenderChildren } from 'claude-code'
 
 import type { AgentRun, ArchiveEntry, ArchiveVolume, Flow, Panel, Phase, PlannedTask, PlanStage, Reading, Samples, StepStatus, TaskPlan, UsageWindow } from '../types'
 import { derive, finishItems, hasItemOps, ITEM_H, itemAlt, itemLine, itemsOf, itemSvg, stepItems } from './agent-items'
@@ -13,28 +13,12 @@ import { ARCHIVE_PAGE, archiveSection, UNREADABLE } from './archive-view'
 import type { FlowDrawing, FlowView, Planned } from './archive-view'
 import { importPlan, isFinished, normalize, percent, PLAN_ID, placeBar, planId, STATUSES, str, where } from './plan'
 import { planBandSvg, planBandText, planRows, planSvg, STATE_COLOR, stateLabel } from './plan-view'
+import { asAgents, asArchive, asFlow, asMeta, asNow, asPanel, asReading, asUsage, asVolumes, PANEL_DEFAULT } from './shapes'
 import { record, toWindows, usageRows, usageSvg } from './usage'
 
 const flow = atom({ plugin: 'flowdeck', key: 'flow' } as const, null)
 const agents = atom({ plugin: 'flowdeck', key: 'agents' } as const, [])
-const panel = atom({ plugin: 'flowdeck', key: 'panel' } as const, {
-  isCompact: false,
-  isDoneCollapsed: false,
-  isContextShown: true,
-  isUsageShown: true,
-  isPlansShown: true,
-  isBandHidden: false,
-  isArchiveShown: false,
-  openEntries: [] as string[],
-  openAgents: [] as string[],
-  closedEntries: [] as string[],
-  archiveLimit: 10,
-  archiveListOpen: false,
-  archiveVolume: null as string | null,
-  archiveError: '',
-  archiveWarning: '',
-  autoOpenedFor: '',
-})
+const panel = atom({ plugin: 'flowdeck', key: 'panel' } as const, PANEL_DEFAULT)
 const usageState = atom({ plugin: 'flowdeck', key: 'usage' } as const, { windows: [] as UsageWindow[], samples: {} as Samples })
 const reading = atom({ plugin: 'flowdeck', key: 'reading' } as const, null as Reading | null)
 const now = atom({ plugin: 'flowdeck', key: 'now' } as const, 0)
@@ -43,6 +27,46 @@ const archive = atom({ plugin: 'flowdeck', key: 'archive' } as const, [] as Arch
 const volumes = atom({ plugin: 'flowdeck', key: 'volumes' } as const, [] as ArchiveVolume[])
 const flowMeta = atom({ plugin: 'flowdeck', key: 'flowMeta' } as const, null as { startedAt: number; project: string } | null)
 const plans = atom({ plugin: 'flowdeck', key: 'plans' } as const, [] as TaskPlan[])
+
+// A reload keeps the held values an older flowdeck wrote, in its older shape: every read goes through its normalizer
+// (shapes.ts), and every update hands its change the normalized value. A change that returns that value unchanged hands
+// the stored one back, so it writes as little as it did before.
+const readPanel = async ($: EngineInterface): Promise<Panel> => asPanel(await read($, panel))
+const updatePanel = async ($: EngineInterface, change: (p: Panel) => Panel): Promise<Panel> =>
+  asPanel(await update($, panel, prev => {
+    const was = asPanel(prev)
+    const next = change(was)
+    return next === was ? prev : next
+  }))
+const readFlow = async ($: EngineInterface): Promise<Flow | null> => asFlow(await read($, flow))
+const updateFlow = async ($: EngineInterface, change: (f: Flow | null) => Flow | null): Promise<Flow | null> =>
+  asFlow(await update($, flow, prev => {
+    const was = asFlow(prev)
+    const next = change(was)
+    return next === was ? prev : next
+  }))
+const readAgents = async ($: EngineInterface): Promise<AgentRun[]> => asAgents(await read($, agents))
+const updateAgents = async ($: EngineInterface, change: (list: AgentRun[]) => AgentRun[]): Promise<AgentRun[]> =>
+  asAgents(await update($, agents, prev => {
+    const was = asAgents(prev)
+    const next = change(was)
+    return next === was ? prev : next
+  }))
+const readPlans = async ($: EngineInterface): Promise<TaskPlan[]> => asPlans(await read($, plans))
+const updatePlans = async ($: EngineInterface, change: (list: TaskPlan[]) => TaskPlan[]): Promise<TaskPlan[]> =>
+  asPlans(await update($, plans, prev => change(asPlans(prev))))
+const readMeta = async ($: EngineInterface): Promise<Meta | null> => asMeta(await read($, flowMeta))
+const updateMeta = async ($: EngineInterface, change: (m: Meta | null) => Meta | null): Promise<Meta | null> =>
+  asMeta(await update($, flowMeta, prev => {
+    const was = asMeta(prev)
+    const next = change(was)
+    return next === was ? prev : next
+  }))
+const readArchive = async ($: EngineInterface): Promise<ArchiveEntry[]> => asArchive(await read($, archive))
+const readVolumes = async ($: EngineInterface): Promise<ArchiveVolume[]> => asVolumes(await read($, volumes))
+const readUsage = async ($: EngineInterface) => asUsage(await read($, usageState))
+const readReading = async ($: EngineInterface): Promise<Reading | null> => asReading(await read($, reading))
+const readNow = async ($: EngineInterface): Promise<number> => asNow(await read($, now))
 
 const TOOL = 'mcp__flowdeck__progress'
 const STEP_TOOL = 'mcp__flowdeck__step'
@@ -735,7 +759,7 @@ async function refreshContext($: EngineInterface): Promise<void> {
   if (b && b.rawMaxTokens > 0) await update($, reading, () => toReading(b)) // otherwise there is no window to measure against
   const windows = toWindows(Array.isArray(u.rateLimits) ? u.rateLimits : [])
   const at = await $.clock.now()
-  await update($, usageState, prev => ({ windows, samples: record(prev.samples, windows, at) }))
+  await update($, usageState, prev => ({ windows, samples: record(asUsage(prev).samples, windows, at) }))
 }
 
 type TodoItem = { title: string; completed: boolean }
@@ -743,7 +767,7 @@ type TodoItem = { title: string; completed: boolean }
 // A linked flow takes the session task list's items as planned tasks (medium tier, display only) and counts one done when the list completes it.
 async function mirrorTasks($: EngineInterface, items: TodoItem[]): Promise<void> {
   if (!items.length) return
-  await update($, flow, prev => {
+  await updateFlow($, prev => {
     if (!prev || !prev.isLinked || prev.isFinished) return prev
     const tasks = [...prev.tasks]
     let total = prev.total
@@ -783,9 +807,9 @@ async function togglePane($: EngineInterface): Promise<boolean> {
 }
 
 async function autoOpen($: EngineInterface, key: string): Promise<void> {
-  const p = await read($, panel)
+  const p = await readPanel($)
   if (p.autoOpenedFor === key) return
-  await update($, panel, prev => ({ ...prev, autoOpenedFor: key }))
+  await updatePanel($, prev => ({ ...prev, autoOpenedFor: key }))
   void $.ui.open({ id: PANE, title: tr().pane })
 }
 
@@ -805,7 +829,7 @@ const io = ($: EngineInterface): Io => ({
 // history.json, its side file or the shared store.
 async function saveArchive($: EngineInterface, entry: ArchiveEntry): Promise<boolean> {
   if (!isWorthKeeping(entry)) return false
-  const isLatest = async (): Promise<boolean> => (await read($, panel)).archiveVolume == null
+  const isLatest = async (): Promise<boolean> => (await readPanel($)).archiveVolume == null
   // The same calls, watched: a side file or the store taking the entry counts as kept.
   const base = io($)
   let isKept = false
@@ -823,14 +847,14 @@ async function saveArchive($: EngineInterface, entry: ArchiveEntry): Promise<boo
     const saved = await saveToProject(watched, project, volumeMax, entry).catch(() => null)
     const vols = saved?.volumes
     if (vols) await update($, volumes, () => vols)
-    if (saved) await update($, panel, prev => ({ ...prev, archiveWarning: saved.isUnreadable ? UNREADABLE : '' }))
+    if (saved) await updatePanel($, prev => ({ ...prev, archiveWarning: saved.isUnreadable ? UNREADABLE : '' }))
     if (saved?.isSaved) {
       if (await isLatest()) await update($, archive, () => saved.latest)
       return true
     }
     view = saved?.latest ?? null
   }
-  const next = await saveToStore(watched, entry, () => read($, archive))
+  const next = await saveToStore(watched, entry, () => readArchive($))
   if (await isLatest()) await update($, archive, () => view ?? next)
   return isKept
 }
@@ -848,15 +872,15 @@ const archivable = (list: AgentRun[], meta: Meta | null): AgentRun[] =>
 // rows (`partial`), and only once it was kept do they leave the live list. Never throws into the press.
 async function archiveRows($: EngineInterface, id: string): Promise<void> {
   try {
-    const f = await read($, flow)
+    const f = await readFlow($)
     if (!f || f.isFinished) return
-    const list = await read($, agents)
+    const list = await readAgents($)
     const endedAt = await $.clock.now()
-    let meta = await read($, flowMeta)
+    let meta = await readMeta($)
     if (!meta) {
       // As recordFlow starts one, but from the first run's start, so the flow's later records keep these rows.
       const fresh = { startedAt: Math.min(endedAt, ...list.map(a => a.startedAt)), project }
-      meta = (await update($, flowMeta, m => m ?? fresh)) ?? fresh
+      meta = (await updateMeta($, m => m ?? fresh)) ?? fresh
     }
     const shown = archivable(list, meta)
     const at = shown.findIndex(a => a.id === id)
@@ -866,7 +890,7 @@ async function archiveRows($: EngineInterface, id: string): Promise<void> {
     const rows = list.filter(a => a.status !== 'running' && a.startedAt >= start && (a.archived || ids.has(a.id)))
     const entry: ArchiveEntry = { ...snapshot({ flow: f, agents: rows, project: meta.project, startedAt: start, endedAt, status: 'open' }), partial: true }
     if (!(await saveArchive($, entry))) return
-    await update($, agents, l => l.map(a => (ids.has(a.id) && a.status !== 'running' ? { ...a, archived: true } : a)))
+    await updateAgents($, l => l.map(a => (ids.has(a.id) && a.status !== 'running' ? { ...a, archived: true } : a)))
   } catch {
     // A failing clock or store leaves the rows where they are.
   }
@@ -887,17 +911,17 @@ async function recordFlow($: EngineInterface, f: Flow, status: 'finished' | 'ope
   try {
     await archiving
     const endedAt = await $.clock.now()
-    let meta = at ? at.meta : await read($, flowMeta)
+    let meta = at ? at.meta : await readMeta($)
     const isFresh = !meta
     if (!meta) {
       // A flow no progress call created (a worker launch): it starts its record now, under one id from here on.
       const fresh = { startedAt: endedAt, project }
       meta = fresh
-      await update($, flowMeta, m => m ?? fresh)
+      await updateMeta($, m => m ?? fresh)
     }
     const start = meta.startedAt
     // Only the agents that began during this flow: one still running from the flow before is counted there.
-    const list = (at ? at.agents : await read($, agents)).filter(a => isFresh || a.startedAt >= start)
+    const list = (at ? at.agents : await readAgents($)).filter(a => isFresh || a.startedAt >= start)
     await saveArchive($, snapshot({ flow: f, agents: list, project: meta.project, startedAt: meta.startedAt, endedAt, status }))
     return meta
   } catch {
@@ -910,23 +934,23 @@ async function recordFlow($: EngineInterface, f: Flow, status: 'finished' | 'ope
 // meta and agents are taken first, so a restart meanwhile neither renames this record nor loses the new flow's meta; a
 // second finish (the button and the tool at once) finds the flow finished and records nothing.
 async function finishFlow($: EngineInterface, input: ProgressInput = {}): Promise<Flow | null> {
-  const meta = await read($, flowMeta)
-  const list = await read($, agents)
+  const meta = await readMeta($)
+  const list = await readAgents($)
   let isEnding = false
-  const next = await update($, flow, p => {
+  const next = await updateFlow($, p => {
     isEnding = !p?.isFinished
     return isEnding ? merge(p, { ...input, finished: true }) : p
   })
   if (next && isEnding) {
     const used = (await recordFlow($, next, 'finished', { meta, agents: list })) ?? meta
-    await update($, flowMeta, m => (isSameMeta(m, used) ? null : m))
+    await updateMeta($, m => (isSameMeta(m, used) ? null : m))
   }
   return next
 }
 
 // The Finish buttons: only an open flow is ended, so a press on a stale row does nothing.
 async function finishOpenFlow($: EngineInterface): Promise<void> {
-  const f = await read($, flow)
+  const f = await readFlow($)
   if (f && !f.isFinished) await finishFlow($)
 }
 
@@ -954,6 +978,10 @@ function parsePlans(v: unknown): SavedPlans {
   }
   return out
 }
+
+// The held plans list, validated as the stored plans are; a plan without a title gets an empty one.
+const asPlans = (v: unknown): TaskPlan[] =>
+  (Array.isArray(v) ? (parsePlans({ list: v }).list ?? []) : []).map(p => (typeof p.title === 'string' ? p : { ...p, title: '' }))
 
 const isPlansObject = (v: unknown): v is Record<string, unknown> => !!v && typeof v === 'object' && !Array.isArray(v)
 
@@ -1024,11 +1052,11 @@ async function savePlans($: EngineInterface, list: TaskPlan[]): Promise<void> {
 
 // A plan left running with every step finished is done once the main turn ends.
 async function closeFinishedPlans($: EngineInterface): Promise<void> {
-  const list = await read($, plans)
+  const list = await readPlans($)
   const isOpen = (p: TaskPlan) => p.state === 'running' && p.stages.some(s => s.steps.length) && p.stages.every(s => s.steps.every(st => isFinished(st.status)))
   if (!list.some(isOpen)) return
   const at = await $.clock.now()
-  const next = await update($, plans, prev => prev.map(p => (isOpen(p) ? { ...p, state: 'done' as const, endedAt: at } : p)))
+  const next = await updatePlans($, prev => prev.map(p => (isOpen(p) ? { ...p, state: 'done' as const, endedAt: at } : p)))
   await savePlans($, next)
 }
 
@@ -1061,7 +1089,7 @@ async function showAgent($: EngineInterface, agentId: string, endedTool?: string
   const last = shown.get(agentId)
   const tool = mine.at(-1)?.tool ?? endedTool ?? last?.tool
   if (last && last.tool === tool && last.isAsked === isAsked) return
-  await update($, agents, list => {
+  await updateAgents($, list => {
     const at = list.findIndex(a => a.agentId === agentId && a.status === 'running')
     const run = list[at]
     if (!run || (run.tool === tool && !!run.isAsked === isAsked)) return list
@@ -1070,6 +1098,79 @@ async function showAgent($: EngineInterface, agentId: string, endedTool?: string
     return next
   })
   shown.set(agentId, { tool, isAsked }) // an agent the panel does not list is skipped the same way
+}
+
+// The buttons on top of the panel. They read only the panel's own toggles, so the panel can draw them whatever else fails.
+function topToggleRow($: EngineInterface, ui: Pick<Elements['desktop'], 'Box' | 'Button'>, p: Panel): RenderChildren {
+  const { Box, Button } = ui
+  const toggleContext = (
+    <Button
+      key="context"
+      label={`${p.isContextShown ? '▾' : '▸'} Context`}
+      plain
+      onPress={async () => {
+        const shown = !p.isContextShown
+        await updatePanel($, prev => ({ ...prev, isContextShown: shown }))
+        await $.store.set('contextShown', shown).catch(() => {})
+      }}
+    />
+  )
+  const toggleUsage = (
+    <Button
+      key="usage"
+      label={`${p.isUsageShown ? '▾' : '▸'} Usage`}
+      plain
+      onPress={async () => {
+        const shown = !p.isUsageShown
+        await updatePanel($, prev => ({ ...prev, isUsageShown: shown }))
+        await $.store.set('usageShown', shown).catch(() => {})
+      }}
+    />
+  )
+  const togglePlans = (
+    <Button
+      key="plans"
+      label={`${p.isPlansShown ? '▾' : '▸'} Plans`}
+      plain
+      onPress={async () => {
+        const shown = !p.isPlansShown
+        await updatePanel($, prev => ({ ...prev, isPlansShown: shown }))
+        await $.store.set('plansShown', shown).catch(() => {})
+      }}
+    />
+  )
+  const toggleBand = (
+    <Button
+      key="band"
+      label={`${p.isBandHidden ? '▸' : '▾'} Band`}
+      plain
+      onPress={async () => {
+        const hidden = !p.isBandHidden
+        await updatePanel($, prev => ({ ...prev, isBandHidden: hidden }))
+      }}
+    />
+  )
+  const toggleArchive = (
+    <Button
+      key="archive"
+      label={`${p.isArchiveShown ? '▾' : '▸'} Archive`}
+      plain
+      onPress={async () => {
+        const shown = !p.isArchiveShown
+        await updatePanel($, prev => ({ ...prev, isArchiveShown: shown }))
+        await $.store.set('historyShown', shown).catch(() => {}) // the store key keeps its name from before the rename
+      }}
+    />
+  )
+  return (
+    <Box key="top-toggles" flexDirection="row" gap={1}>
+      {toggleContext}
+      {toggleUsage}
+      {togglePlans}
+      {toggleBand}
+      {toggleArchive}
+    </Box>
+  )
 }
 
 export const register: Register = (on, options) => {
@@ -1090,18 +1191,18 @@ export const register: Register = (on, options) => {
     const max = Number(named != null && named !== '' ? named : old)
     volumeMax = max > 0 && max < VOLUME_MAX ? max : VOLUME_MAX
     const stored = await $.store.get('contextShown').catch(() => undefined)
-    if (typeof stored === 'boolean') await update($, panel, prev => ({ ...prev, isContextShown: stored }))
+    if (typeof stored === 'boolean') await updatePanel($, prev => ({ ...prev, isContextShown: stored }))
     const storedUsage = await $.store.get('usageShown').catch(() => undefined)
-    if (typeof storedUsage === 'boolean') await update($, panel, prev => ({ ...prev, isUsageShown: storedUsage }))
+    if (typeof storedUsage === 'boolean') await updatePanel($, prev => ({ ...prev, isUsageShown: storedUsage }))
     const storedPlansShown = await $.store.get('plansShown').catch(() => undefined)
-    if (typeof storedPlansShown === 'boolean') await update($, panel, prev => ({ ...prev, isPlansShown: storedPlansShown }))
+    if (typeof storedPlansShown === 'boolean') await updatePanel($, prev => ({ ...prev, isPlansShown: storedPlansShown }))
     const storedArchiveShown = await $.store.get('historyShown').catch(() => undefined)
-    if (typeof storedArchiveShown === 'boolean') await update($, panel, prev => ({ ...prev, isArchiveShown: storedArchiveShown }))
+    if (typeof storedArchiveShown === 'boolean') await updatePanel($, prev => ({ ...prev, isArchiveShown: storedArchiveShown }))
     // The project's latest part, with this project's entries from the shared store merged in.
     const loaded = await loadLatest(io($), project).catch((): Latest => ({ entries: [], volumes: [], isUnreadable: false }))
     await update($, archive, () => loaded.entries)
     await update($, volumes, () => loaded.volumes)
-    await update($, panel, prev => ({ ...prev, archiveListOpen: false, archiveVolume: null, archiveError: '', archiveWarning: loaded.isUnreadable ? UNREADABLE : '' }))
+    await updatePanel($, prev => ({ ...prev, archiveListOpen: false, archiveVolume: null, archiveError: '', archiveWarning: loaded.isUnreadable ? UNREADABLE : '' }))
     const sid = (started as { sessionId?: unknown }).sessionId
     sessionId = (await currentSessionId($)) || (typeof sid === 'string' ? sid : '')
     if (sessionId) {
@@ -1236,7 +1337,7 @@ export const register: Register = (on, options) => {
     // handles, so it stays slow: a click on a handle from before the redraw is refused by the desktop app.
     $.clock.every(TICK_MS, () => {
       void (async () => {
-        const list = await read($, agents)
+        const list = await readAgents($)
         if (!list.some(a => a.status === 'running')) return
         const at = await $.clock.now()
         await update($, now, () => at)
@@ -1259,7 +1360,7 @@ export const register: Register = (on, options) => {
 
   on('tool.call', { tool: TOOL }, async ($, e) => {
     const input = e as unknown as ProgressInput
-    let prev = await read($, flow)
+    let prev = await readFlow($)
     // Finishing a flow that is already finished changes nothing; it would otherwise open a blank one.
     if (prev?.isFinished && input.finished === true) return { result: `ok: ${label(prev)}` }
     // A restart ends the open flow as Finish does; the rest of the input then starts the new one.
@@ -1273,11 +1374,11 @@ export const register: Register = (on, options) => {
         .catch(() => null)
       await update($, flowMeta, () => (startedAt === null ? null : { startedAt, project }))
       // A new flow starts with a clean list; agents still running stay.
-      await update($, agents, list => list.filter(a => a.status === 'running'))
+      await updateAgents($, list => list.filter(a => a.status === 'running'))
     }
-    const next = input.finished === true ? await finishFlow($, input) : await update($, flow, p => merge(p, input))
+    const next = input.finished === true ? await finishFlow($, input) : await updateFlow($, p => merge(p, input))
     if (isNewFlow(prev, input)) {
-      await update($, panel, p => ({ ...p, isBandHidden: false })) // a new flow brings the band back
+      await updatePanel($, p => ({ ...p, isBandHidden: false })) // a new flow brings the band back
     }
     if (next && (input.tasks?.length || input.add?.length)) await autoOpen($, next.title)
     return { result: `ok: ${label(next ?? blank())}` }
@@ -1369,7 +1470,7 @@ export const register: Register = (on, options) => {
     }
     let unknown: string[] = []
     try {
-      await update($, agents, list =>
+      await updateAgents($, list =>
         list.map(a => {
           if (a.agentId !== agentId) return a
           const moved = stepItems(a.items, input, at)
@@ -1398,10 +1499,10 @@ export const register: Register = (on, options) => {
     try {
       const input = e as unknown as Record<string, unknown>
       const id = planId(input)
-      const list = await read($, plans)
+      const list = await readPlans($)
       const made = normalize(input, list.find(p => p.id === id) ?? null, await $.clock.now(), id)
       if (typeof made === 'string') return { result: 'flowdeck plan: ' + made }
-      const placed = await update($, plans, prev => placeBar(prev, made))
+      const placed = await updatePlans($, prev => placeBar(prev, made))
       await savePlans($, placed)
       return { result: planLine(made) }
     } catch {
@@ -1418,10 +1519,10 @@ export const register: Register = (on, options) => {
       const fromInput = (e as unknown as { plan?: unknown }).plan
       const text = typeof fromResult === 'string' && fromResult.trim() ? fromResult : fromInput
       if (typeof text !== 'string') return ran
-      const list = await read($, plans)
+      const list = await readPlans($)
       const made = importPlan(text, list.find(p => p.id === PLAN_ID) ?? null, await $.clock.now())
       if (!made) return ran
-      const placed = await update($, plans, prev => placeBar(prev, made))
+      const placed = await updatePlans($, prev => placeBar(prev, made))
       await savePlans($, placed)
     } catch {
       // A failing store or clock costs the plan, not the approval.
@@ -1436,10 +1537,10 @@ export const register: Register = (on, options) => {
     try {
       const first = ((e as unknown as { questions?: unknown }).questions as { header?: unknown; question?: unknown }[] | undefined)?.[0]
       const note = str(first?.header, 160) || str(first?.question, 160) || null
-      const live = (await read($, plans)).filter(p => p.state === 'running').pop()
+      const live = (await readPlans($)).filter(p => p.state === 'running').pop()
       if (live) {
         waiting = live.id
-        await savePlans($, await update($, plans, list => list.map(p => (p.id === live.id ? { ...p, state: 'needs_input' as const, note } : p))))
+        await savePlans($, await updatePlans($, list => list.map(p => (p.id === live.id ? { ...p, state: 'needs_input' as const, note } : p))))
       }
     } catch {
       // A failing store costs the waiting mark, not the question.
@@ -1448,7 +1549,7 @@ export const register: Register = (on, options) => {
     if (waiting) {
       try {
         const id = waiting
-        await savePlans($, await update($, plans, list => list.map(p => (p.id === id && p.state === 'needs_input' ? { ...p, state: 'running' as const, note: null } : p))))
+        await savePlans($, await updatePlans($, list => list.map(p => (p.id === id && p.state === 'needs_input' ? { ...p, state: 'running' as const, note: null } : p))))
       } catch {
         // as above
       }
@@ -1460,8 +1561,8 @@ export const register: Register = (on, options) => {
   on('prompt.submit', async ($, e, next) => {
     if (e.origin?.kind === 'composer' || e.origin?.kind === 'bridge') {
       try {
-        if ((await read($, plans)).some(p => p.state === 'needs_input')) {
-          await savePlans($, await update($, plans, list => list.map(p => (p.state === 'needs_input' ? { ...p, state: 'running' as const, note: null } : p))))
+        if ((await readPlans($)).some(p => p.state === 'needs_input')) {
+          await savePlans($, await updatePlans($, list => list.map(p => (p.state === 'needs_input' ? { ...p, state: 'running' as const, note: null } : p))))
         }
       } catch {
         // A failing store costs the reset, not the prompt.
@@ -1475,14 +1576,14 @@ export const register: Register = (on, options) => {
     const type = String(e.subagent_type ?? '')
     if (!isWorker(type)) return next(e)
 
-    await update($, flow, prev => {
+    await updateFlow($, prev => {
       const base = prev && !prev.isFinished ? { ...blank(), ...prev } : blank()
       return { ...base, running: base.running + 1, phase: base.phase === 'plan' ? 'delegate' : base.phase }
     })
     try {
       return await next(e)
     } finally {
-      await update($, flow, prev => (prev ? { ...prev, running: Math.max(0, prev.running - 1) } : prev))
+      await updateFlow($, prev => (prev ? { ...prev, running: Math.max(0, prev.running - 1) } : prev))
     }
   })
 
@@ -1491,7 +1592,7 @@ export const register: Register = (on, options) => {
     if (started.deny !== undefined) return started
 
     const at = await $.clock.now()
-    await update($, agents, list => {
+    await updateAgents($, list => {
       const round = 1 + list.filter(a => norm(a.description) === norm(e.description) && e.description).length
       const run: AgentRun = {
         id: started.agentId ?? e.tool_use_id,
@@ -1512,7 +1613,7 @@ export const register: Register = (on, options) => {
     })
     await update($, now, () => at)
     if (isWorker(e.subagentType)) {
-      const f = await read($, flow)
+      const f = await readFlow($)
       await autoOpen($, f && !f.isFinished ? f.title : 'flowdeck')
     }
     return started
@@ -1526,7 +1627,7 @@ export const register: Register = (on, options) => {
     if (!agentId || !usage) return result
 
     const model = usage.model || e.model
-    await update($, agents, list =>
+    await updateAgents($, list =>
       list.map(a =>
         a.agentId !== agentId
           ? a
@@ -1562,7 +1663,7 @@ export const register: Register = (on, options) => {
     if (agentId) {
       forgetFlights(agentId)
       const at = await $.clock.now()
-      await update($, agents, list =>
+      await updateAgents($, list =>
         list.map(a => {
           if (a.agentId !== agentId) return a
           // A run whose steps went unseen still gets the turn's own sum.
@@ -1608,7 +1709,7 @@ export const register: Register = (on, options) => {
 
   // A flow still open when the session ends is kept as open; finishing it later updates the same entry.
   on('session.end', async ($, e, next) => {
-    const f = await read($, flow).catch(() => null)
+    const f = await readFlow($).catch(() => null)
     if (f && !f.isFinished) await recordFlow($, f, 'open')
     return next(e)
   })
@@ -1617,122 +1718,21 @@ export const register: Register = (on, options) => {
     const s = tr()
     const ui = $.ui.resolve(e)
     const { Box, Text, Button } = ui
-    const list = await read($, agents)
-    const f = await read($, flow)
-    const p: Panel = await read($, panel)
-    const rd = await read($, reading)
-    const us = await read($, usageState)
-    const archiveList = await read($, archive)
-    const volumeList = await read($, volumes)
-    const planList = await read($, plans)
-    const meta = await read($, flowMeta)
-    const clockNow = await $.clock.now()
-    const at = Math.max(await read($, now), ...list.map(a => a.startedAt), 0)
-
-    const running = list.filter(a => a.status === 'running').reverse()
-    const finished = list.filter(a => a.status !== 'running').reverse()
-    const planned = plannedOf(f, list)
-    const t = totals(list, at)
-    // The pane's title says "Agents"; inside, only the flow's own name.
-    const title = f && !f.isFinished ? f.title : ''
-
-    const toggleCompact = (
-      <Button
-        key="compact"
-        label={p.isCompact ? s.expand : s.collapse}
-        plain
-        onPress={() => update($, panel, prev => ({ ...prev, isCompact: !prev.isCompact }))}
-      />
+    const p = await readPanel($)
+    // A part that throws draws this one dim line in its place; the rest of the panel still draws.
+    const failed = (label: string, key?: string) => (
+      <Text key={key} dimColor>
+        {`${label} could not be drawn`}
+      </Text>
     )
-    const toggleContext = (
-      <Button
-        key="context"
-        label={`${p.isContextShown ? '▾' : '▸'} Context`}
-        plain
-        onPress={async () => {
-          const shown = !p.isContextShown
-          await update($, panel, prev => ({ ...prev, isContextShown: shown }))
-          await $.store.set('contextShown', shown).catch(() => {})
-        }}
-      />
-    )
-    const toggleUsage = (
-      <Button
-        key="usage"
-        label={`${p.isUsageShown ? '▾' : '▸'} Usage`}
-        plain
-        onPress={async () => {
-          const shown = !p.isUsageShown
-          await update($, panel, prev => ({ ...prev, isUsageShown: shown }))
-          await $.store.set('usageShown', shown).catch(() => {})
-        }}
-      />
-    )
-    const togglePlans = (
-      <Button
-        key="plans"
-        label={`${p.isPlansShown ? '▾' : '▸'} Plans`}
-        plain
-        onPress={async () => {
-          const shown = !p.isPlansShown
-          await update($, panel, prev => ({ ...prev, isPlansShown: shown }))
-          await $.store.set('plansShown', shown).catch(() => {})
-        }}
-      />
-    )
-    const clearPlans = planList.some(pl => pl.state === 'done') ? (
-      <Button
-        key="plans-clear"
-        label="Clear finished"
-        plain
-        onPress={async () => {
-          const next = await update($, plans, prev => prev.filter(pl => pl.state !== 'done'))
-          await savePlans($, next)
-        }}
-      />
-    ) : null
-    const toggleBand = (
-      <Button
-        key="band"
-        label={`${p.isBandHidden ? '▸' : '▾'} Band`}
-        plain
-        onPress={async () => {
-          const hidden = !p.isBandHidden
-          await update($, panel, prev => ({ ...prev, isBandHidden: hidden }))
-        }}
-      />
-    )
-    const toggleArchive = (
-      <Button
-        key="archive"
-        label={`${p.isArchiveShown ? '▾' : '▸'} Archive`}
-        plain
-        onPress={async () => {
-          const shown = !p.isArchiveShown
-          await update($, panel, prev => ({ ...prev, isArchiveShown: shown }))
-          await $.store.set('historyShown', shown).catch(() => {}) // the store key keeps its name from before the rename
-        }}
-      />
-    )
-    const topToggles = (
-      <Box key="top-toggles" flexDirection="row" gap={1}>
-        {toggleContext}
-        {toggleUsage}
-        {togglePlans}
-        {toggleBand}
-        {toggleArchive}
-      </Box>
-    )
-    const finishFlowButton = f && !f.isFinished ? <Button key="flow-finish" label="Finish flow" plain onPress={() => finishOpenFlow($)} /> : null
-    const toggles = finishFlowButton ? (
-      <Box key="title-controls" flexDirection="row" gap={1}>
-        {finishFlowButton}
-        {toggleCompact}
-      </Box>
-    ) : (
-      toggleCompact
-    )
-    const summary = `≈${fmtCost(t.cost)}, ${fmtTokens(t.tokens)} ${s.tokensWord}, ${fmtTime(t.time)}`
+    const safe = async (label: string, draw: () => RenderChildren | Promise<RenderChildren>): Promise<RenderChildren> => {
+      try {
+        return await draw()
+      } catch {
+        return failed(label)
+      }
+    }
+    const topToggles = topToggleRow($, { Box, Button }, p)
     // An agent that reported its steps folds them out under its row; open only in this session.
     // `fp` prefixes an archive group's fold state (`<entryId>:<agentId>`), so folding a row there never folds the live one.
     const isUnfolded = (a: AgentRun, fp = '') => (p.openAgents ?? []).includes(fp + a.id)
@@ -1743,7 +1743,7 @@ export const register: Register = (on, options) => {
         label={isUnfolded(a, fp) ? '▾' : '▸'}
         plain
         onPress={() =>
-          update($, panel, prev => {
+          updatePanel($, prev => {
             const open = prev.openAgents ?? []
             const id = fp + a.id
             return { ...prev, openAgents: open.includes(id) ? open.filter(x => x !== id) : [...open, id] }
@@ -1779,6 +1779,14 @@ export const register: Register = (on, options) => {
       const hasDone = finished.length > 0 || archivedCount > 0
       const archiveButton = (a: AgentRun) =>
         v.archive?.can(a) ? <Button key={`archive-item-${a.id}`} label={ARCHIVE_ICON} plain dimColor onPress={() => v.archive?.press(a)} /> : null
+      // A row that throws draws one dim line in its place; the other rows still draw.
+      const guard = (a: AgentRun, draw: () => RenderChildren): RenderChildren => {
+        try {
+          return draw()
+        } catch {
+          return failed('Agent row', `${kp}${a.id}`)
+        }
+      }
       if (Svg) {
         const viewSummary = `≈${fmtCost(v.t.cost)}, ${fmtTokens(v.t.tokens)} ${s.tokensWord}, ${fmtTime(v.t.time)}`
         const section = (key: string, text: string) => (
@@ -1823,12 +1831,12 @@ export const register: Register = (on, options) => {
           body: () => [
             isEmpty && <Text dimColor>{s.empty}</Text>,
             ...(v.flat
-              ? [flat.map(a => agentRow(a, a.status === 'running' ? s.isRunning : s.isFinished))]
+              ? [flat.map(a => guard(a, () => agentRow(a, a.status === 'running' ? s.isRunning : s.isFinished)))]
               : [
                   running.length > 0 && section(`${kp}h-run`, `${s.running} · ${running.length}`),
-                  running.map(a => agentRow(a, s.isRunning)),
+                  running.map(a => guard(a, () => agentRow(a, s.isRunning))),
                   hasDone && toggleDone,
-                  !v.isDoneCollapsed && finished.map(a => agentRow(a, s.isFinished)),
+                  !v.isDoneCollapsed && finished.map(a => guard(a, () => agentRow(a, s.isFinished))),
                 ]),
             v.planned.length > 0 && section(`${kp}h-plan`, `${s.planned} · ${v.planned.length}`),
             v.planned.map(pl => (
@@ -1908,16 +1916,16 @@ export const register: Register = (on, options) => {
         body: () => [
           isEmpty && <Text dimColor>{s.empty}</Text>,
           ...(v.flat
-            ? [flat.map(row)]
+            ? [flat.map(a => guard(a, () => row(a)))]
             : [
                 running.length > 0 && (
                   <Text dimColor>
                     {s.running} · {running.length}
                   </Text>
                 ),
-                running.map(row),
+                running.map(a => guard(a, () => row(a))),
                 hasDone && toggleDone,
-                !v.isDoneCollapsed && finished.map(row),
+                !v.isDoneCollapsed && finished.map(a => guard(a, () => row(a))),
               ]),
           v.planned.length > 0 && (
             <Text dimColor>
@@ -1948,189 +1956,269 @@ export const register: Register = (on, options) => {
     const openVolume = async (file: string) => {
       const a = project ? await readVolume(io($), dataDir(project), file) : null
       if (!a) {
-        await update($, panel, prev => ({ ...prev, archiveError: file }))
+        await updatePanel($, prev => ({ ...prev, archiveError: file }))
         return
       }
       await update($, archive, () => a.entries)
-      await update($, panel, prev => ({ ...prev, archiveVolume: file, archiveListOpen: false, archiveError: '', archiveLimit: ARCHIVE_PAGE, openEntries: [], closedEntries: [] }))
+      await updatePanel($, prev => ({ ...prev, archiveVolume: file, archiveListOpen: false, archiveError: '', archiveLimit: ARCHIVE_PAGE, openEntries: [], closedEntries: [] }))
     }
     const backToLatest = async () => {
       const loaded = await loadLatest(io($), project).catch(() => null)
       if (!loaded) return
       await update($, archive, () => loaded.entries)
       await update($, volumes, () => loaded.volumes)
-      await update($, panel, prev => ({ ...prev, archiveVolume: null, archiveError: '', archiveWarning: loaded.isUnreadable ? UNREADABLE : '', archiveLimit: ARCHIVE_PAGE, openEntries: [], closedEntries: [] }))
+      await updatePanel($, prev => ({ ...prev, archiveVolume: null, archiveError: '', archiveWarning: loaded.isUnreadable ? UNREADABLE : '', archiveLimit: ARCHIVE_PAGE, openEntries: [], closedEntries: [] }))
     }
-    const archivePart = archiveSection({
-      ui: { Box, Text, Button },
-      Svg,
-      W,
-      cols,
-      svg,
-      fmt: { cost: fmtCost, tokens: fmtTokens, time: fmtTime },
-      tokensWord: s.tokensWord,
-      p,
-      entries: archiveList,
-      volumes: volumeList,
-      flowView,
-      unstarted,
-      on: {
-        // A press records the user's choice, which wins over the default (the first group shown open).
-        entry: (id, isOpen) => update($, panel, prev => ({ ...prev, openEntries: setIn(prev.openEntries, id, !isOpen), closedEntries: setIn(prev.closedEntries, id, isOpen) })),
-        list: () => update($, panel, prev => ({ ...prev, archiveListOpen: !prev.archiveListOpen, archiveError: '' })),
-        volume: openVolume,
-        latest: backToLatest,
-        more: () => update($, panel, prev => ({ ...prev, archiveLimit: (prev.archiveLimit ?? ARCHIVE_PAGE) + ARCHIVE_PAGE })),
-      },
-    })
-    // Only an open flow's own finished rows, and not in the compact panel.
-    const archivableIds = new Set(f && !f.isFinished && !p.isCompact ? archivable(list, meta).map(a => a.id) : [])
-    const live = (): ReturnType<typeof flowView> =>
-      flowView({
-        kp: '',
-        fp: '',
-        title,
-        list,
-        planned,
-        at,
-        t,
-        isDoneCollapsed: p.isDoneCollapsed,
-        doneKey: 'done',
-        onDone: () => update($, panel, prev => ({ ...prev, isDoneCollapsed: !prev.isDoneCollapsed })),
-        controls: toggles,
-        archive: { can: a => archivableIds.has(a.id), press: a => pressArchive($, a.id) },
-      })
 
-    if (Svg) {
-      const dc = rd ? contextSvg(W, rd, !p.isContextShown) : null
-      const contextSection = dc && rd ? (
-        <Svg source={svg(W, dc.height, dc.body)} alt={`context ${rd.percent}%`} width={W} height={dc.height} />
+    // Context, Usage and the Archive draw on their own, each from its own values, whatever the flow is doing.
+    const contextSection = await safe('Context', async () => {
+      const rd = await readReading($)
+      if (Svg) {
+        const dc = rd ? contextSvg(W, rd, !p.isContextShown) : null
+        return dc && rd ? (
+          <Svg source={svg(W, dc.height, dc.body)} alt={`context ${rd.percent}%`} width={W} height={dc.height} />
+        ) : (
+          <Text dimColor>no context data yet</Text>
+        )
+      }
+      // Terminal: the same content in text rows.
+      return rd && cols >= 20 ? (
+        <Box flexDirection="column">
+          {contextRows(rd, cols, !p.isContextShown).map((line, i) => (
+            <Text key={`ctx-${i}`} dimColor={i > 1} wrap="truncate-end">
+              {line}
+            </Text>
+          ))}
+        </Box>
       ) : (
         <Text dimColor>no context data yet</Text>
       )
+    })
 
-      const du = us.windows.length ? usageSvg(W, us.windows, us.samples, clockNow) : null
-      const usageSection = !p.isUsageShown ? null : du ? (
-        <Svg source={svg(W, du.height, du.body)} alt={us.windows.map(w => `${w.label} ${Math.max(0, 100 - w.percent)}% left`).join(', ')} width={W} height={du.height} />
+    const usageSection = await safe('Usage', async () => {
+      if (!p.isUsageShown) return null
+      const us = await readUsage($)
+      const clockNow = await $.clock.now()
+      if (Svg) {
+        const du = us.windows.length ? usageSvg(W, us.windows, us.samples, clockNow) : null
+        return du ? (
+          <Svg source={svg(W, du.height, du.body)} alt={us.windows.map(w => `${w.label} ${Math.max(0, 100 - w.percent)}% left`).join(', ')} width={W} height={du.height} />
+        ) : (
+          <Text dimColor>no usage data yet</Text>
+        )
+      }
+      return us.windows.length ? (
+        <Box flexDirection="column">
+          {usageRows(us.windows, us.samples, clockNow, cols).map((r, i) => (
+            <Text key={`use-${i}`} dimColor={r.kind !== 'bar'} color={r.kind === 'bar' ? (r.over ? 'red' : us.windows[r.window]?.kind === 'seven_day' ? 'blue' : 'yellow') : undefined} wrap="truncate-end">
+              {r.line}
+            </Text>
+          ))}
+        </Box>
       ) : (
         <Text dimColor>no usage data yet</Text>
       )
+    })
 
-      const plansSection = !p.isPlansShown ? null : planList.length ? (
-        <Box key="plans-section" flexDirection="column" gap={1}>
-          {planList.map(pl => {
-            const d = planSvg(W, pl, clockNow)
-            return <Svg key={`plan-view-${keyOf(pl.id)}`} source={svg(W, d.height, d.body)} alt={`${pl.title}: ${stateLabel(pl)}, ${percent(pl, where(pl))}%`} width={W} height={d.height} />
-          })}
-          {clearPlans}
-        </Box>
-      ) : (
-        <Text dimColor>no plans yet</Text>
-      )
-
-      if (p.isCompact) {
+    // The plans take their place only when there are some.
+    const plansSection = await safe('Plans', async () => {
+      if (!p.isPlansShown) return null
+      const planList = await readPlans($)
+      if (!planList.length) return null
+      const clockNow = await $.clock.now()
+      const clearPlans = planList.some(pl => pl.state === 'done') ? (
+        <Button
+          key="plans-clear"
+          label="Clear finished"
+          plain
+          onPress={async () => {
+            const next = await updatePlans($, prev => prev.filter(pl => pl.state !== 'done'))
+            await savePlans($, next)
+          }}
+        />
+      ) : null
+      if (Svg) {
         return (
-          <Box flexDirection="column" gap={1}>
-            <Svg source={compactSvg(W, list, planned, t)} alt={`${list.length} ${s.agentsCount}, ${summary}`} width={W} height={32} />
-            {topToggles}
-            {contextSection}
-            {usageSection}
-            {plansSection}
-            {toggles}
-            {archivePart}
+          <Box key="plans-section" flexDirection="column" gap={1}>
+            {planList.map(pl => {
+              const d = planSvg(W, pl, clockNow)
+              return <Svg key={`plan-view-${keyOf(pl.id)}`} source={svg(W, d.height, d.body)} alt={`${pl.title}: ${stateLabel(pl)}, ${percent(pl, where(pl))}%`} width={W} height={d.height} />
+            })}
+            {clearPlans}
           </Box>
         )
       }
-      const view = live()
       return (
         <Box flexDirection="column">
+          {planList.map(pl => (
+            <Box key={`plan-view-${keyOf(pl.id)}`} flexDirection="column">
+              {planRows(pl, clockNow, cols).map((r, i) => (
+                <Text key={`plan-${keyOf(pl.id)}-${i}`} bold={r.kind === 'head'} dimColor={r.kind === 'note'} color={r.kind === 'bar' ? r.color : undefined} wrap="truncate-end">
+                  {r.line}
+                </Text>
+              ))}
+            </Box>
+          ))}
+          {clearPlans}
+        </Box>
+      )
+    })
+
+    const archivePart = await safe('Archive', async () =>
+      archiveSection({
+        ui: { Box, Text, Button },
+        Svg,
+        W,
+        cols,
+        svg,
+        fmt: { cost: fmtCost, tokens: fmtTokens, time: fmtTime },
+        tokensWord: s.tokensWord,
+        p,
+        entries: await readArchive($),
+        volumes: await readVolumes($),
+        flowView,
+        unstarted,
+        on: {
+          // A press records the user's choice, which wins over the default (the first group shown open).
+          entry: (id, isOpen) => updatePanel($, prev => ({ ...prev, openEntries: setIn(prev.openEntries, id, !isOpen), closedEntries: setIn(prev.closedEntries, id, isOpen) })),
+          list: () => updatePanel($, prev => ({ ...prev, archiveListOpen: !prev.archiveListOpen, archiveError: '' })),
+          volume: openVolume,
+          latest: backToLatest,
+          more: () => updatePanel($, prev => ({ ...prev, archiveLimit: (prev.archiveLimit ?? ARCHIVE_PAGE) + ARCHIVE_PAGE })),
+        },
+      }),
+    )
+
+    // The flow block takes its place only once there is a flow or a run: the header, the rows and the planned tasks.
+    // `top` is the compact desktop strip above the buttons, `main` the rest.
+    const drawFlow = async (): Promise<{ top: RenderChildren; main: RenderChildren }> => {
+      const list = await readAgents($)
+      const f = await readFlow($)
+      if (!f && list.length === 0) return { top: null, main: null }
+      const meta = await readMeta($)
+      const at = Math.max(await readNow($), ...list.map(a => a.startedAt), 0)
+      const running = list.filter(a => a.status === 'running').reverse()
+      const finished = list.filter(a => a.status !== 'running').reverse()
+      const planned = plannedOf(f, list)
+      const t = totals(list, at)
+      // The pane's title says "Agents"; inside, only the flow's own name.
+      const title = f && !f.isFinished ? f.title : ''
+      const toggleCompact = (
+        <Button
+          key="compact"
+          label={p.isCompact ? s.expand : s.collapse}
+          plain
+          onPress={() => updatePanel($, prev => ({ ...prev, isCompact: !prev.isCompact }))}
+        />
+      )
+      const finishFlowButton = f && !f.isFinished ? <Button key="flow-finish" label="Finish flow" plain onPress={() => finishOpenFlow($)} /> : null
+      const toggles = finishFlowButton ? (
+        <Box key="title-controls" flexDirection="row" gap={1}>
+          {finishFlowButton}
+          {toggleCompact}
+        </Box>
+      ) : (
+        toggleCompact
+      )
+      const summary = `≈${fmtCost(t.cost)}, ${fmtTokens(t.tokens)} ${s.tokensWord}, ${fmtTime(t.time)}`
+      // Only an open flow's own finished rows, and not in the compact panel.
+      const archivableIds = new Set(f && !f.isFinished && !p.isCompact ? archivable(list, meta).map(a => a.id) : [])
+      const live = (): ReturnType<typeof flowView> =>
+        flowView({
+          kp: '',
+          fp: '',
+          title,
+          list,
+          planned,
+          at,
+          t,
+          isDoneCollapsed: p.isDoneCollapsed,
+          doneKey: 'done',
+          onDone: () => updatePanel($, prev => ({ ...prev, isDoneCollapsed: !prev.isDoneCollapsed })),
+          controls: toggles,
+          archive: { can: a => archivableIds.has(a.id), press: a => pressArchive($, a.id) },
+        })
+      if (Svg) {
+        if (p.isCompact) {
+          return { top: <Svg source={compactSvg(W, list, planned, t)} alt={`${list.length} ${s.agentsCount}, ${summary}`} width={W} height={32} />, main: toggles }
+        }
+        const view = live()
+        return { top: null, main: [view.header, view.body()] }
+      }
+      const view = live()
+      return {
+        top: null,
+        main: [
+          view.header,
+          p.isCompact ? (
+            <Text wrap="truncate-end">
+              {[...running, ...finished].map(a => (
+                <Text key={a.id} color={colorOf(tierOf(a.type))}>
+                  {STATUS_GLYPH[a.status]}{' '}
+                </Text>
+              ))}
+              {planned.map(pl => (
+                <Text key={`plan-${pl.n}`} dimColor>
+                  ◷{' '}
+                </Text>
+              ))}
+            </Text>
+          ) : (
+            <Box flexDirection="column" marginTop={1}>
+              {view.body()}
+            </Box>
+          ),
+        ],
+      }
+    }
+    let flowPart: { top: RenderChildren; main: RenderChildren }
+    try {
+      flowPart = await drawFlow()
+    } catch {
+      flowPart = { top: null, main: failed('Flow') }
+    }
+
+    if (Svg && p.isCompact) {
+      return (
+        <Box flexDirection="column" gap={1}>
+          {flowPart.top}
           {topToggles}
           {contextSection}
           {usageSection}
           {plansSection}
-          {view.header}
-          {view.body()}
+          {flowPart.main}
           {archivePart}
         </Box>
       )
     }
-
-    // Terminal: the same content in text rows.
-    const contextSection = rd && cols >= 20 ? (
-      <Box flexDirection="column">
-        {contextRows(rd, cols, !p.isContextShown).map((line, i) => (
-          <Text key={`ctx-${i}`} dimColor={i > 1} wrap="truncate-end">
-            {line}
-          </Text>
-        ))}
-      </Box>
-    ) : (
-      <Text dimColor>no context data yet</Text>
-    )
-    const usageSection = !p.isUsageShown ? null : us.windows.length ? (
-      <Box flexDirection="column">
-        {usageRows(us.windows, us.samples, clockNow, cols).map((r, i) => (
-          <Text key={`use-${i}`} dimColor={r.kind !== 'bar'} color={r.kind === 'bar' ? (r.over ? 'red' : us.windows[r.window]?.kind === 'seven_day' ? 'blue' : 'yellow') : undefined} wrap="truncate-end">
-            {r.line}
-          </Text>
-        ))}
-      </Box>
-    ) : (
-      <Text dimColor>no usage data yet</Text>
-    )
-    const plansSection = !p.isPlansShown ? null : planList.length ? (
-      <Box flexDirection="column">
-        {planList.map(pl => (
-          <Box key={`plan-view-${keyOf(pl.id)}`} flexDirection="column">
-            {planRows(pl, clockNow, cols).map((r, i) => (
-              <Text key={`plan-${keyOf(pl.id)}-${i}`} bold={r.kind === 'head'} dimColor={r.kind === 'note'} color={r.kind === 'bar' ? r.color : undefined} wrap="truncate-end">
-                {r.line}
-              </Text>
-            ))}
-          </Box>
-        ))}
-        {clearPlans}
-      </Box>
-    ) : (
-      <Text dimColor>no plans yet</Text>
-    )
-    const view = live()
     return (
       <Box flexDirection="column">
         {topToggles}
         {contextSection}
         {usageSection}
         {plansSection}
-        {view.header}
-        {p.isCompact ? (
-          <Text wrap="truncate-end">
-            {[...running, ...finished].map(a => (
-              <Text key={a.id} color={colorOf(tierOf(a.type))}>
-                {STATUS_GLYPH[a.status]}{' '}
-              </Text>
-            ))}
-            {planned.map(pl => (
-              <Text key={`plan-${pl.n}`} dimColor>
-                ◷{' '}
-              </Text>
-            ))}
-          </Text>
-        ) : (
-          <Box flexDirection="column" marginTop={1}>
-            {view.body()}
-          </Box>
-        )}
+        {flowPart.main}
         {archivePart}
+      </Box>
+    )
+  }).catch(async ($, e) => {
+    // The worst case still draws the top buttons and says so: never a blank pane.
+    const { Box, Text, Button } = $.ui.resolve(e)
+    const p = await readPanel($).catch(() => asPanel(null))
+    return (
+      <Box flexDirection="column">
+        {topToggleRow($, { Box, Button }, p)}
+        <Text dimColor>flowdeck could not draw this panel</Text>
       </Box>
     )
   })
 
   on('ui.render', { component: 'AbovePrompt' }, async ($, e, next) => {
-    const f = await read($, flow)
-    const hidden = (await read($, panel)).isBandHidden
+    const f = await readFlow($)
+    const hidden = (await readPanel($)).isBandHidden
     if (hidden || e.props.hasSurvey) return next(e)
     // the open plans, newest first, at most two rows below the flow row
-    const open = [...(await read($, plans))].reverse().filter(pl => pl.state === 'running' || pl.state === 'needs_input' || pl.state === 'error').slice(0, 2)
+    const open = [...(await readPlans($))].reverse().filter(pl => pl.state === 'running' || pl.state === 'needs_input' || pl.state === 'error').slice(0, 2)
     if (f === null && open.length === 0) return next(e)
 
     const theirs = await next(e) // what other mods and Claude Code draw here stays, below this row
@@ -2162,7 +2250,7 @@ export const register: Register = (on, options) => {
         </Box>
       )
     }
-    const list = await read($, agents)
+    const list = await readAgents($)
     const crew = list.length + plannedOf(f, list).length
     const isWorking = list.some(a => a.status === 'running')
     const crewButton = (
@@ -2177,7 +2265,7 @@ export const register: Register = (on, options) => {
         plain
         role="dismiss"
         onPress={async () => {
-          await update($, panel, p => ({ ...p, isBandHidden: true })) // hides the band only; the flow stays in the panel
+          await updatePanel($, p => ({ ...p, isBandHidden: true })) // hides the band only; the flow stays in the panel
         }}
       />
     )
@@ -2223,5 +2311,5 @@ export const register: Register = (on, options) => {
       {theirs}
       </Box>
     )
-  })
+  }).catch(($, e, next) => next(e)) // a band that fails gives way to what is drawn below it, never an error in the prompt area
 }

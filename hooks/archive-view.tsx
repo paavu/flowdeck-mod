@@ -107,6 +107,20 @@ function archiveGroup(v: ArchiveView, entry: ArchiveEntry, i: number): RenderChi
   )
 }
 
+// A group that throws draws one dim line in its place; the other groups still draw.
+function safeGroup(v: ArchiveView, entry: ArchiveEntry, i: number): RenderChildren {
+  try {
+    return archiveGroup(v, entry, i)
+  } catch {
+    const { Text } = v.ui
+    return (
+      <Text key={`archive-row-${keyOf(String(entry?.id ?? i))}`} dimColor>
+        Archive group could not be drawn
+      </Text>
+    )
+  }
+}
+
 // The Archive section, null while it is hidden.
 export function archiveSection(v: ArchiveView): RenderChildren {
   const { Box, Text, Button } = v.ui
@@ -145,7 +159,7 @@ export function archiveSection(v: ArchiveView): RenderChildren {
           {`Showing ${spanText(span.from, span.to)} · ${flows(entries.length)}`}
         </Text>
       )}
-      {entries.length === 0 ? <Text dimColor>no archive yet</Text> : shown.map((entry, i) => archiveGroup(v, entry, i))}
+      {entries.length === 0 ? <Text dimColor>no archive yet</Text> : shown.map((entry, i) => safeGroup(v, entry, i))}
       {entries.length > shown.length && <Button key="archive-more" label={`Show older (${entries.length - shown.length})`} plain onPress={v.on.more} />}
     </Box>
   )

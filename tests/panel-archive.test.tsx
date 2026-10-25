@@ -239,20 +239,25 @@ describe('the archive of flows', () => {
     expect(String(r?.result ?? r)).toContain('ok')
     const done: any = await progress($, { finished: true })
     expect(String(done?.result ?? done)).toContain('ok')
-    const p = await pane($)
-    await p.press({ key: 'archive' })
-    await settle()
+    const p = await pane($) // the Archive is shown by default
     expect((await p.findAll({ type: 'Button' })).some((b: any) => /^archive-k[a-z0-9]+$/.test(String(b.props.key)))).toBe(true)
     await p.unmount()
   })
 })
 
 describe('archive section in the panel', () => {
-  test('is off by default, the Archive button shows it and the choice is stored', async ($, on) => {
+  test('is on by default, the Archive button hides and shows it and the choice is stored', async ($, on) => {
     const { store } = engine(on, { store: { history: [entry(1)] } })
     await start($)
     await settle()
     let p = await pane($)
+    expect(await p.find({ type: 'Button', text: /▾ Archive/ })).toBeDefined()
+    expect(await p.find({ type: 'Button', key: `archive-${keyOf('e1')}` })).toBeDefined()
+    await p.press({ key: 'archive' })
+    await settle()
+    expect(store.historyShown).toBe(false)
+    await p.unmount()
+    p = await pane($)
     expect(await p.find({ type: 'Button', text: /▸ Archive/ })).toBeDefined()
     expect(await p.find({ type: 'Button', key: `archive-${keyOf('e1')}` })).toBeUndefined()
     await p.press({ key: 'archive' })
@@ -301,6 +306,7 @@ describe('archive section in the panel', () => {
     engine(on, { store: { historyShown: true, history: [entry(1)] } })
     await start($)
     await settle()
+    await plan($) // Collapse belongs to the flow block
     for (const surface of ['terminal', 'desktop'] as const) {
       const p = await pane($, surface)
       await p.press({ key: 'compact' })

@@ -8,7 +8,7 @@ const HISTORY = '/work/app/.claude/flowdeck/history.json'
 type Fail = { fs?: boolean; store?: boolean; clock?: boolean }
 
 function engine(on: any, opts: { store?: Record<string, unknown>; fail?: Fail } = {}) {
-  const store = opts.store ?? {}
+  const store = opts.store ?? { historyShown: false } // these tests read the live flow: the Archive stays hidden
   const fail = opts.fail ?? {}
   const fs = fakeFs(on, { fail })
   const files = fs.files
