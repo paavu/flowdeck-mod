@@ -3,7 +3,7 @@
 import type { Elements, RenderChildren } from 'claude-code'
 
 import type { AgentRun, ArchiveAgent, ArchiveEntry, ArchiveVolume, Panel, PlannedTask } from '../types'
-import { formatEntry, groupLine, spanOf, spanText } from './archive'
+import { formatEntry, groupLine, keyOf, spanOf, spanText } from './archive'
 
 export const ARCHIVE_PAGE = 10
 
@@ -68,11 +68,12 @@ function archiveGroup(v: ArchiveView, entry: ArchiveEntry, i: number): RenderChi
   const { Box, Text, Button } = v.ui
   const { Svg, W, p } = v
   const { lines } = formatEntry(entry)
+  const key = keyOf(entry.id)
   const isOpen = !(p.closedEntries ?? []).includes(entry.id) && (i === 0 || p.openEntries.includes(entry.id))
   const runs = (entry.agents ?? []).map(a => endedRun(a, entry.endedAt))
   const tasks = entry.tasks.map(tk => ({ title: tk.title, tier: tk.tier, after: tk.after ?? [] }))
   const view = v.flowView({
-    kp: `archive-${entry.id}-`,
+    kp: `archive-${key}-`,
     fp: `${entry.id}:`,
     // Archived flows are all finished: the group shows no title.
     title: '',
@@ -90,14 +91,14 @@ function archiveGroup(v: ArchiveView, entry: ArchiveEntry, i: number): RenderChi
         ? view.body()
         : <Box flexDirection="column" marginTop={1}>{view.body()}</Box>
       : lines.map((l, k) => (
-          <Text key={`archive-${entry.id}-${k}`} dimColor wrap="truncate-end">
+          <Text key={`archive-${key}-${k}`} dimColor wrap="truncate-end">
             {l}
           </Text>
         ))
   return (
-    <Box key={`archive-row-${entry.id}`} flexDirection="column" marginTop={i ? 1 : 0}>
+    <Box key={`archive-row-${key}`} flexDirection="column" marginTop={i ? 1 : 0}>
       {i > 0 && Svg && <Svg source={v.svg(W, 1, `<line class="ln" x1="0" y1="0.5" x2="${W}" y2="0.5"/>`)} alt="" width={W} height={1} />}
-      <Button key={`archive-${entry.id}`} plain onPress={() => v.on.entry(entry.id, isOpen)}>
+      <Button key={`archive-${key}`} plain onPress={() => v.on.entry(entry.id, isOpen)}>
         <Text wrap="truncate-end">{`${isOpen ? '▾' : '▸'} ${groupLine(entry, v.cols - 2)}`}</Text>
       </Button>
       {view.header}

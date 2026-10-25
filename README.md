@@ -95,6 +95,7 @@ flowdeck replaces savvy-flow, savvy-progress, context-bar, plan-progress and fli
 - A flow is known by its start time in the project folder: two flows started in the same millisecond there count as one.
 - `history-index.json` grows by about 70 bytes per flow (its side file's name, its start and end once in a volume); it is never rotated.
 - While `history.json` cannot be read, or its index stops rotation and it reaches 3,900,000 bytes, new flows are kept only in their side files and the mod store (itself limited to 4 MiB in all).
+- A button can ignore a click while workers run: the desktop app keeps a button's old handle until the next redraw and refuses a press on it; the panel redraws every 5 seconds while agents run, so elapsed times also advance in 5-second steps.
 - A flow saved again while another session's save of the same folder runs can be overwritten in `history.json` by its earlier finished snapshot, or stay hidden as held by a volume; the newer snapshot stays in its side file, and the panel shows the earlier one.
 
 Built from savvy-flow/savvy-progress, context-bar and plan-progress; see NOTICE.md.

@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'claude-code/testing'
 
-import { byteLength, mergeEntries, parseIndex, placeByEnd, rotate, spanText, summarize, withoutCopies, WRITE_MAX } from '../hooks/archive'
+import { byteLength, keyOf, mergeEntries, parseIndex, placeByEnd, rotate, spanText, summarize, withoutCopies, WRITE_MAX } from '../hooks/archive'
 import type { ArchiveEntry } from '../types'
 import { ENGINE_MAX, fakeFs, utf8 } from './fake-fs'
 
@@ -191,7 +191,7 @@ const view = async ($: any, surface: 'terminal' | 'desktop' = 'terminal') => {
     text: texts.map((t: any) => t.text).join('\n'),
     buttons,
     keys,
-    groups: keys.filter((k: string) => /^archive-(e\d+|\d+-\/work\/app)$/.test(k)).map((k: string) => k.slice('archive-'.length)),
+    groups: keys.filter((k: string) => /^archive-k[a-z0-9]+$/.test(k)).map((k: string) => k.slice('archive-'.length)),
     label: (key: string) => String(buttons.find((b: any) => String(b.props.key) === key)?.props.label ?? ''),
   }
 }
@@ -381,8 +381,8 @@ describe('copies left by a cut-short rotation', () => {
       await start($)
       await settle()
       const v = await view($)
-      expect(v.groups.slice(0, 7)).toEqual(['e1', 'e2', 'e3', 'e4', 'e5', 'e6', 'e7'])
-      expect(v.groups).not.toContain('e8')
+      expect(v.groups.slice(0, 7)).toEqual(['e1', 'e2', 'e3', 'e4', 'e5', 'e6', 'e7'].map(keyOf))
+      expect(v.groups).not.toContain(keyOf('e8'))
       expect(v.label('archive-older')).toBe('▸ Older volumes (1 file)')
       expect(env.writes).toEqual([])
       await flow($, env)
@@ -409,7 +409,7 @@ describe('copies left by a cut-short rotation', () => {
       await settle()
       const v = await view($)
       // e3 is an exact copy: hidden; e4 was saved again after it went into a volume: its newer snapshot shows
-      expect(v.groups).toEqual(['e4', 'e1', 'e2'])
+      expect(v.groups).toEqual(['e4', 'e1', 'e2'].map(keyOf))
       expect(v.text).toContain('· 3 flows')
       expect(env.writes).toEqual([])
     })
@@ -440,7 +440,7 @@ describe('a history.json that is there but cannot be used', () => {
     await start($)
     await settle()
     let v = await view($)
-    expect(v.groups).toEqual([id])
+    expect(v.groups).toEqual([id].map(keyOf))
     expect(v.text).toContain(WARNING)
     for (const surface of ['terminal', 'desktop'] as const) {
       const p = await pane($, surface)
@@ -448,7 +448,7 @@ describe('a history.json that is there but cannot be used', () => {
       await p.unmount()
       // a dim line above the groups
       expect(drawn.indexOf(WARNING)).toBeGreaterThan(-1)
-      expect(drawn.indexOf(WARNING)).toBeLessThan(drawn.indexOf(`"archive-${id}"`))
+      expect(drawn.indexOf(WARNING)).toBeLessThan(drawn.indexOf(`"archive-${keyOf(id)}"`))
     }
     // readable again: the next save merges the side file in, and it is not merged twice
     env.unreadable.clear()
@@ -461,7 +461,7 @@ describe('a history.json that is there but cannot be used', () => {
     await start($)
     await settle()
     v = await view($)
-    expect(v.groups).toEqual([`${env.clock.now}-/work/app`, id, 'e1', 'e2', 'e3'])
+    expect(v.groups).toEqual([`${env.clock.now}-/work/app`, id, 'e1', 'e2', 'e3'].map(keyOf))
     expect(v.text).not.toContain(WARNING)
   })
 
@@ -492,7 +492,7 @@ describe('a history.json that is there but cannot be used', () => {
     await start($)
     await settle()
     const v = await view($)
-    expect(v.groups).toEqual([id])
+    expect(v.groups).toEqual([id].map(keyOf))
     expect(v.text).toContain(WARNING)
   })
 
@@ -591,9 +591,9 @@ describe('browsing volumes in the panel', () => {
     for (const surface of ['terminal', 'desktop'] as const) {
       let v = await view($, surface)
       expect(v.text).toContain(`Showing ${spanText(entry(2).startedAt, entry(1).endedAt)} · 2 flows`)
-      expect(v.groups).toEqual(['e1', 'e2'])
+      expect(v.groups).toEqual(['e1', 'e2'].map(keyOf))
       expect(v.label('archive-older')).toBe('▸ Older volumes (2 files)')
-      expect(v.keys.indexOf('archive-older')).toBeLessThan(v.keys.indexOf('archive-e1'))
+      expect(v.keys.indexOf('archive-older')).toBeLessThan(v.keys.indexOf(`archive-${keyOf('e1')}`))
       expect(v.keys.some((k: string) => k.startsWith('archive-seg-'))).toBe(false)
       expect(v.keys).not.toContain('archive-latest')
       await press($, surface, 'archive-older')
@@ -620,26 +620,26 @@ describe('browsing volumes in the panel', () => {
       await press($, surface, 'archive-seg-history-1.json')
       expect(env.reads.slice(before)).toEqual([vol(1)])
       let v = await view($, surface)
-      expect(v.groups).toEqual(['e20', 'e21', 'e22'])
+      expect(v.groups).toEqual(['e20', 'e21', 'e22'].map(keyOf))
       expect(v.keys.filter((k: string) => k.startsWith('archive-'))[0]).toBe('archive-latest')
       expect(v.keys.indexOf('archive-latest')).toBeLessThan(v.keys.indexOf('archive-older'))
       expect(v.text).toContain(`Showing ${spanText(entry(22).startedAt, entry(20).endedAt)} · 3 flows`)
       expect(v.keys.some((k: string) => k.startsWith('archive-seg-'))).toBe(false)
       const fold = (w: typeof v, key: string) => JSON.stringify(w.buttons.find((b: any) => String(b.props.key) === key)).match(/[▾▸]/)?.[0]
       // the volume's newest group is open by default, the others folded
-      expect(fold(v, 'archive-e20')).toBe('▾')
-      expect(fold(v, 'archive-e21')).toBe('▸')
+      expect(fold(v, `archive-${keyOf('e20')}`)).toBe('▾')
+      expect(fold(v, `archive-${keyOf('e21')}`)).toBe('▸')
       expect(v.text).toMatch(/✓ write tests \(careful\)/)
-      await press($, surface, 'archive-e20')
+      await press($, surface, `archive-${keyOf('e20')}`)
       v = await view($, surface)
       expect(v.text).not.toMatch(/write tests/)
       await press($, surface, 'archive-latest')
       v = await view($, surface)
-      expect(v.groups).toEqual(['e1', 'e2'])
+      expect(v.groups).toEqual(['e1', 'e2'].map(keyOf))
       expect(v.keys).not.toContain('archive-latest')
       // Back to latest applies the default again
-      expect(fold(v, 'archive-e1')).toBe('▾')
-      expect(fold(v, 'archive-e2')).toBe('▸')
+      expect(fold(v, `archive-${keyOf('e1')}`)).toBe('▾')
+      expect(fold(v, `archive-${keyOf('e2')}`)).toBe('▸')
     }
     expect(env.writes).toEqual([])
   })
@@ -650,18 +650,18 @@ describe('browsing volumes in the panel', () => {
     await settle()
     const fold = (w: Awaited<ReturnType<typeof view>>, key: string) => JSON.stringify(w.buttons.find((b: any) => String(b.props.key) === key)).match(/[▾▸]/)?.[0]
     // a user's choice on the latest part: e1 folded, e2 opened
-    await press($, 'terminal', 'archive-e1', 'archive-e2')
+    await press($, 'terminal', `archive-${keyOf('e1')}`, `archive-${keyOf('e2')}`)
     let v = await view($)
-    expect([fold(v, 'archive-e1'), fold(v, 'archive-e2')]).toEqual(['▸', '▾'])
-    await press($, 'terminal', 'archive-older', 'archive-seg-history-1.json', 'archive-e20', 'archive-e21')
+    expect([fold(v, `archive-${keyOf('e1')}`), fold(v, `archive-${keyOf('e2')}`)]).toEqual(['▸', '▾'])
+    await press($, 'terminal', 'archive-older', 'archive-seg-history-1.json', `archive-${keyOf('e20')}`, `archive-${keyOf('e21')}`)
     v = await view($)
-    expect([fold(v, 'archive-e20'), fold(v, 'archive-e21')]).toEqual(['▸', '▾'])
+    expect([fold(v, `archive-${keyOf('e20')}`), fold(v, `archive-${keyOf('e21')}`)]).toEqual(['▸', '▾'])
     await press($, 'terminal', 'archive-older', 'archive-seg-history-2.json', 'archive-older', 'archive-seg-history-1.json')
     v = await view($)
-    expect([fold(v, 'archive-e20'), fold(v, 'archive-e21'), fold(v, 'archive-e22')]).toEqual(['▾', '▸', '▸'])
+    expect([fold(v, `archive-${keyOf('e20')}`), fold(v, `archive-${keyOf('e21')}`), fold(v, `archive-${keyOf('e22')}`)]).toEqual(['▾', '▸', '▸'])
     await press($, 'terminal', 'archive-latest')
     v = await view($)
-    expect([fold(v, 'archive-e1'), fold(v, 'archive-e2')]).toEqual(['▾', '▸'])
+    expect([fold(v, `archive-${keyOf('e1')}`), fold(v, `archive-${keyOf('e2')}`)]).toEqual(['▾', '▸'])
   })
 
   test('a volume that cannot be read says so and the view stays', async ($, on) => {
@@ -672,7 +672,7 @@ describe('browsing volumes in the panel', () => {
       await press($, surface, 'archive-older', 'archive-seg-history-2.json')
       const v = await view($, surface)
       expect(v.text).toContain('could not load history-2.json')
-      expect(v.groups).toEqual(['e1', 'e2'])
+      expect(v.groups).toEqual(['e1', 'e2'].map(keyOf))
       expect(v.keys).not.toContain('archive-latest')
       await press($, surface, 'archive-older')
     }
@@ -680,7 +680,7 @@ describe('browsing volumes in the panel', () => {
     await press($, 'terminal', 'archive-older', 'archive-seg-history-1.json')
     const v = await view($)
     expect(v.text).toContain('could not load history-1.json')
-    expect(v.groups).toEqual(['e1', 'e2'])
+    expect(v.groups).toEqual(['e1', 'e2'].map(keyOf))
     expect(env.writes).toEqual([])
   })
 
@@ -713,10 +713,10 @@ describe('browsing volumes in the panel', () => {
     expect(idsOf(env.files[HISTORY])).toEqual([id, 'e1', 'e2'])
     expect(env.files[vol(2)]).toBe(volume)
     let v = await view($)
-    expect(v.groups).toEqual(['e10', 'e11'])
+    expect(v.groups).toEqual(['e10', 'e11'].map(keyOf))
     await press($, 'terminal', 'archive-latest')
     v = await view($)
-    expect(v.groups).toEqual([id, 'e1', 'e2'])
+    expect(v.groups).toEqual([id, 'e1', 'e2'].map(keyOf))
   })
 
   test('without volumes there is no Older volumes control', async ($, on) => {
@@ -816,7 +816,7 @@ describe('sizes are UTF-8 bytes', () => {
     expect((env.store.history as any[]).map(e => e.id)).toEqual([id])
     await start($)
     await settle()
-    expect((await view($)).groups[0]).toBe(id)
+    expect((await view($)).groups[0]).toBe(keyOf(id))
   })
 })
 
@@ -870,7 +870,7 @@ describe('two sessions saving at once', () => {
     // the next load reads A back from its side file, in its place in time
     await start($)
     await settle()
-    expect((await view($)).groups).toEqual([idB, idA, 'e1'])
+    expect((await view($)).groups).toEqual([idB, idA, 'e1'].map(keyOf))
     // and the next save writes every flow into history.json, each once
     await flow($, env, 'C')
     expect(idsOf(env.files[HISTORY])).toEqual([`${env.clock.now}-/work/app`, idB, idA, 'e1'])

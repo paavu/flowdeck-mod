@@ -1,11 +1,12 @@
 import { describe, expect, test } from 'claude-code/testing'
 
 function engine(on: any, opts: { refuseCommand?: boolean; refuseTool?: string } = {}) {
-  const state = { ticked: false, tools: [] as string[], commands: [] as string[] }
+  const state = { ticked: false, every: [] as unknown[], tools: [] as string[], commands: [] as string[] }
   on('env.get', () => ({ value: undefined }))
   on('settings.read', () => ({ value: {} }))
-  on('clock.every', () => {
+  on('clock.every', (_$: any, e: any) => {
     state.ticked = true
+    state.every.push(e)
     return { value: undefined }
   })
   on('clock.now', () => ({ value: 1 }))
@@ -163,5 +164,12 @@ describe('linked session flow', () => {
     expect(state.tools).toEqual(['progress', 'plan'])
     expect(state.commands).toEqual(['flowdeck-agents'])
     expect(state.ticked).toBe(true)
+  })
+
+  test('the running clocks tick every 5 seconds, not every second', async ($, on) => {
+    const state = engine(on)
+    await start($)
+    expect(state.every.length).toBe(1)
+    expect(state.every[0]).toEqual({ ms: 5000 })
   })
 })

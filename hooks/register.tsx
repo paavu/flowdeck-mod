@@ -6,7 +6,7 @@ import { derive, finishItems, hasItemOps, ITEM_H, itemAlt, itemLine, itemsOf, it
 import type { StepInput } from './agent-items'
 import { agentState, HOUSEKEEPING, splitHead, stateText } from './agent-state'
 import { contextRows, contextSvg, toReading } from './context'
-import { EXTRA_FILE, isWorthKeeping, snapshot, VOLUME_MAX } from './archive'
+import { EXTRA_FILE, isWorthKeeping, keyOf, snapshot, VOLUME_MAX } from './archive'
 import { dataDir, getFile, loadLatest, parseJson, readVolume, saveToProject, saveToStore, writeData } from './archive-store'
 import type { Io, Latest } from './archive-store'
 import { ARCHIVE_PAGE, archiveSection, UNREADABLE } from './archive-view'
@@ -47,6 +47,7 @@ const plans = atom({ plugin: 'flowdeck', key: 'plans' } as const, [] as TaskPlan
 const TOOL = 'mcp__flowdeck__progress'
 const STEP_TOOL = 'mcp__flowdeck__step'
 const PLAN_TOOL = 'mcp__flowdeck__plan'
+const TICK_MS = 5000
 const PLAN_RULE = `# Progress plans
 A task needing more than ~3 edits or commands gets a plan via ${PLAN_TOOL}: create it once with the full breakdown (2-7 stages of steps {title}, or kind: "todo" for one flat list; titles of at most 4 words, in the user's language; one id per task; the first open step becomes active). Move it with short calls: {id, next:true}, {id, done:["A"], active:"B"}, {id, failed:"B", note}, {id, state:"needs_input", note} before asking the user, {id, state:"done"} to finish. When the plan changes, resend stages under the same id. During a /flowdeck flow, report the flow's tasks with ${TOOL}, not a second plan for the same work. No edit is ever blocked for lack of a plan.`
 const PANE = 'flowdeck-agents'
@@ -1218,8 +1219,9 @@ export const register: Register = (on, options) => {
       description: 'Show or hide the flowdeck panel: context window, subagents running, finished and planned, with model, cost and time',
     }).catch(() => {}) // a name Claude Code already has is refused: start anyway
 
-    // Ticks the running agents' clocks; quiet when nothing runs.
-    $.clock.every(1000, () => {
+    // Ticks the running agents' clocks; quiet when nothing runs. Every tick redraws the pane and gives its buttons new
+    // handles, so it stays slow: a click on a handle from before the redraw is refused by the desktop app.
+    $.clock.every(TICK_MS, () => {
       void (async () => {
         const list = await read($, agents)
         if (!list.some(a => a.status === 'running')) return
@@ -2000,7 +2002,7 @@ export const register: Register = (on, options) => {
         <Box key="plans-section" flexDirection="column" gap={1}>
           {planList.map(pl => {
             const d = planSvg(W, pl, clockNow)
-            return <Svg key={`plan-view-${pl.id}`} source={svg(W, d.height, d.body)} alt={`${pl.title}: ${stateLabel(pl)}, ${percent(pl, where(pl))}%`} width={W} height={d.height} />
+            return <Svg key={`plan-view-${keyOf(pl.id)}`} source={svg(W, d.height, d.body)} alt={`${pl.title}: ${stateLabel(pl)}, ${percent(pl, where(pl))}%`} width={W} height={d.height} />
           })}
           {clearPlans}
         </Box>
@@ -2061,9 +2063,9 @@ export const register: Register = (on, options) => {
     const plansSection = !p.isPlansShown ? null : planList.length ? (
       <Box flexDirection="column">
         {planList.map(pl => (
-          <Box key={`plan-view-${pl.id}`} flexDirection="column">
+          <Box key={`plan-view-${keyOf(pl.id)}`} flexDirection="column">
             {planRows(pl, clockNow, cols).map((r, i) => (
-              <Text key={`plan-${pl.id}-${i}`} bold={r.kind === 'head'} dimColor={r.kind === 'note'} color={r.kind === 'bar' ? r.color : undefined} wrap="truncate-end">
+              <Text key={`plan-${keyOf(pl.id)}-${i}`} bold={r.kind === 'head'} dimColor={r.kind === 'note'} color={r.kind === 'bar' ? r.color : undefined} wrap="truncate-end">
                 {r.line}
               </Text>
             ))}
@@ -2124,13 +2126,13 @@ export const register: Register = (on, options) => {
             const { Svg } = ui
             const d = planBandSvg(bandWidth, pl, planNow)
             return (
-              <Box key={`flowdeck-plan-${pl.id}`} flexDirection="row" flexShrink={1} minWidth={0} overflow="hidden">
+              <Box key={`flowdeck-plan-${keyOf(pl.id)}`} flexDirection="row" flexShrink={1} minWidth={0} overflow="hidden">
                 <Svg source={svg(bandWidth, d.height, d.body)} alt={planAlt(pl)} width={bandWidth} height={d.height} />
               </Box>
             )
           })
         : open.map(pl => (
-            <Text key={`flowdeck-plan-${pl.id}`} color={STATE_COLOR[pl.state] ?? ACCENT} wrap="truncate-end">
+            <Text key={`flowdeck-plan-${keyOf(pl.id)}`} color={STATE_COLOR[pl.state] ?? ACCENT} wrap="truncate-end">
               {planBandText(pl, e.props.bodyColumns)}
             </Text>
           ))

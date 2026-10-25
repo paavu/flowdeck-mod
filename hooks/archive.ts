@@ -27,6 +27,14 @@ export const sideStart = (file: string): number | null => {
 }
 
 // The UTF-8 size of a text: 1 byte up to U+007F, 2 up to U+07FF, 4 for a surrogate pair, else 3 (a lone surrogate is written as U+FFFD).
+// A short element key for an id that may hold a path or free text: the engine matches keys exactly, so a key keeps to
+// [a-z0-9]. FNV-1a 32-bit of the code points, then the length.
+export function keyOf(id: string): string {
+  let h = 0x811c9dc5
+  for (const ch of id) h = Math.imul(h ^ ch.codePointAt(0)!, 0x01000193) >>> 0
+  return `k${h.toString(36).padStart(7, '0')}${id.length.toString(36)}`
+}
+
 export function byteLength(s: string): number {
   let n = 0
   for (let i = 0; i < s.length; i++) {

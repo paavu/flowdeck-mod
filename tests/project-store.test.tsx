@@ -1,5 +1,6 @@
 import { describe, expect, test } from 'claude-code/testing'
 
+import { keyOf } from '../hooks/archive'
 import { fakeFs } from './fake-fs'
 import type { Fail } from './fake-fs'
 
@@ -67,8 +68,8 @@ const archiveButtons = async ($: any): Promise<string[]> => {
   const p = await pane($)
   const all = await p.findAll({ type: 'Button' })
   await p.unmount()
-  // the groups' fold keys: `archive-e<i>` for the saved entries, `archive-<startedAt>-<project>` for flows run here
-  return all.map((b: any) => String(b.props.key)).filter((k: string) => /^archive-(e\d+|\d+-.*)$/.test(k))
+  // the groups' fold keys: `archive-<keyOf(entry id)>`
+  return all.map((b: any) => String(b.props.key)).filter((k: string) => /^archive-k[a-z0-9]+$/.test(k))
 }
 const titles = (text: string | undefined): string[] => (JSON.parse(text ?? '[]') as any[]).map(e => e.title)
 const WARNING = 'history.json could not be read; showing recovered entries (the file is untouched)'
@@ -127,12 +128,12 @@ describe('the archive in the project folder', () => {
     expect(titles(files['/b/.claude/flowdeck/history.json'])).toEqual(['Beta'])
     const b = await archiveButtons($)
     expect(b).toHaveLength(1)
-    expect(b[0]).toMatch(/-\/b$/)
+    expect(b[0]).toBe(`archive-${keyOf(JSON.parse(files['/b/.claude/flowdeck/history.json']!)[0].id)}`)
     await start($, '/a')
     await settle()
     const a = await archiveButtons($)
     expect(a).toHaveLength(1)
-    expect(a[0]).toMatch(/-\/a$/)
+    expect(a[0]).toBe(`archive-${keyOf(JSON.parse(files['/a/.claude/flowdeck/history.json']!)[0].id)}`)
   })
 
   test('a restart reads the file and the panel shows it', async ($, on) => {
@@ -141,7 +142,7 @@ describe('the archive in the project folder', () => {
     await settle()
     const list = await archiveButtons($)
     expect(list).toHaveLength(2)
-    expect(list[0]).toBe('archive-e2')
+    expect(list[0]).toBe(`archive-${keyOf('e2')}`)
   })
 
   test('a file of 60 entries keeps them all on the next save', async ($, on) => {
@@ -164,7 +165,7 @@ describe('the archive in the project folder', () => {
     await p.unmount()
     const shown = await archiveButtons($)
     expect(shown).toHaveLength(1)
-    expect(shown[0]).toBe('archive-e9')
+    expect(shown[0]).toBe(`archive-${keyOf('e9')}`)
     await flow($)
     expect(files[HISTORY]).toBe('nope')
     expect(titles(files[`${DIR}/history-extra-${NOW}.json`])).toEqual(['Ship it'])
@@ -172,7 +173,7 @@ describe('the archive in the project folder', () => {
     p = await pane($)
     expect(await p.find({ type: 'Text', text: WARNING })).toBeDefined()
     await p.unmount()
-    expect((await archiveButtons($)).map(b => (/^archive-\d+-/.test(b) ? 'Ship it' : b === 'archive-e9' ? 'Mine' : b))).toEqual(['Ship it', 'Mine'])
+    expect((await archiveButtons($)).map(b => (b === `archive-${keyOf('e9')}` ? 'Mine' : 'Ship it'))).toEqual(['Ship it', 'Mine'])
   })
 
   test('a file that is there but cannot be read (oversized) is never overwritten', async ($, on) => {
@@ -197,7 +198,7 @@ describe('the archive in the project folder', () => {
     await settle()
     const shown = await archiveButtons($)
     expect(shown).toHaveLength(2)
-    expect(shown.includes('archive-e2')).toBe(false)
+    expect(shown.includes(`archive-${keyOf('e2')}`)).toBe(false)
     await flow($)
     expect(titles(files[HISTORY])).toEqual(['Ship it', 'Mine', 'Mine too'])
     clock.now = NOW + 60_000
@@ -259,9 +260,9 @@ describe('the archive in the project folder', () => {
     await start($)
     await settle()
     const p = await pane($)
-    const groups = (await p.findAll({ type: 'Button' })).map((b: any) => String(b.props.key)).filter((k: string) => /^archive-\d+-\/work\/app$/.test(k))
+    const groups = (await p.findAll({ type: 'Button' })).map((b: any) => String(b.props.key)).filter((k: string) => /^archive-k[a-z0-9]+$/.test(k))
     await p.unmount()
-    expect(groups).toEqual([`archive-${NOW + 60_000}-/work/app`, `archive-${NOW}-/work/app`])
+    expect(groups).toEqual([`archive-${keyOf(`${NOW + 60_000}-/work/app`)}`, `archive-${keyOf(`${NOW}-/work/app`)}`])
   })
 })
 

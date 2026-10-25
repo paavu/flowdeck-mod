@@ -1,5 +1,7 @@
 import { describe, expect, test } from 'claude-code/testing'
 
+import { keyOf } from '../hooks/archive'
+
 const NOW = Date.UTC(2026, 9, 26, 12, 40)
 const HOUR = 3_600_000
 
@@ -240,7 +242,7 @@ describe('the archive of flows', () => {
     const p = await pane($)
     await p.press({ key: 'archive' })
     await settle()
-    expect((await p.findAll({ type: 'Button' })).some((b: any) => /^archive-\d+-/.test(String(b.props.key)))).toBe(true)
+    expect((await p.findAll({ type: 'Button' })).some((b: any) => /^archive-k[a-z0-9]+$/.test(String(b.props.key)))).toBe(true)
     await p.unmount()
   })
 })
@@ -252,7 +254,7 @@ describe('archive section in the panel', () => {
     await settle()
     let p = await pane($)
     expect(await p.find({ type: 'Button', text: /▸ Archive/ })).toBeDefined()
-    expect(await p.find({ type: 'Button', key: 'archive-e1' })).toBeUndefined()
+    expect(await p.find({ type: 'Button', key: `archive-${keyOf('e1')}` })).toBeUndefined()
     await p.press({ key: 'archive' })
     await settle()
     expect(store.historyShown).toBe(true)
@@ -271,8 +273,8 @@ describe('archive section in the panel', () => {
     await settle()
     for (const surface of ['terminal', 'desktop'] as const) {
       const p = await pane($, surface)
-      const buttons = (await p.findAll({ type: 'Button' })).filter((b: any) => /^archive-e\d$/.test(String(b.props.key)))
-      expect(buttons.map((b: any) => String(b.props.key))).toEqual(['archive-e2', 'archive-e1'])
+      const buttons = (await p.findAll({ type: 'Button' })).filter((b: any) => /^archive-k[a-z0-9]+$/.test(String(b.props.key)))
+      expect(buttons.map((b: any) => String(b.props.key))).toEqual([`archive-${keyOf('e2')}`, `archive-${keyOf('e1')}`])
       await p.unmount()
     }
   })
@@ -285,11 +287,11 @@ describe('archive section in the panel', () => {
     expect(await p.find({ type: 'Button', text: /^▾ .* · 2 items$/ })).toBeDefined()
     expect(await p.find({ type: 'Text', text: /✓ write tests \(careful\)/ })).toBeDefined()
     expect(await p.find({ type: 'Text', text: /○ wire it \(medium\)/ })).toBeDefined()
-    await p.press({ key: 'archive-e1' })
+    await p.press({ key: `archive-${keyOf('e1')}` })
     await settle()
     expect(await p.find({ type: 'Button', text: /^▸ .* · 2 items$/ })).toBeDefined()
     expect(await p.find({ type: 'Text', text: /write tests \(careful\)/ })).toBeUndefined()
-    await p.press({ key: 'archive-e1' })
+    await p.press({ key: `archive-${keyOf('e1')}` })
     await settle()
     expect(await p.find({ type: 'Text', text: /✓ write tests \(careful\)/ })).toBeDefined()
     await p.unmount()
@@ -303,7 +305,7 @@ describe('archive section in the panel', () => {
       const p = await pane($, surface)
       await p.press({ key: 'compact' })
       await settle()
-      expect(await p.find({ type: 'Button', key: 'archive-e1' })).toBeDefined()
+      expect(await p.find({ type: 'Button', key: `archive-${keyOf('e1')}` })).toBeDefined()
       await p.press({ key: 'compact' })
       await settle()
       await p.unmount()
@@ -341,7 +343,7 @@ describe('archive section in the panel', () => {
       await start($)
       await settle()
       const p = await pane($)
-      if (Array.isArray(saved)) expect(await p.find({ type: 'Button', key: 'archive-e1' })).toBeDefined()
+      if (Array.isArray(saved)) expect(await p.find({ type: 'Button', key: `archive-${keyOf('e1')}` })).toBeDefined()
       else expect(await p.find({ type: 'Text', text: /no archive yet/ })).toBeDefined()
       await p.unmount()
       await plan($, 'After garbage')
