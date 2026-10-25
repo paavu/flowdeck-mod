@@ -316,15 +316,17 @@ export function entryDate(entry: ArchiveEntry, tz?: string, compact = false): st
 
 const statusOf = (entry: ArchiveEntry): string =>
   entry.partial ? 'archived while the flow runs' : entry.status === 'finished' ? 'finished' : 'ended with the session'
-const shortStatusOf = (entry: ArchiveEntry): string => (entry.partial ? 'partial' : entry.status === 'finished' ? 'finished' : 'ended')
 
-// The group's date line fitted to `cols`: the full line, then without the time of day, then the short status, then
-// without the status, so done/total stays visible.
-export function entryLine(entry: ArchiveEntry, cols: number, tz?: string): string {
-  const n = `${entry.done}/${entry.total}`
+// The group's fold line fitted to `cols`: `Oct 26, 2026 · 10:42 AM · 17 items`, then without the time of day,
+// then with the bare count; an entry archived while its flow ran ends in ` · running`. The count is the rows the
+// group shows: its runs, or the tasks of an entry saved without runs.
+export function groupLine(entry: ArchiveEntry, cols: number, tz?: string): string {
+  const n = entry.agents?.length || entry.tasks.length
+  const items = `${n} ${n === 1 ? 'item' : 'items'}`
+  const tail = entry.partial ? ' · running' : ''
   const date = entryDate(entry, tz)
   const day = entryDate(entry, tz, true)
-  const tries = [`${date} · ${n} · ${statusOf(entry)}`, `${day} · ${n} · ${statusOf(entry)}`, `${day} · ${n} · ${shortStatusOf(entry)}`, `${day} · ${n}`]
+  const tries = [`${date} · ${items}${tail}`, `${day} · ${items}${tail}`, `${day} · ${n}${tail}`, `${day} · ${n}`]
   return tries.find(t => t.length <= cols) ?? tries[tries.length - 1]
 }
 

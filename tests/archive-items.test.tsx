@@ -267,14 +267,9 @@ describe('the partial archive entry', () => {
     await press($, 'archive-item-w1')
     for (const surface of ['terminal', 'desktop'] as const) {
       const p = await pane($, surface)
-      const groups = await p.findAll({ type: 'Button', text: /^▾ Ship it$/ })
+      const groups = await p.findAll({ type: 'Button', text: /^▾ .* · 1 item · running$/ })
       expect(groups.length).toBe(1)
-      const lines = await p.findAll({ type: 'Text', text: /^  .* · 1\/3 · / })
-      expect(lines.length).toBe(1)
-      expect(lines[0].text).toContain('archived while the flow runs')
-      expect(lines[0].text).not.toContain('ended with the session')
-      // the newest group is open, its row flat with no Finished toggle
-      expect(JSON.stringify(groups[0])).toContain('▾ Ship it')
+      expect(await p.find({ type: 'Text', text: /1\/3|archived while the flow runs|ended with the session/ })).toBeUndefined()
       const buttons = await p.findAll({ type: 'Button' })
       // inside the group the archived row has no Archive button
       expect(archiveKeys(buttons)).toEqual(['archive-item-w3', 'archive-item-w2'])
@@ -381,7 +376,7 @@ describe('the partial archive entry', () => {
     await settle()
     await press($, 'archive')
     const p = await pane($)
-    expect(await p.find({ type: 'Text', text: /archived while the flow runs/ })).toBeDefined()
+    expect(await p.find({ type: 'Button', text: / · running$/ })).toBeDefined()
     await p.unmount()
   })
 })

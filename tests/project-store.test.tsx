@@ -67,7 +67,8 @@ const archiveButtons = async ($: any): Promise<string[]> => {
   const p = await pane($)
   const all = await p.findAll({ type: 'Button' })
   await p.unmount()
-  return all.map((b: any) => JSON.stringify(b)).filter((s: string) => /Flow |Ship it|Alpha|Beta|Mine|Other/.test(s))
+  // the groups' fold keys: `archive-e<i>` for the saved entries, `archive-<startedAt>-<project>` for flows run here
+  return all.map((b: any) => String(b.props.key)).filter((k: string) => /^archive-(e\d+|\d+-.*)$/.test(k))
 }
 const titles = (text: string | undefined): string[] => (JSON.parse(text ?? '[]') as any[]).map(e => e.title)
 const WARNING = 'history.json could not be read; showing recovered entries (the file is untouched)'
@@ -126,12 +127,12 @@ describe('the archive in the project folder', () => {
     expect(titles(files['/b/.claude/flowdeck/history.json'])).toEqual(['Beta'])
     const b = await archiveButtons($)
     expect(b).toHaveLength(1)
-    expect(b[0]).toContain('Beta')
+    expect(b[0]).toMatch(/-\/b$/)
     await start($, '/a')
     await settle()
     const a = await archiveButtons($)
     expect(a).toHaveLength(1)
-    expect(a[0]).toContain('Alpha')
+    expect(a[0]).toMatch(/-\/a$/)
   })
 
   test('a restart reads the file and the panel shows it', async ($, on) => {
@@ -140,7 +141,7 @@ describe('the archive in the project folder', () => {
     await settle()
     const list = await archiveButtons($)
     expect(list).toHaveLength(2)
-    expect(list[0]).toContain('Flow 2')
+    expect(list[0]).toBe('archive-e2')
   })
 
   test('a file of 60 entries keeps them all on the next save', async ($, on) => {
@@ -163,7 +164,7 @@ describe('the archive in the project folder', () => {
     await p.unmount()
     const shown = await archiveButtons($)
     expect(shown).toHaveLength(1)
-    expect(shown[0]).toContain('Mine')
+    expect(shown[0]).toBe('archive-e9')
     await flow($)
     expect(files[HISTORY]).toBe('nope')
     expect(titles(files[`${DIR}/history-extra-${NOW}.json`])).toEqual(['Ship it'])
@@ -171,7 +172,7 @@ describe('the archive in the project folder', () => {
     p = await pane($)
     expect(await p.find({ type: 'Text', text: WARNING })).toBeDefined()
     await p.unmount()
-    expect((await archiveButtons($)).map(b => (b.includes('Ship it') ? 'Ship it' : 'Mine'))).toEqual(['Ship it', 'Mine'])
+    expect((await archiveButtons($)).map(b => (/^archive-\d+-/.test(b) ? 'Ship it' : b === 'archive-e9' ? 'Mine' : b))).toEqual(['Ship it', 'Mine'])
   })
 
   test('a file that is there but cannot be read (oversized) is never overwritten', async ($, on) => {
@@ -196,7 +197,7 @@ describe('the archive in the project folder', () => {
     await settle()
     const shown = await archiveButtons($)
     expect(shown).toHaveLength(2)
-    expect(shown.some(s => s.includes('Other'))).toBe(false)
+    expect(shown.includes('archive-e2')).toBe(false)
     await flow($)
     expect(titles(files[HISTORY])).toEqual(['Ship it', 'Mine', 'Mine too'])
     clock.now = NOW + 60_000
