@@ -16,6 +16,9 @@ export const str = (v: unknown, max = 120) => (typeof v === 'string' ? v.replace
 const status = (v: unknown): StepStatus => (STATUSES.includes(v as StepStatus) ? (v as StepStatus) : 'pending')
 const list = (v: unknown): PlanInput[] => (Array.isArray(v) ? v.filter(x => x && typeof x === 'object') : []) as PlanInput[]
 export const isFinished = (s: StepStatus) => s === 'done' || s === 'skipped'
+// a saved step or substep: a title and a known status
+export const isStoredStep = (st: unknown): st is { title: string; status: StepStatus } =>
+  !!st && typeof st === 'object' && typeof (st as { title?: unknown }).title === 'string' && STATUSES.includes((st as { status?: unknown }).status as StepStatus)
 const same = (a: string, b: string) => a.trim().toLowerCase() === b.trim().toLowerCase()
 
 export const slug = (s: string) =>

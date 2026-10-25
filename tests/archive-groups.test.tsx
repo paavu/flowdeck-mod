@@ -373,7 +373,7 @@ describe('archive groups in the panel', () => {
     expect(d.keys).toContain(`archive-${keyOf('gA')}`)
   })
 
-  test('the open group shows its rows flat, newest first, with their final states and stats, and the unstarted task; no Finished toggle', async ($, on) => {
+  test('the open group shows its rows flat, newest first, with their final states and stats; no planned task and no Finished toggle', async ($, on) => {
     engine(on, { store: { historyShown: true, history: [groupA(), groupB()] } })
     await start($)
     await settle()
@@ -385,8 +385,8 @@ describe('archive groups in the panel', () => {
       expect(t.text).toMatch(/Done/)
       expect(t.text).toMatch(/Error/)
       expect(t.text).toMatch(/ctx 10% · 100k ≈\$0\.50 5:00/)
-      expect(t.text).toMatch(/Planned · 1/)
-      expect(t.text).toMatch(/3\. polish/)
+      expect(t.text).not.toMatch(/Planned/)
+      expect(t.text).not.toMatch(/3\. polish/)
       expect(t.text).not.toMatch(/Finished|Running ·/)
       expect(JSON.stringify(t.buttons)).not.toMatch(/Finished/)
       expect(t.keys.some((k: string) => /finished/.test(k))).toBe(false)
@@ -398,7 +398,7 @@ describe('archive groups in the panel', () => {
       expect(String(done?.props.source)).toContain('5:00')
       const rows = d.alts.filter((a: string) => /^(write tests|wire it):/.test(a))
       expect(rows.map((a: string) => a.split(':')[0])).toEqual(['wire it', 'write tests'])
-      expect(d.alts.some((a: string) => /^3\. polish: planned/.test(a))).toBe(true)
+      expect(d.alts.some((a: string) => /^3\. polish: planned/.test(a))).toBe(false)
       expect(d.svgs.some((s: any) => /Finished/.test(String(s.props.source)) || /Finished/.test(String(s.props.alt)))).toBe(false)
       expect(JSON.stringify(d.buttons)).not.toMatch(/Finished/)
       const p = await pane($, surface)
@@ -668,7 +668,8 @@ describe('archive groups in the panel', () => {
     const t = await terminal($)
     expect(t.keys).not.toContain(`archive-finished-${id}`)
     expect(t.text).toMatch(/write tests/)
-    expect(t.text).toMatch(/2\. wire it/)
+    // the unstarted task is not drawn: the Archive holds finished work only
+    expect(t.text).not.toMatch(/2\. wire it/)
     expect(t.keys).toContain(`archive-${keyOf(id)}`)
   })
 

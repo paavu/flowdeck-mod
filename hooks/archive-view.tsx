@@ -2,7 +2,7 @@
 // group per past flow. It draws only: the data, the panel's flow drawing and every press come from register.tsx.
 import type { Elements, RenderChildren } from 'claude-code'
 
-import type { AgentRun, ArchiveAgent, ArchiveEntry, ArchiveVolume, Panel, PlannedTask } from '../types'
+import type { AgentRun, ArchiveAgent, ArchiveEntry, ArchiveVolume, Panel, PlannedTask, TaskPlan } from '../types'
 import { formatEntry, groupLine, keyOf, spanOf, spanText } from './archive'
 
 export const ARCHIVE_PAGE = 10
@@ -45,7 +45,8 @@ export type ArchiveView = {
   entries: ArchiveEntry[]
   volumes: ArchiveVolume[]
   flowView: (v: FlowView) => FlowDrawing
-  unstarted: (tasks: PlannedTask[], list: AgentRun[]) => Planned[]
+  /** One plan drawn as the Plans section draws it; `kp` prefixes its keys, `at` is its clock. */
+  plan: (pl: TaskPlan, kp: string, at: number) => RenderChildren
   on: {
     entry: (id: string, isOpen: boolean) => unknown
     list: () => unknown
@@ -62,7 +63,10 @@ const endedRun = (a: ArchiveAgent, end: number): AgentRun => ({ ...a, endedAt: a
 const flows = (n: number): string => `${n} ${n === 1 ? 'flow' : 'flows'}`
 
 // A past flow as a group: its fold (end date and item count) and its tiles always;
-// opened, the flow as it ended with its rows flat, or the task list of an entry saved without runs.
+// opened, the flow as it ended with its rows flat, or the task list of an entry saved without runs. The Archive holds
+// finished work only, so a group never draws the flow's unstarted tasks.
+// A finished plan is a group of its own: its fold (end date and step count) and, opened, the plan as the Plans section
+// draws it (title, state, percent); it has no tiles.
 // The first group shown is open unless the user folded it; the others are folded unless the user opened them.
 function archiveGroup(v: ArchiveView, entry: ArchiveEntry, i: number): RenderChildren {
   const { Box, Text, Button } = v.ui
@@ -71,37 +75,40 @@ function archiveGroup(v: ArchiveView, entry: ArchiveEntry, i: number): RenderChi
   const key = keyOf(entry.id)
   const isOpen = !(p.closedEntries ?? []).includes(entry.id) && (i === 0 || p.openEntries.includes(entry.id))
   const runs = (entry.agents ?? []).map(a => endedRun(a, entry.endedAt))
-  const tasks = entry.tasks.map(tk => ({ title: tk.title, tier: tk.tier, after: tk.after ?? [] }))
-  const view = v.flowView({
-    kp: `archive-${key}-`,
-    fp: `${entry.id}:`,
-    // Archived flows are all finished: the group shows no title.
-    title: '',
-    list: runs,
-    planned: v.unstarted(tasks, runs),
-    at: entry.endedAt,
-    t: { cost: entry.cost, tokens: entry.tokens, time: entry.time },
-    flat: true,
-    controls: null,
-  })
+  const view = entry.plan
+    ? null
+    : v.flowView({
+        kp: `archive-${key}-`,
+        fp: `${entry.id}:`,
+        // Archived flows are all finished: the group shows no title.
+        title: '',
+        list: runs,
+        planned: [],
+        at: entry.endedAt,
+        t: { cost: entry.cost, tokens: entry.tokens, time: entry.time },
+        flat: true,
+        controls: null,
+      })
   const body = !isOpen
     ? null
-    : runs.length
-      ? Svg
-        ? view.body()
-        : <Box flexDirection="column" marginTop={1}>{view.body()}</Box>
-      : lines.map((l, k) => (
-          <Text key={`archive-${key}-${k}`} dimColor wrap="truncate-end">
-            {l}
-          </Text>
-        ))
+    : entry.plan
+      ? v.plan(entry.plan, `archive-${key}-`, entry.endedAt)
+      : view && runs.length
+        ? Svg
+          ? view.body()
+          : <Box flexDirection="column" marginTop={1}>{view.body()}</Box>
+        : lines.map((l, k) => (
+            <Text key={`archive-${key}-${k}`} dimColor wrap="truncate-end">
+              {l}
+            </Text>
+          ))
   return (
     <Box key={`archive-row-${key}`} flexDirection="column" marginTop={i ? 1 : 0}>
       {i > 0 && Svg && <Svg source={v.svg(W, 1, `<line class="ln" x1="0" y1="0.5" x2="${W}" y2="0.5"/>`)} alt="" width={W} height={1} />}
       <Button key={`archive-${key}`} plain onPress={() => v.on.entry(entry.id, isOpen)}>
         <Text wrap="truncate-end">{`${isOpen ? '▾' : '▸'} ${groupLine(entry, v.cols - 2)}`}</Text>
       </Button>
-      {view.header}
+      {view?.header}
       {body}
     </Box>
   )

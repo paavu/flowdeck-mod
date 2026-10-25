@@ -1,17 +1,17 @@
 import { atom, read, update } from 'claude-code'
 import type { Elements, EngineInterface, Register, RenderChildren } from 'claude-code'
 
-import type { AgentRun, ArchiveEntry, ArchiveVolume, Flow, Panel, Phase, PlannedTask, PlanStage, Reading, Samples, StepStatus, TaskPlan, UsageWindow } from '../types'
+import type { AgentRun, ArchiveEntry, ArchiveVolume, Flow, Panel, Phase, PlannedTask, PlanStage, Reading, Samples, TaskPlan, UsageWindow } from '../types'
 import { derive, finishItems, hasItemOps, ITEM_H, itemAlt, itemLine, itemsOf, itemSvg, stepItems } from './agent-items'
 import type { StepInput } from './agent-items'
 import { agentState, HOUSEKEEPING, splitHead, stateText } from './agent-state'
 import { contextRows, contextSvg, toReading } from './context'
-import { EXTRA_FILE, isWorthKeeping, keyOf, snapshot, VOLUME_MAX } from './archive'
+import { EXTRA_FILE, isWorthKeeping, keyOf, planEntry, snapshot, VOLUME_MAX } from './archive'
 import { dataDir, getFile, loadLatest, parseJson, readVolume, saveToProject, saveToStore, writeData } from './archive-store'
 import type { Io, Latest } from './archive-store'
 import { ARCHIVE_PAGE, archiveSection, UNREADABLE } from './archive-view'
 import type { FlowDrawing, FlowView, Planned } from './archive-view'
-import { importPlan, isFinished, normalize, percent, PLAN_ID, placeBar, planId, STATUSES, str, where } from './plan'
+import { importPlan, isFinished, isStoredStep, normalize, percent, PLAN_ID, placeBar, planId, str, where } from './plan'
 import { planBandSvg, planBandText, planRows, planSvg, STATE_COLOR, stateLabel } from './plan-view'
 import { asAgents, asArchive, asFlow, asMeta, asNow, asPanel, asReading, asUsage, asVolumes, PANEL_DEFAULT } from './shapes'
 import { record, toWindows, usageRows, usageSvg } from './usage'
@@ -902,6 +902,29 @@ const pressArchive = ($: EngineInterface, id: string): Promise<unknown> => {
   return run
 }
 
+// The finished plans kept in the archive this session, so one is saved again only once it changed (reopened and done again).
+const archivedPlans = new Set<string>()
+const planKey = (p: TaskPlan): string => `${p.id}\n${p.startedAt}\n${p.endedAt ?? ''}`
+
+// Every place a plan becomes done calls this: the plan is saved as its own Archive entry, after the archive saves under
+// way, on the flows' path; saving it again replaces the entry. True when it was kept. Never throws into the tool call,
+// the turn or the press.
+function archivePlan($: EngineInterface, plan: TaskPlan): Promise<boolean> {
+  if (plan.state !== 'done') return Promise.resolve(false)
+  if (archivedPlans.has(planKey(plan))) return Promise.resolve(true)
+  const run = archiving.then(async () => {
+    try {
+      const isKept = await saveArchive($, planEntry(plan, project, await $.clock.now()))
+      if (isKept) archivedPlans.add(planKey(plan))
+      return isKept
+    } catch {
+      return false
+    }
+  })
+  archiving = run.catch(() => {})
+  return run
+}
+
 type Meta = { startedAt: number; project: string }
 const isSameMeta = (a: Meta | null, b: Meta | null): boolean => !!a && !!b && a.startedAt === b.startedAt && a.project === b.project
 
@@ -955,9 +978,6 @@ async function finishOpenFlow($: EngineInterface): Promise<void> {
 }
 
 type SavedPlans = Record<string, TaskPlan[]>
-
-const isStoredStep = (st: unknown): boolean =>
-  !!st && typeof st === 'object' && typeof (st as { title?: unknown }).title === 'string' && STATUSES.includes((st as { status?: unknown }).status as StepStatus)
 
 const isStoredStage = (s: unknown): s is PlanStage =>
   !!s && typeof s === 'object' && typeof (s as { name?: unknown }).name === 'string' && Array.isArray((s as { steps?: unknown }).steps) && (s as { steps: unknown[] }).steps.every(isStoredStep)
@@ -1056,8 +1076,29 @@ async function closeFinishedPlans($: EngineInterface): Promise<void> {
   const isOpen = (p: TaskPlan) => p.state === 'running' && p.stages.some(s => s.steps.length) && p.stages.every(s => s.steps.every(st => isFinished(st.status)))
   if (!list.some(isOpen)) return
   const at = await $.clock.now()
-  const next = await updatePlans($, prev => prev.map(p => (isOpen(p) ? { ...p, state: 'done' as const, endedAt: at } : p)))
+  const closed = new Set<string>()
+  const next = await updatePlans($, prev =>
+    prev.map(p => {
+      if (!isOpen(p)) return p
+      closed.add(p.id)
+      return { ...p, state: 'done' as const, endedAt: at }
+    }),
+  )
   await savePlans($, next)
+  for (const p of next) if (closed.has(p.id)) await archivePlan($, p)
+}
+
+// Clear finished: each done plan is archived first (one saved already is not saved again), and only the plans the archive
+// kept leave the list; one whose save failed stays. Never throws into the press.
+async function clearFinishedPlans($: EngineInterface): Promise<void> {
+  try {
+    const kept = new Set<string>()
+    for (const p of (await readPlans($)).filter(pl => pl.state === 'done')) if (await archivePlan($, p)) kept.add(planKey(p))
+    if (!kept.size) return
+    await savePlans($, await updatePlans($, prev => prev.filter(p => !(p.state === 'done' && kept.has(planKey(p))))))
+  } catch {
+    // A failing store leaves the plans where they are.
+  }
 }
 
 const planLine = (p: TaskPlan): string => {
@@ -1504,6 +1545,7 @@ export const register: Register = (on, options) => {
       if (typeof made === 'string') return { result: 'flowdeck plan: ' + made }
       const placed = await updatePlans($, prev => placeBar(prev, made))
       await savePlans($, placed)
+      if (made.state === 'done') await archivePlan($, made)
       return { result: planLine(made) }
     } catch {
       return { result: 'flowdeck plan: could not update the plan' }
@@ -2020,6 +2062,24 @@ export const register: Register = (on, options) => {
       )
     })
 
+    // One plan as the Plans section and an Archive plan group draw it: the svg on the desktop, the rows in the terminal.
+    // `kp` keeps the Archive's keys apart from the section's.
+    const planDrawing = (pl: TaskPlan, kp: string, at: number): RenderChildren => {
+      if (Svg) {
+        const d = planSvg(W, pl, at)
+        return <Svg key={`${kp}plan-view-${keyOf(pl.id)}`} source={svg(W, d.height, d.body)} alt={`${pl.title}: ${stateLabel(pl)}, ${percent(pl, where(pl))}%`} width={W} height={d.height} />
+      }
+      return (
+        <Box key={`${kp}plan-view-${keyOf(pl.id)}`} flexDirection="column">
+          {planRows(pl, at, cols).map((r, i) => (
+            <Text key={`${kp}plan-${keyOf(pl.id)}-${i}`} bold={r.kind === 'head'} dimColor={r.kind === 'note'} color={r.kind === 'bar' ? r.color : undefined} wrap="truncate-end">
+              {r.line}
+            </Text>
+          ))}
+        </Box>
+      )
+    }
+
     // The plans take their place only when there are some.
     const plansSection = await safe('Plans', async () => {
       if (!p.isPlansShown) return null
@@ -2031,34 +2091,20 @@ export const register: Register = (on, options) => {
           key="plans-clear"
           label="Clear finished"
           plain
-          onPress={async () => {
-            const next = await updatePlans($, prev => prev.filter(pl => pl.state !== 'done'))
-            await savePlans($, next)
-          }}
+          onPress={() => clearFinishedPlans($)}
         />
       ) : null
       if (Svg) {
         return (
           <Box key="plans-section" flexDirection="column" gap={1}>
-            {planList.map(pl => {
-              const d = planSvg(W, pl, clockNow)
-              return <Svg key={`plan-view-${keyOf(pl.id)}`} source={svg(W, d.height, d.body)} alt={`${pl.title}: ${stateLabel(pl)}, ${percent(pl, where(pl))}%`} width={W} height={d.height} />
-            })}
+            {planList.map(pl => planDrawing(pl, '', clockNow))}
             {clearPlans}
           </Box>
         )
       }
       return (
         <Box flexDirection="column">
-          {planList.map(pl => (
-            <Box key={`plan-view-${keyOf(pl.id)}`} flexDirection="column">
-              {planRows(pl, clockNow, cols).map((r, i) => (
-                <Text key={`plan-${keyOf(pl.id)}-${i}`} bold={r.kind === 'head'} dimColor={r.kind === 'note'} color={r.kind === 'bar' ? r.color : undefined} wrap="truncate-end">
-                  {r.line}
-                </Text>
-              ))}
-            </Box>
-          ))}
+          {planList.map(pl => planDrawing(pl, '', clockNow))}
           {clearPlans}
         </Box>
       )
@@ -2077,7 +2123,7 @@ export const register: Register = (on, options) => {
         entries: await readArchive($),
         volumes: await readVolumes($),
         flowView,
-        unstarted,
+        plan: planDrawing,
         on: {
           // A press records the user's choice, which wins over the default (the first group shown open).
           entry: (id, isOpen) => updatePanel($, prev => ({ ...prev, openEntries: setIn(prev.openEntries, id, !isOpen), closedEntries: setIn(prev.closedEntries, id, isOpen) })),

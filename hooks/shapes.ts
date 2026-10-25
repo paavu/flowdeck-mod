@@ -113,9 +113,11 @@ export const asAgents = (v: unknown): AgentRun[] =>
 
 const ENTRY_NUMS = ['startedAt', 'endedAt', 'done', 'total', 'cost', 'tokens', 'time'] as const
 
-// An entry as the archive writes it passes as it is; anything else goes through the archive's own parser (which may drop it).
+// An entry as the archive writes it passes as it is; anything else goes through the archive's own parser (which may drop
+// it). An entry with a plan always does, so the plan it draws is checked.
 const isEntry = (e: unknown): e is ArchiveEntry =>
   isObj(e) &&
+  e.plan === undefined &&
   typeof e.id === 'string' &&
   !!e.id &&
   typeof e.project === 'string' &&

@@ -98,6 +98,8 @@ export type ArchiveEntry = {
   agents?: ArchiveAgent[]
   /** Saved while the flow runs, with only the runs archived so far; the flow's next full save replaces it. */
   partial?: boolean
+  /** A finished plan's own entry (id `plan-<plan id>-<startedAt>-<project>`): the plan as it finished; no tasks or runs. */
+  plan?: TaskPlan
 }
 
 /** One archive volume (a `history-<n>.json` file) in the volume index `history-index.json`: its entries summed up. */

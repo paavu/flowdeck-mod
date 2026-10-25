@@ -114,7 +114,8 @@ describe('plans section in the panel', () => {
     await p.unmount()
     expect(saved(store).map(x => x.id)).toEqual(['alpha'])
     p = await pane($, 'terminal')
-    expect(await p.find({ type: 'Text', text: /Beta cleanup/ })).toBeUndefined()
+    // gone from the Plans section; only its Archive group still draws it
+    expect((await p.findAll({ type: 'Text' })).filter((t: any) => /Beta cleanup/.test(t.text))).toHaveLength(1)
     expect(await p.find({ type: 'Text', text: /Alpha rollout/ })).toBeDefined()
     expect(await p.find({ type: 'Button', text: /Clear finished/ })).toBeUndefined()
     await p.unmount()

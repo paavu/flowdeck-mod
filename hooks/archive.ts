@@ -1,7 +1,8 @@
 // The archive (formerly History): a record of finished flowdeck flows, kept per project, one entry per flow with its runs,
-// newest first. Its files keep their original `history*` names for compatibility (see archive-store.ts).
-import type { AgentRun, AgentStatus, ArchiveAgent, ArchiveEntry, ArchiveTask, ArchiveVolume, Flow } from '../types'
+// and one per finished plan, newest first. Its files keep their original `history*` names for compatibility (see archive-store.ts).
+import type { AgentRun, AgentStatus, ArchiveAgent, ArchiveEntry, ArchiveTask, ArchiveVolume, Flow, PlanStage, PlanState, PlanStep, StepStatus, TaskPlan } from '../types'
 import { itemsOf } from './agent-items'
+import { isFinished, isStoredStep } from './plan'
 
 const MAX_TASKS = 100
 export const MAX_TEXT = 200
@@ -131,12 +132,87 @@ export function snapshot(input: {
   }
 }
 
-export const isWorthKeeping = (e: ArchiveEntry): boolean => e.tasks.length > 0 || e.done > 0 || e.cost > 0 || e.time > 0
+const MAX_STEPS = 100
+const PLAN_STATES: readonly PlanState[] = ['running', 'needs_input', 'error', 'done']
 
-// Nothing is ever dropped: a later snapshot of the same flow replaces its entry and moves it to the front.
+// A plan as the archive keeps it, or null when it is no plan: broken stages and steps are dropped (a stage left with no
+// step too), at most 100 steps and 100 substeps in all, strings at 200.
+function planOf(v: unknown): TaskPlan | null {
+  if (!v || typeof v !== 'object' || Array.isArray(v)) return null
+  const o = v as Record<string, unknown>
+  const startedAt = num(o.startedAt)
+  if (typeof o.id !== 'string' || !o.id || startedAt === null || !Array.isArray(o.stages)) return null
+  let steps = 0
+  let subs = 0
+  const stages: PlanStage[] = []
+  for (const s of o.stages as unknown[]) {
+    const r = s && typeof s === 'object' ? (s as Record<string, unknown>) : {}
+    if (typeof r.name !== 'string' || !Array.isArray(r.steps)) continue
+    const kept: PlanStep[] = []
+    for (const st of r.steps as unknown[]) {
+      if (steps >= MAX_STEPS) break
+      if (!isStoredStep(st)) continue
+      const x = st as Record<string, unknown>
+      const step: PlanStep = { title: cap(x.title), status: x.status as StepStatus, substeps: [] }
+      for (const sub of Array.isArray(x.substeps) ? x.substeps : []) {
+        if (subs >= MAX_STEPS) break
+        if (!isStoredStep(sub)) continue
+        step.substeps.push({ title: cap(sub.title), status: sub.status })
+        subs++
+      }
+      const doneAt = num(x.doneAt)
+      if (doneAt !== null) step.doneAt = doneAt
+      kept.push(step)
+      steps++
+    }
+    if (kept.length) stages.push({ name: cap(r.name), steps: kept })
+  }
+  return {
+    id: cap(o.id),
+    title: cap(o.title),
+    kind: o.kind === 'todo' ? 'todo' : 'plan',
+    stages,
+    state: PLAN_STATES.find(x => x === o.state) ?? 'done',
+    note: typeof o.note === 'string' ? cap(o.note) : null,
+    startedAt,
+    endedAt: num(o.endedAt),
+  }
+}
+
+const stepsOf = (p: TaskPlan): PlanStep[] => p.stages.flatMap(s => s.steps)
+
+// A finished plan as its own entry: one id per plan and project, so saving it again replaces it. Dated by its end, or `at`
+// (the save) when it has none; no tasks, runs, cost or tokens.
+export function planEntry(plan: TaskPlan, project: string, at: number): ArchiveEntry {
+  const p = planOf(plan) ?? { ...plan, stages: [] }
+  const endedAt = typeof p.endedAt === 'number' ? p.endedAt : at
+  const steps = stepsOf(p)
+  return {
+    id: `plan-${p.id}-${p.startedAt}-${project}`,
+    project,
+    title: p.title.trim(),
+    startedAt: p.startedAt,
+    endedAt,
+    status: 'finished',
+    done: steps.filter(st => isFinished(st.status)).length,
+    total: steps.length,
+    tasks: [],
+    cost: 0,
+    tokens: 0,
+    time: Math.max(0, endedAt - p.startedAt),
+    plan: { ...p, endedAt },
+  }
+}
+
+export const isWorthKeeping = (e: ArchiveEntry): boolean =>
+  e.plan ? stepsOf(e.plan).length > 0 : e.tasks.length > 0 || e.done > 0 || e.cost > 0 || e.time > 0
+
+// Nothing is ever dropped: a later snapshot of the same flow replaces its entry and moves it to the front. A plan goes
+// where its end puts it, as it may have finished before the newest entries.
 export function addEntry(archive: ArchiveEntry[], entry: ArchiveEntry): ArchiveEntry[] {
   if (!isWorthKeeping(entry)) return archive
-  return [entry, ...archive.filter(e => e.id !== entry.id)]
+  const rest = archive.filter(e => e.id !== entry.id)
+  return entry.plan ? placeByEnd(rest, [entry]) : [entry, ...rest]
 }
 
 // The newest entries whose JSON stays under `maxBytes` (UTF-8), and the older rest; the order is kept.
@@ -294,6 +370,8 @@ function parseEntry(v: unknown): ArchiveEntry | null {
   const entry: ArchiveEntry = { id, project, title, startedAt: startedAt!, endedAt: endedAt!, status, done: done!, total: total!, tasks, cost: cost!, tokens: tokens!, time: time! }
   if (Array.isArray(o.agents)) entry.agents = agentsOf(o.agents).slice(-MAX_AGENTS)
   if (o.partial === true) entry.partial = true
+  const plan = planOf(o.plan)
+  if (plan && plan.stages.length) entry.plan = plan
   return entry
 }
 
@@ -327,10 +405,10 @@ const statusOf = (entry: ArchiveEntry): string =>
 
 // The group's fold line fitted to `cols`: `Oct 26, 2026 · 10:42 AM · 17 items`, then without the time of day,
 // then with the bare count; an entry archived while its flow ran ends in ` · running`. The count is the rows the
-// group shows: its runs, or the tasks of an entry saved without runs.
+// group shows: its runs, or the tasks of an entry saved without runs; a plan's counts its steps, `· 3 steps`.
 export function groupLine(entry: ArchiveEntry, cols: number, tz?: string): string {
-  const n = entry.agents?.length || entry.tasks.length
-  const items = `${n} ${n === 1 ? 'item' : 'items'}`
+  const n = entry.plan ? stepsOf(entry.plan).length : entry.agents?.length || entry.tasks.length
+  const items = entry.plan ? `${n} ${n === 1 ? 'step' : 'steps'}` : `${n} ${n === 1 ? 'item' : 'items'}`
   const tail = entry.partial ? ' · running' : ''
   const date = entryDate(entry, tz)
   const day = entryDate(entry, tz, true)
