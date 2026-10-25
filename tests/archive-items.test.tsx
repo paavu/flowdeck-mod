@@ -555,10 +555,10 @@ describe('where the Archive button shows', () => {
         expect(w).toBeLessThanOrEqual(W)
         expect(String(s.props.source)).not.toContain('NaN')
       }
-      // a row with the Archive button leaves it room: the plain row by the button, the row with steps by the chevron too
+      // the archive icon and the chevron share one 28 px column on the right
       const row = (n: number) => d.svgs.find((s: any) => String(s.props.alt).startsWith(`task ${n}:`))
-      expect(Number(row(1).props.width)).toBeLessThanOrEqual(W - 56)
-      expect(Number(row(2).props.width)).toBeLessThanOrEqual(W - 56 - 28)
+      expect(Number(row(1).props.width)).toBe(W - 28)
+      expect(Number(row(2).props.width)).toBe(W - 28)
       expect(archiveKeys(d.buttons).length).toBe(3)
     }
     for (let cols = 24; cols <= 80; cols += 4) {
@@ -583,5 +583,84 @@ describe('where the Archive button shows', () => {
       expect(new Set(keys).size).toBe(keys.length)
       expect(keys.filter(k => k.startsWith('archive-item-'))).toEqual(['archive-item-w4', 'archive-item-w3'])
     }
+  })
+})
+
+describe('the small archive icon', () => {
+  const ICON = '⤓'
+  const kids = (n: any): any[] => (Array.isArray(n?.children) ? n.children : Array.isArray(n?.props?.children) ? n.props.children : []).filter((c: any) => c && typeof c === 'object')
+  const walk = (n: any, out: any[] = []): any[] => {
+    if (!n || typeof n !== 'object') return out
+    out.push(n)
+    for (const c of kids(n)) walk(c, out)
+    return out
+  }
+  const keyOf = (n: any) => String(n?.props?.key ?? n?.key ?? '')
+  // the innermost Box that directly holds the Button with this key
+  const holder = (root: any, key: string) => walk(root).find(n => kids(n).some(c => keyOf(c) === key))
+  const one = (s: string) => [...new (Intl as any).Segmenter().segment(s)].length === 1
+
+  test('the label is one narrow glyph, never the word Archive, on both surfaces', async ($, on) => {
+    const { clock } = engine(on)
+    await start($)
+    await plan($)
+    await finishedRows($, clock, 2)
+    for (const surface of ['terminal', 'desktop'] as const) {
+      const p = await pane($, surface)
+      const b = await p.find({ type: 'Button', key: 'archive-item-w1' })
+      await p.unmount()
+      const label = String(b.props.label)
+      expect(label).toBe(ICON)
+      expect(one(label)).toBe(true)
+      expect(label).not.toMatch(/Archive/)
+      expect(b.props.plain).toBe(true)
+      expect(b.props.dimColor).toBe(true)
+    }
+  })
+
+  test('desktop: one 28 px column, the icon above the chevron; rows with neither keep the full width', async ($, on) => {
+    const { clock } = engine(on)
+    await start($)
+    await plan($)
+    await finishedRows($, clock, 2, [], () => $.tool.call({ tool: 'mcp__flowdeck__step', agentId: 'w2', steps: [{ title: 'one' }, { title: 'two' }] } as any))
+    clock.now = NOW + 130_000
+    await spawn($, 'w9', 'still going')
+    await turnStep($, 'w9')
+    for (const [cols, W] of [[31, 240], [46, 360], [120, 900]] as const) {
+      const p = await pane($, 'desktop', cols)
+      const svgs = await p.findAll({ type: 'Svg' })
+      const root = await p.drawn()
+      await p.unmount()
+      const row = (name: string) => svgs.find((s: any) => String(s.props.alt).startsWith(`${name}:`))
+      expect(Number(row('task 1').props.width)).toBe(W - 28)
+      expect(Number(row('task 2').props.width)).toBe(W - 28)
+      expect(Number(row('still going').props.width)).toBe(W)
+      const col = holder(root, 'archive-item-w2')
+      expect(col?.props?.flexDirection).toBe('column')
+      expect(kids(col).map(keyOf)).toEqual(['archive-item-w2', 'agent-fold-w2'])
+      expect(kids(holder(root, 'archive-item-w1')).map(keyOf)).toEqual(['archive-item-w1'])
+      expect(JSON.stringify(root)).not.toContain('NaN')
+    }
+  })
+
+  test('terminal: the glyph comes right after the task name on the first line', async ($, on) => {
+    const { clock } = engine(on)
+    await start($)
+    await plan($)
+    await finishedRows($, clock, 2, [], () => $.tool.call({ tool: 'mcp__flowdeck__step', agentId: 'w2', steps: [{ title: 'one' }, { title: 'two' }] } as any))
+    for (let cols = 24; cols <= 80; cols += 4) {
+      const p = await pane($, 'terminal', cols)
+      const root = await p.drawn()
+      await p.unmount()
+      expect(JSON.stringify(root)).not.toContain('NaN')
+      for (const id of ['w1', 'w2']) {
+        const line = kids(holder(root, `archive-item-${id}`))
+        const at = line.findIndex(c => keyOf(c) === `archive-item-${id}`)
+        expect(JSON.stringify(line[at - 1])).toContain(`task ${id.slice(1)}`)
+        if (id === 'w2') expect(line.findIndex(c => keyOf(c) === 'agent-fold-w2')).toBeGreaterThan(at + 1)
+      }
+    }
+    const t = await terminal($)
+    expect(t.text).not.toMatch(/\bArchive\b(?! ·)/)
   })
 })

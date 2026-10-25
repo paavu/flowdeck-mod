@@ -610,8 +610,8 @@ ${tile(0, s.cost, '≈' + fmtCost(t.cost))}${tile(1, s.tokens, fmtTokens(t.token
 
 const headerHeight = (title: string): number => (title ? 72 : 44)
 
-// The room a finished row leaves for its Archive button on the desktop: the label at the button's size and the gap.
-const ARCHIVE_W = Math.ceil(textWidth('Archive', 13)) + 14
+// The archive icon: one single-width glyph, never an emoji.
+const ARCHIVE_ICON = '⤓'
 
 // The task's own progress when the worker reports steps; a finished run is full.
 const progressOf = (a: AgentRun): number | null => {
@@ -1763,7 +1763,7 @@ export const register: Register = (on, options) => {
       )
       const hasDone = finished.length > 0 || archivedCount > 0
       const archiveButton = (a: AgentRun) =>
-        v.archive?.can(a) ? <Button key={`archive-item-${a.id}`} label="Archive" plain onPress={() => v.archive?.press(a)} /> : null
+        v.archive?.can(a) ? <Button key={`archive-item-${a.id}`} label={ARCHIVE_ICON} plain dimColor onPress={() => v.archive?.press(a)} /> : null
       if (Svg) {
         const viewSummary = `≈${fmtCost(v.t.cost)}, ${fmtTokens(v.t.tokens)} ${s.tokensWord}, ${fmtTime(v.t.time)}`
         const section = (key: string, text: string) => (
@@ -1771,20 +1771,22 @@ export const register: Register = (on, options) => {
             {text}
           </Text>
         )
-        // With items the row leaves room for its chevron on the right, and an archivable row for its Archive button after
-        // it; its children are drawn as wide as it.
+        // The archive icon (at the task-name line) and the chevron below it share one 28 px column on the right;
+        // the row's children are drawn as wide as it.
         const agentRow = (a: AgentRun, word: string) => {
           const alt = `${a.description}: ${modelName(a.model)}, ${word}`
           const items = itemsOf(a.items)
           const toArchive = archiveButton(a)
           if (!items.length && !toArchive) return <Svg key={`${kp}${a.id}`} source={agentSvg(W, a, at)} alt={alt} width={W} height={66} />
-          const rowW = W - (items.length ? 28 : 0) - (toArchive ? ARCHIVE_W : 0)
+          const rowW = W - 28
           return (
             <Box key={`${kp}${a.id}`} flexDirection="column">
-              <Box flexDirection="row" alignItems="center" gap={1}>
+              <Box flexDirection="row" alignItems={toArchive ? 'flex-start' : 'center'} gap={1}>
                 <Svg source={agentSvg(rowW, a, at)} alt={alt} width={rowW} height={66} />
-                {items.length > 0 && foldButton(a, kp, fp)}
-                {toArchive}
+                <Box flexDirection="column">
+                  {toArchive}
+                  {items.length > 0 && foldButton(a, kp, fp)}
+                </Box>
               </Box>
               {isUnfolded(a, fp) &&
                 items.map((it, i) => (
@@ -1838,9 +1840,9 @@ export const register: Register = (on, options) => {
               <Text bold wrap="truncate-end">
                 {a.description || a.type}
               </Text>
+              {archiveButton(a)}
               <Text color={a.status === 'failed' ? 'red' : a.status === 'done' ? 'green' : color}>{STATUS_GLYPH[a.status]}</Text>
               {items.length > 0 && foldButton(a, kp, fp)}
-              {archiveButton(a)}
             </Box>
             <Text dimColor wrap="truncate-end">
               {modelLine}
