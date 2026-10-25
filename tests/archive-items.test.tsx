@@ -552,10 +552,10 @@ describe('where the Archive button shows', () => {
         expect(w).toBeLessThanOrEqual(W)
         expect(String(s.props.source)).not.toContain('NaN')
       }
-      // the archive icon and the chevron share one 28 px column on the right
+      // the archive icon and the chevron live on the native first line: every drawing keeps the full width
       const row = (n: number) => d.svgs.find((s: any) => String(s.props.alt).startsWith(`task ${n}:`))
-      expect(Number(row(1).props.width)).toBe(W - 28)
-      expect(Number(row(2).props.width)).toBe(W - 28)
+      expect(Number(row(1).props.width)).toBe(W)
+      expect(Number(row(2).props.width)).toBe(W)
       expect(archiveKeys(d.buttons).length).toBe(3)
     }
     for (let cols = 24; cols <= 80; cols += 4) {
@@ -615,7 +615,7 @@ describe('the small archive icon', () => {
     }
   })
 
-  test('desktop: one 28 px column, the icon above the chevron; rows with neither keep the full width', async ($, on) => {
+  test('desktop: line 1 is the task name, the icon right after it, a spacer, the chevron at the far end; the drawing below keeps the full width', async ($, on) => {
     const { clock } = engine(on)
     await start($)
     await plan($)
@@ -623,20 +623,52 @@ describe('the small archive icon', () => {
     clock.now = NOW + 130_000
     await spawn($, 'w9', 'still going')
     await turnStep($, 'w9')
+    const has = (n: any, key: string) => walk(n).some(c => keyOf(c) === key)
+    const says = (n: any, s: string) => JSON.stringify(n).includes(s)
+    // the innermost row Box of the native first line that holds the task name
+    const titleLine = (r: any, name: string) => walk(kids(r)[0]).filter(n => n?.props?.flexDirection === 'row' && kids(n).some(c => says(c, name))).pop()
+    const parts = (line: any, id: string, name: string) =>
+      kids(line).map(c =>
+        has(c, `archive-item-${id}`) ? 'icon' : has(c, `agent-fold-${id}`) ? 'chevron' : says(c, name) ? 'title' : c?.props?.flexGrow === 1 && kids(c).length === 0 ? 'spacer' : '?',
+      )
+    const expected: [string, string, string[]][] = [
+      ['w2', 'task 2', ['title', 'icon', 'spacer', 'chevron']],
+      ['w1', 'task 1', ['title', 'icon', 'spacer']],
+      ['w9', 'still going', ['title', 'spacer']],
+    ]
     for (const [cols, W] of [[31, 240], [46, 360], [120, 900]] as const) {
       const p = await pane($, 'desktop', cols)
-      const svgs = await p.findAll({ type: 'Svg' })
       const root = await p.drawn()
       await p.unmount()
-      const row = (name: string) => svgs.find((s: any) => String(s.props.alt).startsWith(`${name}:`))
-      expect(Number(row('task 1').props.width)).toBe(W - 28)
-      expect(Number(row('task 2').props.width)).toBe(W - 28)
-      expect(Number(row('still going').props.width)).toBe(W)
-      const col = holder(root, 'archive-item-w2')
-      expect(col?.props?.flexDirection).toBe('column')
-      expect(kids(col).map(keyOf)).toEqual(['archive-item-w2', 'agent-fold-w2'])
-      expect(kids(holder(root, 'archive-item-w1')).map(keyOf)).toEqual(['archive-item-w1'])
       expect(JSON.stringify(root)).not.toContain('NaN')
+      for (const [id, name, want] of expected) {
+        const r = walk(root).find(n => keyOf(n) === id)
+        expect(r?.props?.flexDirection).toBe('column')
+        const [first, drawing] = kids(r)
+        expect(first?.props?.flexDirection).toBe('row')
+        // the indent lines the title up with the drawing's text at x 42
+        expect(Number(kids(first)[0]?.props?.width)).toBe(42)
+        const line = titleLine(r, name)
+        expect(line?.props?.flexDirection).toBe('row')
+        expect(parts(line, id, name)).toEqual(want)
+        const title = kids(line)[0]
+        expect(title?.props?.flexShrink).toBe(1)
+        expect(title?.props?.minWidth).toBe(0)
+        const text = walk(title).find(n => n?.props?.bold)
+        expect(text?.props?.wrap).toBe('truncate-end')
+        expect(says(text, name)).toBe(true)
+        for (const c of kids(line)) if (has(c, `archive-item-${id}`) || has(c, `agent-fold-${id}`)) expect(c?.props?.flexShrink).toBe(0)
+        // the drawing: full width, shorter, no title of its own; the alt still names the task
+        expect(Number(drawing?.props?.width)).toBe(W)
+        expect(Number(drawing?.props?.height)).toBe(48)
+        expect(String(drawing?.props?.alt).startsWith(`${name}:`)).toBe(true)
+        const src = String(drawing?.props?.source)
+        expect(src).not.toContain(name)
+        expect(src).not.toContain('font-size="13"')
+      }
+      // the icon and the chevron are never stacked in one column
+      expect(holder(root, 'archive-item-w2')?.props?.flexDirection).not.toBe('column')
+      expect(holder(root, 'archive-item-w2')).not.toBe(holder(root, 'agent-fold-w2'))
     }
   })
 

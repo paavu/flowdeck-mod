@@ -632,7 +632,15 @@ const fitStats = (a: AgentRun, at: number, gap: string, room: number, width: (s:
   return forms.find(f => width(f) <= room) ?? ''
 }
 
-const agentSvg = (W: number, a: AgentRun, at: number): string => {
+// The desktop row draws the task name natively above the drawing (`titleOutside`): the drawing then
+// drops its title line, everything moves up by that line and the crab is centred on what is left.
+const AGENT_H = 66
+const TITLE_LINE = 18
+const agentHeight = (titleOutside = false): number => AGENT_H - (titleOutside ? TITLE_LINE : 0)
+
+const agentSvg = (W: number, a: AgentRun, at: number, opts: { titleOutside?: boolean } = {}): string => {
+  const out = opts.titleOutside === true
+  const dy = out ? TITLE_LINE : 0
   const s = tr()
   const tier = tierOf(a.type)
   const color = colorOf(tier)
@@ -654,19 +662,24 @@ const agentSvg = (W: number, a: AgentRun, at: number): string => {
   const [lead, rest] = splitHead(fitText(steps ? `${head} · ${steps}` : head, 11, stepsW), head)
   // Without reported steps the bar falls back to the context, drawn grey.
   const fillW = Math.round(barW * (progress ?? ctx / 100))
+  const H = agentHeight(out)
   return svg(
     W,
-    66,
-    `${crab(0, 14, costumeOf(a.type), false, a.status === 'running')}
-<text class="t" x="42" y="18" font-family="${FONT}" font-size="13" font-weight="600">${xml(fitText(a.description || a.type, 13, textW))}</text>
-<text x="42" y="34" font-family="${FONT}" font-size="11"><tspan fill="${color}">${xml(tierWord)}</tspan><tspan class="s">  ${xml(meta.join('  ·  '))}</tspan></text>
-${stats ? `<text class="s" x="${42 + barW}" y="34" text-anchor="end" font-family="${FONT}" font-size="11" font-variant-numeric="tabular-nums">${stats}</text>` : ''}
-${stepsW > 30 ? `<text x="42" y="49" font-family="${FONT}" font-size="11" font-variant-numeric="tabular-nums"><tspan fill="${state.color}">${xml(lead)}</tspan>${rest ? `<tspan class="t">${xml(rest)}</tspan>` : ''}</text>` : ''}
-<rect class="k" x="42" y="55" width="${barW}" height="4" rx="2"/><rect${progress === null ? ' class="m"' : ''} x="42" y="55" width="${fillW}" height="4" rx="2"${progress === null ? '' : ` fill="${state.color}"`}/>
-${statusMark(W - 8, 16, a.status, color)}
-<line class="ln" x1="0" y1="65.5" x2="${W}" y2="65.5"/>`,
+    H,
+    `${crab(0, out ? 10 : 14, costumeOf(a.type), false, a.status === 'running')}
+${out ? '' : `<text class="t" x="42" y="18" font-family="${FONT}" font-size="13" font-weight="600">${xml(fitText(a.description || a.type, 13, textW))}</text>`}
+<text x="42" y="${34 - dy}" font-family="${FONT}" font-size="11"><tspan fill="${color}">${xml(tierWord)}</tspan><tspan class="s">  ${xml(meta.join('  ·  '))}</tspan></text>
+${stats ? `<text class="s" x="${42 + barW}" y="${34 - dy}" text-anchor="end" font-family="${FONT}" font-size="11" font-variant-numeric="tabular-nums">${stats}</text>` : ''}
+${stepsW > 30 ? `<text x="42" y="${49 - dy}" font-family="${FONT}" font-size="11" font-variant-numeric="tabular-nums"><tspan fill="${state.color}">${xml(lead)}</tspan>${rest ? `<tspan class="t">${xml(rest)}</tspan>` : ''}</text>` : ''}
+<rect class="k" x="42" y="${55 - dy}" width="${barW}" height="4" rx="2"/><rect${progress === null ? ' class="m"' : ''} x="42" y="${55 - dy}" width="${fillW}" height="4" rx="2"${progress === null ? '' : ` fill="${state.color}"`}/>
+${statusMark(W - 8, out ? 12 : 16, a.status, color)}
+<line class="ln" x1="0" y1="${H - 0.5}" x2="${W}" y2="${H - 0.5}"/>`,
   )
 }
+
+// The empty drawing that indents the native task name by the drawing's text column (x 42).
+const TITLE_INDENT = 42
+const INDENT_SVG = `<svg xmlns="http://www.w3.org/2000/svg" width="${TITLE_INDENT}" height="1" viewBox="0 0 ${TITLE_INDENT} 1"/>`
 
 const plannedSvg = (W: number, p: Planned): string => {
   const tier = p.tier in TIER_COLOR ? p.tier : 'other'
@@ -1773,26 +1786,31 @@ export const register: Register = (on, options) => {
             {text}
           </Text>
         )
-        // The archive icon (at the task-name line) and the chevron below it share one 28 px column on the right;
-        // the row's children are drawn as wide as it.
+        // Every row: the task name natively on line 1, the archive icon right after it and the chevron at the far
+        // end (a Button cannot sit inside a drawing), then the drawing at the full width without its title line.
         const agentRow = (a: AgentRun, word: string) => {
           const alt = `${a.description}: ${modelName(a.model)}, ${word}`
           const items = itemsOf(a.items)
           const toArchive = archiveButton(a)
-          if (!items.length && !toArchive) return <Svg key={`${kp}${a.id}`} source={agentSvg(W, a, at)} alt={alt} width={W} height={66} />
-          const rowW = W - 28
           return (
             <Box key={`${kp}${a.id}`} flexDirection="column">
-              <Box flexDirection="row" alignItems={toArchive ? 'flex-start' : 'center'} gap={1}>
-                <Svg source={agentSvg(rowW, a, at)} alt={alt} width={rowW} height={66} />
-                <Box flexDirection="column">
-                  {toArchive}
-                  {items.length > 0 && foldButton(a, kp, fp)}
+              <Box flexDirection="row" alignItems="center">
+                <Svg source={INDENT_SVG} alt="" width={TITLE_INDENT} height={1} />
+                <Box flexDirection="row" alignItems="center" gap={1} flexGrow={1} flexShrink={1} minWidth={0}>
+                  <Box flexShrink={1} minWidth={0} overflow="hidden">
+                    <Text bold wrap="truncate-end">
+                      {a.description || a.type}
+                    </Text>
+                  </Box>
+                  {toArchive && <Box flexShrink={0}>{toArchive}</Box>}
+                  <Box flexGrow={1} />
+                  {items.length > 0 && <Box flexShrink={0}>{foldButton(a, kp, fp)}</Box>}
                 </Box>
               </Box>
+              <Svg source={agentSvg(W, a, at, { titleOutside: true })} alt={alt} width={W} height={agentHeight(true)} />
               {isUnfolded(a, fp) &&
                 items.map((it, i) => (
-                  <Svg key={`${kp}agent-item-${a.id}-${i}`} source={svg(rowW, ITEM_H, itemSvg(rowW, it, at, fitText))} alt={itemAlt(it, at)} width={rowW} height={ITEM_H} />
+                  <Svg key={`${kp}agent-item-${a.id}-${i}`} source={svg(W, ITEM_H, itemSvg(W, it, at, fitText))} alt={itemAlt(it, at)} width={W} height={ITEM_H} />
                 ))}
             </Box>
           )

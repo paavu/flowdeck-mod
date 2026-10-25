@@ -380,7 +380,7 @@ describe('agent items in the panel', () => {
     const row = d.svgs.find((s: any) => /^with items:/.test(String(s.props.alt)))
     const plain = d.svgs.find((s: any) => /^without items:/.test(String(s.props.alt)))
     expect(Number(row.props.width)).toBe(Number(kids[0].props.width))
-    expect(Number(plain.props.height)).toBe(66)
+    expect(Number(plain.props.height)).toBe(48)
   })
 
   test('no dismiss button on agent rows', async ($, on) => {

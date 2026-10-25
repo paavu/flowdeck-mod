@@ -368,7 +368,7 @@ describe('archive groups in the panel', () => {
     expect(String(headers[0].props.source)).toContain('12k')
     expect(String(headers[0].props.source)).toContain('30:00')
     expect(String(headers[1].props.source)).toContain('1:30')
-    expect(d.svgs.filter((s: any) => Number(s.props.height) === 66).length).toBe(2)
+    expect(d.svgs.filter((s: any) => Number(s.props.height) === 48).length).toBe(2)
     expect(d.alts.some((a: string) => /^only task:/.test(a))).toBe(false)
     expect(d.keys).toContain(`archive-${keyOf('gA')}`)
   })
@@ -407,6 +407,44 @@ describe('archive groups in the panel', () => {
     }
   })
 
+  test('desktop: a group row has the live layout, the task name natively on line 1 and the drawing below, with no archive icon', async ($, on) => {
+    engine(on, { store: { historyShown: true, history: [groupA(), groupB()] } })
+    await start($)
+    await settle()
+    const kidsOf = (n: any): any[] => (Array.isArray(n?.children) ? n.children : Array.isArray(n?.props?.children) ? n.props.children : []).filter((c: any) => c && typeof c === 'object')
+    const walk = (n: any, out: any[] = []): any[] => {
+      if (!n || typeof n !== 'object') return out
+      out.push(n)
+      for (const c of kidsOf(n)) walk(c, out)
+      return out
+    }
+    const keyOfNode = (n: any) => String(n?.props?.key ?? n?.key ?? '')
+    const has = (n: any, key: string) => walk(n).some(c => keyOfNode(c) === key)
+    const says = (n: any, s: string) => JSON.stringify(n).includes(s)
+    const kp = `archive-${keyOf('gA')}-`
+    const p = await pane($, 'desktop')
+    const root = await p.drawn()
+    await p.unmount()
+    for (const [id, name, want] of [
+      ['a2', 'wire it', ['title', 'spacer', 'chevron']],
+      ['a1', 'write tests', ['title', 'spacer']],
+    ] as const) {
+      const r = walk(root).find(n => keyOfNode(n) === `${kp}${id}`)
+      expect(r?.props?.flexDirection).toBe('column')
+      const [first, drawing] = kidsOf(r)
+      expect(first?.props?.flexDirection).toBe('row')
+      const line = walk(first).filter(n => n?.props?.flexDirection === 'row' && kidsOf(n).some(c => says(c, name))).pop()
+      const parts = kidsOf(line).map(c =>
+        has(c, `${kp}agent-fold-${id}`) ? 'chevron' : says(c, name) ? 'title' : c?.props?.flexGrow === 1 && kidsOf(c).length === 0 ? 'spacer' : '?',
+      )
+      expect(parts).toEqual([...want])
+      expect(walk(r).some(n => keyOfNode(n).startsWith('archive-item-'))).toBe(false)
+      expect(Number(drawing?.props?.height)).toBe(48)
+      expect(String(drawing?.props?.alt).startsWith(`${name}:`)).toBe(true)
+      expect(String(drawing?.props?.source)).not.toContain(name)
+    }
+  })
+
   test('pressing the open newest group folds it and it stays folded; pressing a folded group opens it', async ($, on) => {
     engine(on, { store: { historyShown: true, history: [groupA(), groupB()] } })
     await start($)
@@ -421,7 +459,7 @@ describe('archive groups in the panel', () => {
       t = await terminal($)
       expect(t.text).not.toMatch(/write tests/)
       const d = await desktop($)
-      expect(d.svgs.filter((s: any) => Number(s.props.height) === 66).length).toBe(0)
+      expect(d.svgs.filter((s: any) => Number(s.props.height) === 48).length).toBe(0)
       await press($, surface, `archive-${keyOf('gB')}`)
       t = await terminal($)
       expect(JSON.stringify(t.buttons.find((b: any) => String(b.props.key) === `archive-${keyOf('gB')}`))).toContain('▾ ')

@@ -390,8 +390,8 @@ describe('agent rows: live tool word and state colours', () => {
     await call($, 'Bash', 'w1')
     const src = await svgOf($, /^wire it:/)
     expect(src).toContain(`<tspan fill="${RUNNING}">Running · Bash</tspan>`)
-    expect(src).toMatch(new RegExp(`<rect x="42" y="55" width="\\d+" height="4" rx="2" fill="${RUNNING}"/>`))
-    expect(src).not.toMatch(new RegExp(`y="55"[^>]*fill="${CAREFUL}"`))
+    expect(src).toMatch(new RegExp(`<rect x="42" y="37" width="\\d+" height="4" rx="2" fill="${RUNNING}"/>`))
+    expect(src).not.toMatch(new RegExp(`y="37"[^>]*fill="${CAREFUL}"`))
     expect(src).toContain(`<tspan fill="${CAREFUL}">careful</tspan>`)
     expect(src).toContain('1/3')
   })
@@ -405,7 +405,7 @@ describe('agent rows: live tool word and state colours', () => {
     await $.turn.complete({ reason: 'answer', answer: 'ok', durationMs: 1, agentId: 'w1' } as any)
     const src = await svgOf($, /^wire it:/)
     expect(src).toContain(`<tspan fill="${GREEN}">Done</tspan>`)
-    expect(src).toMatch(new RegExp(`<rect x="42" y="55" width="\\d+" height="4" rx="2" fill="${GREEN}"/>`))
+    expect(src).toMatch(new RegExp(`<rect x="42" y="37" width="\\d+" height="4" rx="2" fill="${GREEN}"/>`))
   })
 
   test('the terminal bar takes the state colour once steps are reported', async ($, on) => {
@@ -444,11 +444,11 @@ describe('agent rows: live tool word and state colours', () => {
   const charEm = (ch: string) => (/[\s.,:;'|!il1()[\]]/.test(ch) ? 0.3 : /[A-ZА-ЯЁmwшщжюМШЩЖЮ@%]/.test(ch) ? 0.72 : 0.56)
   const width11 = (s: string) => [...s].reduce((w, ch) => w + charEm(ch) * 11, 0)
   const STATS = ['ctx 0% · 0  ≈$0.00  0:00', 'ctx 0% · 0  ≈$0.00', 'ctx 0%  ≈$0.00', 'ctx 0%']
-  // desktop W = cols * 8 - 8, at least 240; the text slot is W - 64
+  // desktop W = cols * 8 - 8, at least 240; the text slot is W - 64; the title is native, so the model line is at y 16, the state at 31
   const rowAt = async ($: any, cols: number) => {
     const src = await svgOf($, /^wire it:/, cols)
-    const [meta = '', stats = ''] = lineAt(src, 34)
-    return { src, meta, stats, state: lineAt(src, 49), slot: Math.max(240, cols * 8 - 8) - 64 }
+    const [meta = '', stats = ''] = lineAt(src, 16)
+    return { src, meta, stats, state: lineAt(src, 31), slot: Math.max(240, cols * 8 - 8) - 64 }
   }
   const stepped = async ($: any, on: any, note = 'Device verification') => {
     agentEngine(on)
@@ -463,7 +463,7 @@ describe('agent rows: live tool word and state colours', () => {
     const r = await rowAt($, 76)
     expect(r.meta).toContain('Opus 5.5')
     expect(r.stats).toBe(STATS[0])
-    expect(r.src).toMatch(/<text class="s" x="\d+" y="34" text-anchor="end"/)
+    expect(r.src).toMatch(/<text class="s" x="\d+" y="16" text-anchor="end"/)
     expect(r.state).toEqual(['Running · Bash · 4/6 · Device verification'])
     expect(r.src).not.toContain('NaN')
   })
@@ -515,8 +515,8 @@ describe('agent rows: live tool word and state colours', () => {
     await $.turn.complete({ reason: 'error', answer: '', durationMs: 1, agentId: 'w2' } as any)
     for (const name of ['first', 'second']) {
       const src = await svgOf($, new RegExp(`^${name}:`), 76)
-      expect(lineAt(src, 34)[1]).toBe(STATS[0])
-      expect(lineAt(src, 49).join('')).not.toContain('ctx')
+      expect(lineAt(src, 16)[1]).toBe(STATS[0])
+      expect(lineAt(src, 31).join('')).not.toContain('ctx')
       expect(src).not.toContain('NaN')
     }
   })
