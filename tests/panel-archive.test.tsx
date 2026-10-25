@@ -259,7 +259,7 @@ describe('archive section in the panel', () => {
     await p.unmount()
     p = await pane($)
     expect(await p.find({ type: 'Button', text: /▾ Archive/ })).toBeDefined()
-    expect(await p.find({ type: 'Button', text: /▸ Old flow 1 .* · 1\/2 · finished/ })).toBeDefined()
+    expect(await p.find({ type: 'Button', text: /▾ Old flow 1 .* · 1\/2 · finished/ })).toBeDefined()
     expect(await p.find({ type: 'Text', text: /≈\$1\.50 · 12k tokens · 30:00/ })).toBeDefined()
     await p.unmount()
   })
@@ -277,20 +277,21 @@ describe('archive section in the panel', () => {
     }
   })
 
-  test('pressing an entry expands its task lines and pressing again folds them', async ($, on) => {
+  test('the only entry shows its task lines, pressing folds them and pressing again expands them', async ($, on) => {
     engine(on, { store: { historyShown: true, history: [entry(1)] } })
     await start($)
     await settle()
     const p = await pane($)
-    expect(await p.find({ type: 'Text', text: /write tests \(careful\)/ })).toBeUndefined()
-    await p.press({ key: 'archive-e1' })
-    await settle()
     expect(await p.find({ type: 'Button', text: /▾ Old flow 1 .* · finished/ })).toBeDefined()
     expect(await p.find({ type: 'Text', text: /✓ write tests \(careful\)/ })).toBeDefined()
     expect(await p.find({ type: 'Text', text: /○ wire it \(medium\)/ })).toBeDefined()
     await p.press({ key: 'archive-e1' })
     await settle()
+    expect(await p.find({ type: 'Button', text: /▸ Old flow 1 .* · finished/ })).toBeDefined()
     expect(await p.find({ type: 'Text', text: /write tests \(careful\)/ })).toBeUndefined()
+    await p.press({ key: 'archive-e1' })
+    await settle()
+    expect(await p.find({ type: 'Text', text: /✓ write tests \(careful\)/ })).toBeDefined()
     await p.unmount()
   })
 
@@ -324,7 +325,7 @@ describe('archive section in the panel', () => {
     await plan($)
     await progress($, { finished: true })
     const p = await pane($)
-    expect(await p.find({ type: 'Button', text: /▸ Ship it .* · 1\/2 · finished/ })).toBeDefined()
+    expect(await p.find({ type: 'Button', text: /▾ Ship it .* · 1\/2 · finished/ })).toBeDefined()
     await p.unmount()
   })
 

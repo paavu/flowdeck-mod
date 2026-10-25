@@ -123,11 +123,12 @@ export type Panel = {
   isBandHidden: boolean
   /** Stored under the engine-store key `historyShown`, its name from before the rename. */
   isArchiveShown: boolean
+  /** Archive groups the user opened (the first group shown is open by default); this session only. */
   openEntries: string[]
   /** Agent rows unfolded to show their items; this session only. */
   openAgents: string[]
-  /** Archive groups whose finished list is open; this session only. */
-  openFinished: string[]
+  /** Archive groups the user folded, the default-open first one included; this session only. */
+  closedEntries: string[]
   /** How many archive groups are shown; this session only. */
   archiveLimit: number
   /** The list of archive volumes is open; this session only. */

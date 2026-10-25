@@ -625,15 +625,43 @@ describe('browsing volumes in the panel', () => {
       expect(v.keys.indexOf('archive-latest')).toBeLessThan(v.keys.indexOf('archive-older'))
       expect(v.text).toContain(`Showing ${spanText(entry(22).startedAt, entry(20).endedAt)} · 3 flows`)
       expect(v.keys.some((k: string) => k.startsWith('archive-seg-'))).toBe(false)
+      const fold = (w: typeof v, key: string) => JSON.stringify(w.buttons.find((b: any) => String(b.props.key) === key)).match(/[▾▸]/)?.[0]
+      // the volume's newest group is open by default, the others folded
+      expect(fold(v, 'archive-e20')).toBe('▾')
+      expect(fold(v, 'archive-e21')).toBe('▸')
+      expect(v.text).toMatch(/✓ write tests \(careful\)/)
       await press($, surface, 'archive-e20')
       v = await view($, surface)
-      expect(v.text).toMatch(/✓ write tests \(careful\)/)
-      await press($, surface, 'archive-e20', 'archive-latest')
+      expect(v.text).not.toMatch(/write tests/)
+      await press($, surface, 'archive-latest')
       v = await view($, surface)
       expect(v.groups).toEqual(['e1', 'e2'])
       expect(v.keys).not.toContain('archive-latest')
+      // Back to latest applies the default again
+      expect(fold(v, 'archive-e1')).toBe('▾')
+      expect(fold(v, 'archive-e2')).toBe('▸')
     }
     expect(env.writes).toEqual([])
+  })
+
+  test('switching volume applies the default again: the first group of the volume shown is open', async ($, on) => {
+    engine(on, { store: { historyShown: true }, files: disk() })
+    await start($)
+    await settle()
+    const fold = (w: Awaited<ReturnType<typeof view>>, key: string) => JSON.stringify(w.buttons.find((b: any) => String(b.props.key) === key)).match(/[▾▸]/)?.[0]
+    // a user's choice on the latest part: e1 folded, e2 opened
+    await press($, 'terminal', 'archive-e1', 'archive-e2')
+    let v = await view($)
+    expect([fold(v, 'archive-e1'), fold(v, 'archive-e2')]).toEqual(['▸', '▾'])
+    await press($, 'terminal', 'archive-older', 'archive-seg-history-1.json', 'archive-e20', 'archive-e21')
+    v = await view($)
+    expect([fold(v, 'archive-e20'), fold(v, 'archive-e21')]).toEqual(['▸', '▾'])
+    await press($, 'terminal', 'archive-older', 'archive-seg-history-2.json', 'archive-older', 'archive-seg-history-1.json')
+    v = await view($)
+    expect([fold(v, 'archive-e20'), fold(v, 'archive-e21'), fold(v, 'archive-e22')]).toEqual(['▾', '▸', '▸'])
+    await press($, 'terminal', 'archive-latest')
+    v = await view($)
+    expect([fold(v, 'archive-e1'), fold(v, 'archive-e2')]).toEqual(['▾', '▸'])
   })
 
   test('a volume that cannot be read says so and the view stays', async ($, on) => {

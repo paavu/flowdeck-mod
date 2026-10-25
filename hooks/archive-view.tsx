@@ -14,7 +14,8 @@ export type Planned = PlannedTask & { n: number }
 export type Totals = { cost: number; tokens: number; time: number }
 
 // One flow as the panel draws it, live or from the archive: the header (title and the three tiles, then
-// `controls`) and, on demand, the body (running, the `Finished · N` fold, planned). `at` is the clock the rows count to.
+// `controls`) and, on demand, the body (running, the `Finished · N` fold, planned; `flat`, the archive's: every row
+// newest first, then planned). `at` is the clock the rows count to.
 export type FlowView = {
   kp: string
   fp: string
@@ -23,13 +24,10 @@ export type FlowView = {
   planned: Planned[]
   at: number
   t: Totals
-  isDoneCollapsed: boolean
-  doneKey: string
-  onDone: () => unknown
   controls: RenderChildren
   /** The live flow only: which finished rows get an Archive button, and its press. */
   archive?: { can: (a: AgentRun) => boolean; press: (a: AgentRun) => unknown }
-}
+} & ({ flat?: false; isDoneCollapsed: boolean; doneKey: string; onDone: () => unknown } | { flat: true })
 export type FlowDrawing = { header: RenderChildren; body: () => RenderChildren }
 
 export type ArchiveView = {
@@ -47,8 +45,7 @@ export type ArchiveView = {
   flowView: (v: FlowView) => FlowDrawing
   unstarted: (tasks: PlannedTask[], list: AgentRun[]) => Planned[]
   on: {
-    entry: (id: string) => unknown
-    finished: (id: string) => unknown
+    entry: (id: string, isOpen: boolean) => unknown
     list: () => unknown
     volume: (file: string) => unknown
     latest: () => unknown
@@ -63,12 +60,13 @@ const endedRun = (a: ArchiveAgent, end: number): AgentRun => ({ ...a, endedAt: a
 const flows = (n: number): string => `${n} ${n === 1 ? 'flow' : 'flows'}`
 
 // A past flow as a group: its fold (title, date, done/total, how it ended) and its tiles always;
-// opened, the flow as it ended with its finished list folded, or the task list of an entry saved without runs.
+// opened, the flow as it ended with its rows flat, or the task list of an entry saved without runs.
+// The first group shown is open unless the user folded it; the others are folded unless the user opened them.
 function archiveGroup(v: ArchiveView, entry: ArchiveEntry, i: number): RenderChildren {
   const { Box, Text, Button } = v.ui
   const { Svg, W, p } = v
   const { head, line, lines } = formatEntry(entry)
-  const isOpen = p.openEntries.includes(entry.id)
+  const isOpen = !(p.closedEntries ?? []).includes(entry.id) && (i === 0 || p.openEntries.includes(entry.id))
   const runs = (entry.agents ?? []).map(a => endedRun(a, entry.endedAt))
   const tasks = entry.tasks.map(tk => ({ title: tk.title, tier: tk.tier, after: tk.after ?? [] }))
   const view = v.flowView({
@@ -79,9 +77,7 @@ function archiveGroup(v: ArchiveView, entry: ArchiveEntry, i: number): RenderChi
     planned: v.unstarted(tasks, runs),
     at: entry.endedAt,
     t: { cost: entry.cost, tokens: entry.tokens, time: entry.time },
-    isDoneCollapsed: !(p.openFinished ?? []).includes(entry.id),
-    doneKey: `archive-finished-${entry.id}`,
-    onDone: () => v.on.finished(entry.id),
+    flat: true,
     controls: null,
   })
   const body = !isOpen
@@ -98,7 +94,7 @@ function archiveGroup(v: ArchiveView, entry: ArchiveEntry, i: number): RenderChi
   return (
     <Box key={`archive-row-${entry.id}`} flexDirection="column" marginTop={i ? 1 : 0}>
       {i > 0 && Svg && <Svg source={v.svg(W, 1, `<line class="ln" x1="0" y1="0.5" x2="${W}" y2="0.5"/>`)} alt="" width={W} height={1} />}
-      <Button key={`archive-${entry.id}`} plain onPress={() => v.on.entry(entry.id)}>
+      <Button key={`archive-${entry.id}`} plain onPress={() => v.on.entry(entry.id, isOpen)}>
         {`${isOpen ? '▾' : '▸'} ${head}`} <Text dimColor>{line}</Text>
       </Button>
       {view.header}

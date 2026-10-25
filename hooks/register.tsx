@@ -27,7 +27,7 @@ const panel = atom({ plugin: 'flowdeck', key: 'panel' } as const, {
   isArchiveShown: false,
   openEntries: [] as string[],
   openAgents: [] as string[],
-  openFinished: [] as string[],
+  closedEntries: [] as string[],
   archiveLimit: 10,
   archiveListOpen: false,
   archiveVolume: null as string | null,
@@ -1750,16 +1750,17 @@ export const register: Register = (on, options) => {
       const finished = v.list.filter(a => a.status !== 'running' && !a.archived).reverse()
       const archivedCount = v.list.filter(a => a.status !== 'running' && a.archived).length
       const isEmpty = v.list.length === 0 && v.planned.length === 0
-      const doneLabel = `${v.isDoneCollapsed ? '▸' : '▾'} ${s.finished} · ${finished.length}`
-      const toggleDone =
-        archivedCount > 0 ? (
-          <Button key={v.doneKey} plain onPress={v.onDone}>
-            {doneLabel}
-            <Text dimColor>{` · ${archivedCount} archived`}</Text>
-          </Button>
-        ) : (
-          <Button key={v.doneKey} label={doneLabel} plain onPress={v.onDone} />
-        )
+      // The archive's flat list: every row newest first, with no Running heading and no Finished fold.
+      const flat = v.flat ? v.list.slice().reverse() : []
+      const doneLabel = v.flat ? '' : `${v.isDoneCollapsed ? '▸' : '▾'} ${s.finished} · ${finished.length}`
+      const toggleDone = v.flat ? null : archivedCount > 0 ? (
+        <Button key={v.doneKey} plain onPress={v.onDone}>
+          {doneLabel}
+          <Text dimColor>{` · ${archivedCount} archived`}</Text>
+        </Button>
+      ) : (
+        <Button key={v.doneKey} label={doneLabel} plain onPress={v.onDone} />
+      )
       const hasDone = finished.length > 0 || archivedCount > 0
       const archiveButton = (a: AgentRun) =>
         v.archive?.can(a) ? <Button key={`archive-item-${a.id}`} label="Archive" plain onPress={() => v.archive?.press(a)} /> : null
@@ -1799,10 +1800,14 @@ export const register: Register = (on, options) => {
           ],
           body: () => [
             isEmpty && <Text dimColor>{s.empty}</Text>,
-            running.length > 0 && section(`${kp}h-run`, `${s.running} · ${running.length}`),
-            running.map(a => agentRow(a, s.isRunning)),
-            hasDone && toggleDone,
-            !v.isDoneCollapsed && finished.map(a => agentRow(a, s.isFinished)),
+            ...(v.flat
+              ? [flat.map(a => agentRow(a, a.status === 'running' ? s.isRunning : s.isFinished))]
+              : [
+                  running.length > 0 && section(`${kp}h-run`, `${s.running} · ${running.length}`),
+                  running.map(a => agentRow(a, s.isRunning)),
+                  hasDone && toggleDone,
+                  !v.isDoneCollapsed && finished.map(a => agentRow(a, s.isFinished)),
+                ]),
             v.planned.length > 0 && section(`${kp}h-plan`, `${s.planned} · ${v.planned.length}`),
             v.planned.map(pl => (
               <Svg key={`${kp}plan-${pl.n}`} source={plannedSvg(W, pl)} alt={`${pl.n}. ${pl.title}: ${s.isPlanned}`} width={W} height={46} />
@@ -1878,14 +1883,18 @@ export const register: Register = (on, options) => {
         ],
         body: () => [
           isEmpty && <Text dimColor>{s.empty}</Text>,
-          running.length > 0 && (
-            <Text dimColor>
-              {s.running} · {running.length}
-            </Text>
-          ),
-          running.map(row),
-          hasDone && toggleDone,
-          !v.isDoneCollapsed && finished.map(row),
+          ...(v.flat
+            ? [flat.map(row)]
+            : [
+                running.length > 0 && (
+                  <Text dimColor>
+                    {s.running} · {running.length}
+                  </Text>
+                ),
+                running.map(row),
+                hasDone && toggleDone,
+                !v.isDoneCollapsed && finished.map(row),
+              ]),
           v.planned.length > 0 && (
             <Text dimColor>
               {s.planned} · {v.planned.length}
@@ -1910,10 +1919,7 @@ export const register: Register = (on, options) => {
       }
     }
 
-    const toggleIn = (ids: string[] | undefined, id: string): string[] => {
-      const open = ids ?? []
-      return open.includes(id) ? open.filter(x => x !== id) : [...open, id]
-    }
+    const setIn = (ids: string[] | undefined, id: string, isIn: boolean): string[] => [...(ids ?? []).filter(x => x !== id), ...(isIn ? [id] : [])]
     // Browsing only reads: a volume's entries replace the shown ones, Back to latest reads history.json again.
     const openVolume = async (file: string) => {
       const a = project ? await readVolume(io($), dataDir(project), file) : null
@@ -1922,14 +1928,14 @@ export const register: Register = (on, options) => {
         return
       }
       await update($, archive, () => a.entries)
-      await update($, panel, prev => ({ ...prev, archiveVolume: file, archiveListOpen: false, archiveError: '', archiveLimit: ARCHIVE_PAGE }))
+      await update($, panel, prev => ({ ...prev, archiveVolume: file, archiveListOpen: false, archiveError: '', archiveLimit: ARCHIVE_PAGE, openEntries: [], closedEntries: [] }))
     }
     const backToLatest = async () => {
       const loaded = await loadLatest(io($), project).catch(() => null)
       if (!loaded) return
       await update($, archive, () => loaded.entries)
       await update($, volumes, () => loaded.volumes)
-      await update($, panel, prev => ({ ...prev, archiveVolume: null, archiveError: '', archiveWarning: loaded.isUnreadable ? UNREADABLE : '', archiveLimit: ARCHIVE_PAGE }))
+      await update($, panel, prev => ({ ...prev, archiveVolume: null, archiveError: '', archiveWarning: loaded.isUnreadable ? UNREADABLE : '', archiveLimit: ARCHIVE_PAGE, openEntries: [], closedEntries: [] }))
     }
     const archivePart = archiveSection({
       ui: { Box, Text, Button },
@@ -1944,8 +1950,8 @@ export const register: Register = (on, options) => {
       flowView,
       unstarted,
       on: {
-        entry: id => update($, panel, prev => ({ ...prev, openEntries: toggleIn(prev.openEntries, id) })),
-        finished: id => update($, panel, prev => ({ ...prev, openFinished: toggleIn(prev.openFinished, id) })),
+        // A press records the user's choice, which wins over the default (the first group shown open).
+        entry: (id, isOpen) => update($, panel, prev => ({ ...prev, openEntries: setIn(prev.openEntries, id, !isOpen), closedEntries: setIn(prev.closedEntries, id, isOpen) })),
         list: () => update($, panel, prev => ({ ...prev, archiveListOpen: !prev.archiveListOpen, archiveError: '' })),
         volume: openVolume,
         latest: backToLatest,

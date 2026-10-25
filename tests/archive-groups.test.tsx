@@ -304,20 +304,23 @@ const groupB = (): ArchiveEntry =>
 const DATE = /[A-Z][a-z]{2} \d{1,2}.*, \d{4} · \d{1,2}:\d{2} [AP]M/
 
 describe('archive groups in the panel', () => {
-  test('two groups show titles, dates and the three tiles, folded by default', async ($, on) => {
+  test('two groups show titles, dates and the three tiles; the newest is open, the other folded', async ($, on) => {
     engine(on, { store: { historyShown: true, history: [groupA(), groupB()] } })
     await start($)
     await settle()
     const t = await terminal($)
-    const groups = t.buttons.filter((b: any) => /^archive-g/.test(String(b.props.key)))
+    const groups = t.buttons.filter((b: any) => /^archive-g[AB]$/.test(String(b.props.key)))
     expect(groups.map((b: any) => String(b.props.key))).toEqual(['archive-gA', 'archive-gB'])
-    expect(JSON.stringify(groups[0])).toContain('▸ Flow A')
+    expect(JSON.stringify(groups[0])).toContain('▾ Flow A')
+    expect(JSON.stringify(groups[1])).toContain('▸ Flow B')
     expect(JSON.stringify(groups[0])).toContain(`${entryDate(groupA())} · 1/3 · finished`)
     expect(JSON.stringify(groups[1])).toContain(`${entryDate(groupB())} · 1/1 · finished`)
     expect(JSON.stringify(groups[0])).toMatch(DATE)
     expect(t.text).toContain('≈$1.50 · 12k tokens · 30:00')
     expect(t.text).toContain('≈$0.75 · 3k tokens · 1:30')
-    expect(t.text).not.toMatch(/write tests/)
+    expect(t.text).toMatch(/write tests/)
+    // the folded group shows only its header
+    expect(t.text).not.toMatch(/only task/)
     expect(t.keys.some((k: string) => /finished/.test(k))).toBe(false)
 
     const d = await desktop($)
@@ -327,42 +330,104 @@ describe('archive groups in the panel', () => {
     expect(String(headers[0].props.source)).toContain('12k')
     expect(String(headers[0].props.source)).toContain('30:00')
     expect(String(headers[1].props.source)).toContain('1:30')
-    expect(d.svgs.filter((s: any) => Number(s.props.height) === 66).length).toBe(0)
+    expect(d.svgs.filter((s: any) => Number(s.props.height) === 66).length).toBe(2)
+    expect(d.alts.some((a: string) => /^only task:/.test(a))).toBe(false)
     expect(d.keys).toContain('archive-gA')
   })
 
-  test('opening a group shows Finished · N collapsed, then the rows with their final states and stats, and the unstarted task', async ($, on) => {
+  test('the open group shows its rows flat, newest first, with their final states and stats, and the unstarted task; no Finished toggle', async ($, on) => {
     engine(on, { store: { historyShown: true, history: [groupA(), groupB()] } })
     await start($)
     await settle()
     for (const surface of ['terminal', 'desktop'] as const) {
-      await press($, surface, 'archive-gA')
-      let t = await terminal($)
-      const fin = t.buttons.find((b: any) => String(b.props.key) === 'archive-finished-gA')
-      expect(String(fin?.props.label)).toBe('▸ Finished · 2')
-      expect(t.text).not.toMatch(/write tests/)
-      expect(t.text).toMatch(/Planned · 1/)
-      expect(t.text).toMatch(/3\. polish/)
-      await press($, surface, 'archive-finished-gA')
-      t = await terminal($)
-      expect(String(t.buttons.find((b: any) => String(b.props.key) === 'archive-finished-gA')?.props.label)).toBe('▾ Finished · 2')
+      const t = await terminal($)
       expect(t.text).toMatch(/write tests/)
       expect(t.text).toMatch(/wire it/)
+      expect(t.text.indexOf('wire it')).toBeLessThan(t.text.indexOf('write tests'))
       expect(t.text).toMatch(/Done/)
       expect(t.text).toMatch(/Error/)
       expect(t.text).toMatch(/ctx 10% · 100k ≈\$0\.50 5:00/)
+      expect(t.text).toMatch(/Planned · 1/)
+      expect(t.text).toMatch(/3\. polish/)
+      expect(t.text).not.toMatch(/Finished|Running ·/)
+      expect(JSON.stringify(t.buttons)).not.toMatch(/Finished/)
+      expect(t.keys.some((k: string) => /finished/.test(k))).toBe(false)
       const d = await desktop($)
       const done = d.svgs.find((s: any) => /^write tests:/.test(String(s.props.alt)))
       const failed = d.svgs.find((s: any) => /^wire it:/.test(String(s.props.alt)))
       expect(String(done?.props.source)).toContain(STATE_COLOR.done)
       expect(String(failed?.props.source)).toContain(STATE_COLOR.error)
       expect(String(done?.props.source)).toContain('5:00')
+      const rows = d.alts.filter((a: string) => /^(write tests|wire it):/.test(a))
+      expect(rows.map((a: string) => a.split(':')[0])).toEqual(['wire it', 'write tests'])
       expect(d.alts.some((a: string) => /^3\. polish: planned/.test(a))).toBe(true)
-      // the other group stays folded
-      expect(t.keys).not.toContain('archive-finished-gB')
-      await press($, surface, 'archive-finished-gA', 'archive-gA')
+      expect(d.svgs.some((s: any) => /Finished/.test(String(s.props.source)) || /Finished/.test(String(s.props.alt)))).toBe(false)
+      expect(JSON.stringify(d.buttons)).not.toMatch(/Finished/)
+      const p = await pane($, surface)
+      expect((await p.findAll({ type: 'Text' })).some((x: any) => /Finished/.test(String(x.text)))).toBe(false)
+      await p.unmount()
+    }
+  })
+
+  test('pressing the open newest group folds it and it stays folded; pressing a folded group opens it', async ($, on) => {
+    engine(on, { store: { historyShown: true, history: [groupA(), groupB()] } })
+    await start($)
+    await settle()
+    for (const surface of ['terminal', 'desktop'] as const) {
+      await press($, surface, 'archive-gA')
+      let t = await terminal($)
+      expect(JSON.stringify(t.buttons.find((b: any) => String(b.props.key) === 'archive-gA'))).toContain('▸ Flow A')
+      expect(t.text).not.toMatch(/write tests/)
+      expect(t.text).toContain('≈$1.50 · 12k tokens · 30:00')
+      // a re-render keeps the choice
       t = await terminal($)
       expect(t.text).not.toMatch(/write tests/)
+      const d = await desktop($)
+      expect(d.svgs.filter((s: any) => Number(s.props.height) === 66).length).toBe(0)
+      await press($, surface, 'archive-gB')
+      t = await terminal($)
+      expect(JSON.stringify(t.buttons.find((b: any) => String(b.props.key) === 'archive-gB'))).toContain('▾ Flow B')
+      expect(t.text).toMatch(/only task/)
+      expect(t.text).not.toMatch(/write tests/)
+      expect(t.text).not.toMatch(/Finished/)
+      await press($, surface, 'archive-gA', 'archive-gB')
+      t = await terminal($)
+      expect(t.text).toMatch(/write tests/)
+      expect(t.text).not.toMatch(/only task/)
+    }
+  })
+
+  test('with one group it is open', async ($, on) => {
+    engine(on, { store: { historyShown: true, history: [groupB()] } })
+    await start($)
+    await settle()
+    const t = await terminal($)
+    expect(JSON.stringify(t.buttons.find((b: any) => String(b.props.key) === 'archive-gB'))).toContain('▾ Flow B')
+    expect(t.text).toMatch(/only task/)
+    const d = await desktop($)
+    expect(d.alts.some((a: string) => /^only task:/.test(a))).toBe(true)
+  })
+
+  test('a group of 60 agents draws flat without overflow', async ($, on) => {
+    const agents = Array.from({ length: 60 }, (_, k) => run({ id: `m${k}`, agentId: `m${k}`, description: `task ${k} ${'d'.repeat(150)}`, startedAt: NOW - 2 * HOUR + k * 1000, endedAt: NOW - 2 * HOUR + k * 1000 + MIN }))
+    const e = { ...snap(agents), id: 'gL' } as ArchiveEntry
+    engine(on, { store: { historyShown: true, history: [e] } })
+    await start($)
+    await settle()
+    const d = await desktop($)
+    const rows = d.svgs.filter((s: any) => /^task \d+ /.test(String(s.props.alt)))
+    expect(rows.length).toBe(60)
+    expect(String(rows[0].props.alt)).toMatch(/^task 59 /)
+    for (const s of d.svgs) expect(Number(s.props.width)).toBeLessThanOrEqual(900)
+    for (const cols of [24, 40, 80]) {
+      const p = await pane($, 'terminal', cols)
+      const texts = await p.findAll({ type: 'Text' })
+      await p.unmount()
+      const text = texts.map((x: any) => x.text).join('\n')
+      expect(text).not.toContain('NaN')
+      expect(text).not.toContain('undefined')
+      expect(text).not.toMatch(/Finished/)
+      expect(text.split('task ').length - 1).toBeGreaterThanOrEqual(60)
     }
   })
 
@@ -370,7 +435,6 @@ describe('archive groups in the panel', () => {
     engine(on, { store: { historyShown: true, history: [groupA()] } })
     await start($)
     await settle()
-    await press($, 'terminal', 'archive-gA', 'archive-finished-gA')
     let t = await terminal($)
     expect(t.keys).toContain('archive-gA-agent-fold-a2')
     expect(t.text).not.toMatch(/patch it/)
@@ -384,7 +448,7 @@ describe('archive groups in the panel', () => {
     expect(String(kids[1].props.alt)).toMatch(/^patch it: Error/)
   })
 
-  test('an entry saved without agents shows its task list when opened', async ($, on) => {
+  test('an entry saved without agents shows its task list when open', async ($, on) => {
     const old = { id: 'old', project: '/work/app', title: 'Old flow', startedAt: NOW - 2 * HOUR, endedAt: NOW - HOUR, status: 'open', done: 1, total: 2, tasks: [{ title: 'write tests', tier: 'careful' }, { title: 'wire it', tier: 'medium' }], cost: 1.5, tokens: 12_000, time: 30 * MIN }
     engine(on, { store: { historyShown: true, history: [old] } })
     await start($)
@@ -393,12 +457,12 @@ describe('archive groups in the panel', () => {
       let t = await terminal($)
       expect(JSON.stringify(t.buttons.find((b: any) => String(b.props.key) === 'archive-old'))).toContain('ended with the session')
       expect(t.text).toContain('≈$1.50 · 12k tokens · 30:00')
-      expect(t.text).not.toMatch(/write tests/)
-      await press($, surface, 'archive-old')
-      t = await terminal($)
       expect(t.text).toMatch(/✓ write tests \(careful\)/)
       expect(t.text).toMatch(/○ wire it \(medium\)/)
       expect(t.keys).not.toContain('archive-finished-old')
+      await press($, surface, 'archive-old')
+      t = await terminal($)
+      expect(t.text).not.toMatch(/write tests/)
       await press($, surface, 'archive-old')
     }
   })
@@ -409,7 +473,6 @@ describe('archive groups in the panel', () => {
     const { clock } = engine(on, { store: { historyShown: true, history: [e] } })
     await start($)
     await settle()
-    await press($, 'terminal', 'archive-gR')
     let t = await terminal($)
     expect(t.text).toMatch(/Running at finish/)
     expect(t.text).toMatch(/2:00/)
@@ -435,7 +498,6 @@ describe('archive groups in the panel', () => {
     await progress($, { finished: true })
     const saved = (store.history as any[])[0]
     expect(saved.agents.map((a: any) => [a.id, a.status, a.endedAt])).toEqual([['w1', 'running', NOW + 61_000]])
-    await press($, 'terminal', `archive-${saved.id}`)
     const t = await terminal($)
     expect(t.text).toMatch(/Running at finish/)
     expect(t.text).toMatch(/1:00/)
@@ -449,7 +511,7 @@ describe('archive groups in the panel', () => {
     await progress($, { title: 'Live', total: 1, done: 0, phase: 'delegate', tasks: [{ title: 'wire it', tier: 'medium' }] })
     await $.agent.spawn({ subagentType: 'flowdeck-medium', description: 'wire it', tool_use_id: 'a2' } as any)
     await $.tool.call({ tool: 'mcp__flowdeck__step', agentId: 'a2', steps: [{ title: 'live one' }, { title: 'live two' }] } as any)
-    await press($, 'terminal', 'archive-gA', 'archive-finished-gA', 'archive-gC', 'archive-finished-gC', 'archive-gA-agent-fold-a2')
+    await press($, 'terminal', 'archive-gC', 'archive-gA-agent-fold-a2')
     const count = (text: string, word: string) => text.split(word).length - 1
     let t = await terminal($)
     expect(count(t.text, '✗ patch it')).toBe(1)
@@ -480,8 +542,12 @@ describe('archive groups in the panel', () => {
     }
     await press($, 'terminal', 'archive-more')
     const t = await terminal($)
-    expect(t.buttons.filter((b: any) => /^archive-g\d+$/.test(String(b.props.key))).length).toBe(12)
+    const groups = t.buttons.filter((b: any) => /^archive-g\d+$/.test(String(b.props.key)))
+    expect(groups.length).toBe(12)
     expect(t.keys).not.toContain('archive-more')
+    // the newest is still the only group open by default
+    expect(groups.map((b: any) => (JSON.stringify(b).includes('▾ Group') ? 'open' : 'folded'))).toEqual(['open', ...Array(11).fill('folded')])
+    expect(t.text.split('only task').length - 1).toBe(1)
   })
 
   test('a flow finished through finishFlow is saved with its agents and appears as a group', async ($, on) => {
@@ -498,9 +564,9 @@ describe('archive groups in the panel', () => {
     expect(saved.agents.map((a: any) => [a.id, a.status, a.endedAt])).toEqual([['w1', 'done', NOW + 61_000]])
     expect(saved.tasks[1]).toEqual({ title: 'wire it', tier: 'medium', after: [] })
     const id = saved.id
-    await press($, 'terminal', `archive-${id}`, `archive-finished-${id}`)
     const t = await terminal($)
-    expect(String(t.buttons.find((b: any) => String(b.props.key) === `archive-finished-${id}`)?.props.label)).toBe('▾ Finished · 1')
+    expect(t.keys).not.toContain(`archive-finished-${id}`)
+    expect(t.text).toMatch(/write tests/)
     expect(t.text).toMatch(/2\. wire it/)
     expect(t.keys).toContain(`archive-${id}`)
   })
