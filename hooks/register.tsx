@@ -6,7 +6,7 @@ import { derive, finishItems, hasItemOps, ITEM_H, itemAlt, itemLine, itemsOf, it
 import type { StepInput } from './agent-items'
 import { agentState, HOUSEKEEPING, splitHead, stateText } from './agent-state'
 import { contextRows, contextSvg, toReading } from './context'
-import { isWorthKeeping, snapshot, VOLUME_MAX } from './archive'
+import { EXTRA_FILE, isWorthKeeping, snapshot, VOLUME_MAX } from './archive'
 import { dataDir, getFile, loadLatest, parseJson, readVolume, saveToProject, saveToStore, writeData } from './archive-store'
 import type { Io, Latest } from './archive-store'
 import { ARCHIVE_PAGE, archiveSection, UNREADABLE } from './archive-view'
@@ -610,6 +610,9 @@ ${tile(0, s.cost, '≈' + fmtCost(t.cost))}${tile(1, s.tokens, fmtTokens(t.token
 
 const headerHeight = (title: string): number => (title ? 72 : 44)
 
+// The room a finished row leaves for its Archive button on the desktop: the label at the button's size and the gap.
+const ARCHIVE_W = Math.ceil(textWidth('Archive', 13)) + 14
+
 // The task's own progress when the worker reports steps; a finished run is full.
 const progressOf = (a: AgentRun): number | null => {
   if (a.status === 'done') return 1
@@ -784,24 +787,81 @@ const io = ($: EngineInterface): Io => ({
 })
 
 // Without a project folder, or when the project files cannot take it, the save goes to the shared store as before.
-// Only the latest part's view takes the entry; a volume being shown stays as it is.
-async function saveArchive($: EngineInterface, entry: ArchiveEntry): Promise<void> {
-  if (!isWorthKeeping(entry)) return
+// Only the latest part's view takes the entry; a volume being shown stays as it is. True when the entry was kept somewhere:
+// history.json, its side file or the shared store.
+async function saveArchive($: EngineInterface, entry: ArchiveEntry): Promise<boolean> {
+  if (!isWorthKeeping(entry)) return false
   const isLatest = async (): Promise<boolean> => (await read($, panel)).archiveVolume == null
+  // The same calls, watched: a side file or the store taking the entry counts as kept.
+  const base = io($)
+  let isKept = false
+  const kept = <T,>(r: T): T => {
+    isKept = true
+    return r
+  }
+  const watched: Io = {
+    ...base,
+    write: (path, text) => Promise.resolve(base.write(path, text)).then(r => (EXTRA_FILE.test(path.slice(path.lastIndexOf('/') + 1)) ? kept(r) : r)),
+    storeSet: value => base.storeSet(value).then(kept),
+  }
   let view: ArchiveEntry[] | null = null
   if (project) {
-    const saved = await saveToProject(io($), project, volumeMax, entry).catch(() => null)
+    const saved = await saveToProject(watched, project, volumeMax, entry).catch(() => null)
     const vols = saved?.volumes
     if (vols) await update($, volumes, () => vols)
     if (saved) await update($, panel, prev => ({ ...prev, archiveWarning: saved.isUnreadable ? UNREADABLE : '' }))
     if (saved?.isSaved) {
       if (await isLatest()) await update($, archive, () => saved.latest)
-      return
+      return true
     }
     view = saved?.latest ?? null
   }
-  const next = await saveToStore(io($), entry, () => read($, archive))
+  const next = await saveToStore(watched, entry, () => read($, archive))
   if (await isLatest()) await update($, archive, () => view ?? next)
+  return isKept
+}
+
+// The archive presses, one after another; a flow's own record waits for the one under way, so a partial entry never
+// lands after the flow's full one.
+let archiving: Promise<unknown> = Promise.resolve()
+
+// The finished rows of the flow that can still be archived, newest first as the live Finished list shows them: rows
+// that began before the flow belong to the flow before it.
+const archivable = (list: AgentRun[], meta: Meta | null): AgentRun[] =>
+  list.filter(a => a.status !== 'running' && !a.archived && (!meta || a.startedAt >= meta.startedAt)).reverse()
+
+// Archives the row and every older finished row not archived yet: the open flow's entry is saved with all its archived
+// rows (`partial`), and only once it was kept do they leave the live list. Never throws into the press.
+async function archiveRows($: EngineInterface, id: string): Promise<void> {
+  try {
+    const f = await read($, flow)
+    if (!f || f.isFinished) return
+    const list = await read($, agents)
+    const endedAt = await $.clock.now()
+    let meta = await read($, flowMeta)
+    if (!meta) {
+      // As recordFlow starts one, but from the first run's start, so the flow's later records keep these rows.
+      const fresh = { startedAt: Math.min(endedAt, ...list.map(a => a.startedAt)), project }
+      meta = (await update($, flowMeta, m => m ?? fresh)) ?? fresh
+    }
+    const shown = archivable(list, meta)
+    const at = shown.findIndex(a => a.id === id)
+    if (at < 0) return
+    const ids = new Set(shown.slice(at).map(a => a.id))
+    const start = meta.startedAt
+    const rows = list.filter(a => a.status !== 'running' && a.startedAt >= start && (a.archived || ids.has(a.id)))
+    const entry: ArchiveEntry = { ...snapshot({ flow: f, agents: rows, project: meta.project, startedAt: start, endedAt, status: 'open' }), partial: true }
+    if (!(await saveArchive($, entry))) return
+    await update($, agents, l => l.map(a => (ids.has(a.id) && a.status !== 'running' ? { ...a, archived: true } : a)))
+  } catch {
+    // A failing clock or store leaves the rows where they are.
+  }
+}
+
+const pressArchive = ($: EngineInterface, id: string): Promise<unknown> => {
+  const run = archiving.then(() => archiveRows($, id))
+  archiving = run.catch(() => {})
+  return run
 }
 
 type Meta = { startedAt: number; project: string }
@@ -811,6 +871,7 @@ const isSameMeta = (a: Meta | null, b: Meta | null): boolean => !!a && !!b && a.
 // when it could not be saved. Never throws into the tool call or the turn that asked.
 async function recordFlow($: EngineInterface, f: Flow, status: 'finished' | 'open', at?: { meta: Meta | null; agents: AgentRun[] }): Promise<Meta | null> {
   try {
+    await archiving
     const endedAt = await $.clock.now()
     let meta = at ? at.meta : await read($, flowMeta)
     const isFresh = !meta
@@ -1460,6 +1521,7 @@ export const register: Register = (on, options) => {
               effort: typeof e.effort === 'string' ? e.effort : a.effort,
               status: 'running',
               endedAt: undefined,
+              archived: undefined, // a run going again is no longer archived
               contextTokens:
                 (usage.input_tokens || 0) +
                 (usage.cache_read_input_tokens || 0) +
@@ -1548,6 +1610,7 @@ export const register: Register = (on, options) => {
     const archiveList = await read($, archive)
     const volumeList = await read($, volumes)
     const planList = await read($, plans)
+    const meta = await read($, flowMeta)
     const clockNow = await $.clock.now()
     const at = Math.max(await read($, now), ...list.map(a => a.startedAt), 0)
 
@@ -1683,11 +1746,23 @@ export const register: Register = (on, options) => {
     const flowView = (v: FlowView): FlowDrawing => {
       const { kp, fp, at } = v
       const running = v.list.filter(a => a.status === 'running').reverse()
-      const finished = v.list.filter(a => a.status !== 'running').reverse()
+      // Archived rows leave the Finished list; the totals and the planned tasks still count them.
+      const finished = v.list.filter(a => a.status !== 'running' && !a.archived).reverse()
+      const archivedCount = v.list.filter(a => a.status !== 'running' && a.archived).length
       const isEmpty = v.list.length === 0 && v.planned.length === 0
-      const toggleDone = (
-        <Button key={v.doneKey} label={`${v.isDoneCollapsed ? '▸' : '▾'} ${s.finished} · ${finished.length}`} plain onPress={v.onDone} />
-      )
+      const doneLabel = `${v.isDoneCollapsed ? '▸' : '▾'} ${s.finished} · ${finished.length}`
+      const toggleDone =
+        archivedCount > 0 ? (
+          <Button key={v.doneKey} plain onPress={v.onDone}>
+            {doneLabel}
+            <Text dimColor>{` · ${archivedCount} archived`}</Text>
+          </Button>
+        ) : (
+          <Button key={v.doneKey} label={doneLabel} plain onPress={v.onDone} />
+        )
+      const hasDone = finished.length > 0 || archivedCount > 0
+      const archiveButton = (a: AgentRun) =>
+        v.archive?.can(a) ? <Button key={`archive-item-${a.id}`} label="Archive" plain onPress={() => v.archive?.press(a)} /> : null
       if (Svg) {
         const viewSummary = `≈${fmtCost(v.t.cost)}, ${fmtTokens(v.t.tokens)} ${s.tokensWord}, ${fmtTime(v.t.time)}`
         const section = (key: string, text: string) => (
@@ -1695,17 +1770,20 @@ export const register: Register = (on, options) => {
             {text}
           </Text>
         )
-        // With items the row leaves room for its chevron on the right; its children are drawn as wide as it.
+        // With items the row leaves room for its chevron on the right, and an archivable row for its Archive button after
+        // it; its children are drawn as wide as it.
         const agentRow = (a: AgentRun, word: string) => {
           const alt = `${a.description}: ${modelName(a.model)}, ${word}`
           const items = itemsOf(a.items)
-          if (!items.length) return <Svg key={`${kp}${a.id}`} source={agentSvg(W, a, at)} alt={alt} width={W} height={66} />
-          const rowW = W - 28
+          const toArchive = archiveButton(a)
+          if (!items.length && !toArchive) return <Svg key={`${kp}${a.id}`} source={agentSvg(W, a, at)} alt={alt} width={W} height={66} />
+          const rowW = W - (items.length ? 28 : 0) - (toArchive ? ARCHIVE_W : 0)
           return (
             <Box key={`${kp}${a.id}`} flexDirection="column">
               <Box flexDirection="row" alignItems="center" gap={1}>
                 <Svg source={agentSvg(rowW, a, at)} alt={alt} width={rowW} height={66} />
-                {foldButton(a, kp, fp)}
+                {items.length > 0 && foldButton(a, kp, fp)}
+                {toArchive}
               </Box>
               {isUnfolded(a, fp) &&
                 items.map((it, i) => (
@@ -1723,7 +1801,7 @@ export const register: Register = (on, options) => {
             isEmpty && <Text dimColor>{s.empty}</Text>,
             running.length > 0 && section(`${kp}h-run`, `${s.running} · ${running.length}`),
             running.map(a => agentRow(a, s.isRunning)),
-            finished.length > 0 && toggleDone,
+            hasDone && toggleDone,
             !v.isDoneCollapsed && finished.map(a => agentRow(a, s.isFinished)),
             v.planned.length > 0 && section(`${kp}h-plan`, `${s.planned} · ${v.planned.length}`),
             v.planned.map(pl => (
@@ -1757,6 +1835,7 @@ export const register: Register = (on, options) => {
               </Text>
               <Text color={a.status === 'failed' ? 'red' : a.status === 'done' ? 'green' : color}>{STATUS_GLYPH[a.status]}</Text>
               {items.length > 0 && foldButton(a, kp, fp)}
+              {archiveButton(a)}
             </Box>
             <Text dimColor wrap="truncate-end">
               {modelLine}
@@ -1805,7 +1884,7 @@ export const register: Register = (on, options) => {
             </Text>
           ),
           running.map(row),
-          finished.length > 0 && toggleDone,
+          hasDone && toggleDone,
           !v.isDoneCollapsed && finished.map(row),
           v.planned.length > 0 && (
             <Text dimColor>
@@ -1873,6 +1952,8 @@ export const register: Register = (on, options) => {
         more: () => update($, panel, prev => ({ ...prev, archiveLimit: (prev.archiveLimit ?? ARCHIVE_PAGE) + ARCHIVE_PAGE })),
       },
     })
+    // Only an open flow's own finished rows, and not in the compact panel.
+    const archivableIds = new Set(f && !f.isFinished && !p.isCompact ? archivable(list, meta).map(a => a.id) : [])
     const live = (): ReturnType<typeof flowView> =>
       flowView({
         kp: '',
@@ -1886,6 +1967,7 @@ export const register: Register = (on, options) => {
         doneKey: 'done',
         onDone: () => update($, panel, prev => ({ ...prev, isDoneCollapsed: !prev.isDoneCollapsed })),
         controls: toggles,
+        archive: { can: a => archivableIds.has(a.id), press: a => pressArchive($, a.id) },
       })
 
     if (Svg) {

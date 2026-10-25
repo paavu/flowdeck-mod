@@ -72,12 +72,14 @@ export type AgentRun = {
   tool?: string
   /** True while a permission dialog for one of the agent's calls is up. */
   isAsked?: boolean
+  /** A finished run moved into the archive from the live panel; it leaves the live Finished list but still counts in the flow's totals. */
+  archived?: boolean
 }
 
 export type ArchiveTask = { title: string; tier: string; after?: number[] }
 
 /** An agent run as it was when its flow was saved, without the live-only fields. */
-export type ArchiveAgent = Omit<AgentRun, 'tool' | 'isAsked'>
+export type ArchiveAgent = Omit<AgentRun, 'tool' | 'isAsked' | 'archived'>
 
 export type ArchiveEntry = {
   id: string
@@ -94,6 +96,8 @@ export type ArchiveEntry = {
   time: number // ms
   /** The flow's runs at the end; absent in entries saved before runs were kept. */
   agents?: ArchiveAgent[]
+  /** Saved while the flow runs, with only the runs archived so far; the flow's next full save replaces it. */
+  partial?: boolean
 }
 
 /** One archive volume (a `history-<n>.json` file) in the volume index `history-index.json`: its entries summed up. */

@@ -27,6 +27,8 @@ export type FlowView = {
   doneKey: string
   onDone: () => unknown
   controls: RenderChildren
+  /** The live flow only: which finished rows get an Archive button, and its press. */
+  archive?: { can: (a: AgentRun) => boolean; press: (a: AgentRun) => unknown }
 }
 export type FlowDrawing = { header: RenderChildren; body: () => RenderChildren }
 

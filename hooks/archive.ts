@@ -285,6 +285,7 @@ function parseEntry(v: unknown): ArchiveEntry | null {
     .slice(0, MAX_TASKS)
   const entry: ArchiveEntry = { id, project, title, startedAt: startedAt!, endedAt: endedAt!, status, done: done!, total: total!, tasks, cost: cost!, tokens: tokens!, time: time! }
   if (Array.isArray(o.agents)) entry.agents = agentsOf(o.agents).slice(-MAX_AGENTS)
+  if (o.partial === true) entry.partial = true
   return entry
 }
 
@@ -323,7 +324,7 @@ export function spanText(from: number, to: number, tz?: string): string {
 // The group's title, its short line (date, done/total, how it ended) and the task lines for an entry without runs.
 export function formatEntry(entry: ArchiveEntry, tz?: string): { head: string; line: string; lines: string[] } {
   const head = entry.title.trim() || 'Untitled flow'
-  const status = entry.status === 'finished' ? 'finished' : 'ended with the session'
+  const status = entry.partial ? 'archived while the flow runs' : entry.status === 'finished' ? 'finished' : 'ended with the session'
   const line = `${entryDate(entry, tz)} · ${entry.done}/${entry.total} · ${status}`
   // The flow only counts done tasks, not which ones, so the first `done` in plan order are shown done.
   const lines = entry.tasks.map((t, i) => `${i < entry.done ? '✓' : '○'} ${t.title} (${t.tier})`)
