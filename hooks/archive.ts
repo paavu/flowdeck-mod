@@ -305,12 +305,27 @@ const partsOf = (at: number, tz?: string) => {
 }
 
 // When the flow ended, `Oct 26, 2026 · 10:42 AM`; one that started on an earlier day shows the range, `Oct 25 → Oct 26, 2026 · 10:42 AM`.
-export function entryDate(entry: ArchiveEntry, tz?: string): string {
+// `compact` leaves out the time of day.
+export function entryDate(entry: ArchiveEntry, tz?: string, compact = false): string {
   const end = partsOf(entry.endedAt, tz)
   const start = partsOf(entry.startedAt, tz)
   const isSameDay = start.day === end.day && start.year === end.year
   const from = isSameDay ? '' : `${start.year === end.year ? start.day : `${start.day}, ${start.year}`} → `
-  return `${from}${end.day}, ${end.year} · ${end.time}`
+  return `${from}${end.day}, ${end.year}${compact ? '' : ` · ${end.time}`}`
+}
+
+const statusOf = (entry: ArchiveEntry): string =>
+  entry.partial ? 'archived while the flow runs' : entry.status === 'finished' ? 'finished' : 'ended with the session'
+const shortStatusOf = (entry: ArchiveEntry): string => (entry.partial ? 'partial' : entry.status === 'finished' ? 'finished' : 'ended')
+
+// The group's date line fitted to `cols`: the full line, then without the time of day, then the short status, then
+// without the status, so done/total stays visible.
+export function entryLine(entry: ArchiveEntry, cols: number, tz?: string): string {
+  const n = `${entry.done}/${entry.total}`
+  const date = entryDate(entry, tz)
+  const day = entryDate(entry, tz, true)
+  const tries = [`${date} · ${n} · ${statusOf(entry)}`, `${day} · ${n} · ${statusOf(entry)}`, `${day} · ${n} · ${shortStatusOf(entry)}`, `${day} · ${n}`]
+  return tries.find(t => t.length <= cols) ?? tries[tries.length - 1]
 }
 
 // A span of days, `Oct 20 – Oct 26, 2026`; `Dec 28, 2025 – Jan 3, 2026` across a year; `Oct 26, 2026` within one day.
@@ -324,8 +339,7 @@ export function spanText(from: number, to: number, tz?: string): string {
 // The group's title, its short line (date, done/total, how it ended) and the task lines for an entry without runs.
 export function formatEntry(entry: ArchiveEntry, tz?: string): { head: string; line: string; lines: string[] } {
   const head = entry.title.trim() || 'Untitled flow'
-  const status = entry.partial ? 'archived while the flow runs' : entry.status === 'finished' ? 'finished' : 'ended with the session'
-  const line = `${entryDate(entry, tz)} · ${entry.done}/${entry.total} · ${status}`
+  const line = `${entryDate(entry, tz)} · ${entry.done}/${entry.total} · ${statusOf(entry)}`
   // The flow only counts done tasks, not which ones, so the first `done` in plan order are shown done.
   const lines = entry.tasks.map((t, i) => `${i < entry.done ? '✓' : '○'} ${t.title} (${t.tier})`)
   return { head, line, lines }

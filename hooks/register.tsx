@@ -1873,12 +1873,14 @@ export const register: Register = (on, options) => {
       }
       return {
         header: [
-          <Box flexDirection="row" justifyContent="space-between">
-            <Text bold wrap="truncate-end">
-              {v.title}
-            </Text>
-            {v.controls}
-          </Box>,
+          (v.title || !v.flat) && (
+            <Box flexDirection="row" justifyContent="space-between">
+              <Text bold wrap="truncate-end">
+                {v.title}
+              </Text>
+              {v.controls}
+            </Box>
+          ),
           <Text dimColor>
             ≈{fmtCost(v.t.cost)} · {fmtTokens(v.t.tokens)} {s.tokensWord} · {fmtTime(v.t.time)}
           </Text>,
@@ -1943,6 +1945,7 @@ export const register: Register = (on, options) => {
       ui: { Box, Text, Button },
       Svg,
       W,
+      cols,
       svg,
       fmt: { cost: fmtCost, tokens: fmtTokens, time: fmtTime },
       tokensWord: s.tokensWord,

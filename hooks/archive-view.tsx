@@ -3,7 +3,7 @@
 import type { Elements, RenderChildren } from 'claude-code'
 
 import type { AgentRun, ArchiveAgent, ArchiveEntry, ArchiveVolume, Panel, PlannedTask } from '../types'
-import { formatEntry, spanOf, spanText } from './archive'
+import { entryLine, formatEntry, spanOf, spanText } from './archive'
 
 export const ARCHIVE_PAGE = 10
 
@@ -35,6 +35,8 @@ export type ArchiveView = {
   /** The desktop's drawing element; null in the terminal. */
   Svg: Elements['desktop']['Svg'] | null
   W: number
+  /** The panel's width in columns: the date line fits it. */
+  cols: number
   svg: (W: number, H: number, body: string) => string
   fmt: { cost: (usd: number) => string; tokens: (n: number) => string; time: (ms: number) => string }
   tokensWord: string
@@ -65,14 +67,15 @@ const flows = (n: number): string => `${n} ${n === 1 ? 'flow' : 'flows'}`
 function archiveGroup(v: ArchiveView, entry: ArchiveEntry, i: number): RenderChildren {
   const { Box, Text, Button } = v.ui
   const { Svg, W, p } = v
-  const { head, line, lines } = formatEntry(entry)
+  const { head, lines } = formatEntry(entry)
   const isOpen = !(p.closedEntries ?? []).includes(entry.id) && (i === 0 || p.openEntries.includes(entry.id))
   const runs = (entry.agents ?? []).map(a => endedRun(a, entry.endedAt))
   const tasks = entry.tasks.map(tk => ({ title: tk.title, tier: tk.tier, after: tk.after ?? [] }))
   const view = v.flowView({
     kp: `archive-${entry.id}-`,
     fp: `${entry.id}:`,
-    title: head,
+    // The fold above already names the flow.
+    title: '',
     list: runs,
     planned: v.unstarted(tasks, runs),
     at: entry.endedAt,
@@ -95,8 +98,9 @@ function archiveGroup(v: ArchiveView, entry: ArchiveEntry, i: number): RenderChi
     <Box key={`archive-row-${entry.id}`} flexDirection="column" marginTop={i ? 1 : 0}>
       {i > 0 && Svg && <Svg source={v.svg(W, 1, `<line class="ln" x1="0" y1="0.5" x2="${W}" y2="0.5"/>`)} alt="" width={W} height={1} />}
       <Button key={`archive-${entry.id}`} plain onPress={() => v.on.entry(entry.id, isOpen)}>
-        {`${isOpen ? '▾' : '▸'} ${head}`} <Text dimColor>{line}</Text>
+        <Text wrap="truncate-end">{`${isOpen ? '▾' : '▸'} ${head}`}</Text>
       </Button>
+      <Text dimColor wrap="truncate-end">{`  ${entryLine(entry, v.cols - 2)}`}</Text>
       {view.header}
       {body}
     </Box>
