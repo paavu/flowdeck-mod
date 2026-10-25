@@ -63,7 +63,7 @@ const flow = async ($: any, title = 'Ship it') => {
 const planTool = async ($: any, input: Record<string, unknown>) => String((await $.tool.call({ tool: 'mcp__flowdeck__plan', ...input } as any)).result)
 const STAGES = [{ name: 'Build', steps: [{ title: 'write tests' }, { title: 'wire tool' }] }]
 const pane = ($: any) => $.ui.mount({ plugin: 'flowdeck', surface: 'terminal', component: 'Pane', requestId: 'flowdeck-agents', props: { bodyColumns: 80 } } as any)
-const historyButtons = async ($: any): Promise<string[]> => {
+const archiveButtons = async ($: any): Promise<string[]> => {
   const p = await pane($)
   const all = await p.findAll({ type: 'Button' })
   await p.unmount()
@@ -87,7 +87,7 @@ const entry = (i: number, project = '/work/app', title = `Flow ${i}`) => ({
   time: 30 * 60_000,
 })
 
-describe('history in the project folder', () => {
+describe('the archive in the project folder', () => {
   test('finishing a flow writes the entry to the project file and a self-ignoring .gitignore once', async ($, on) => {
     const { store, files, writes, clock } = engine(on)
     await start($)
@@ -120,16 +120,16 @@ describe('history in the project folder', () => {
     clock.now = NOW + 60_000
     await start($, '/b')
     await settle()
-    expect(await historyButtons($)).toEqual([])
+    expect(await archiveButtons($)).toEqual([])
     await flow($, 'Beta')
     expect(titles(files['/a/.claude/flowdeck/history.json'])).toEqual(['Alpha'])
     expect(titles(files['/b/.claude/flowdeck/history.json'])).toEqual(['Beta'])
-    const b = await historyButtons($)
+    const b = await archiveButtons($)
     expect(b).toHaveLength(1)
     expect(b[0]).toContain('Beta')
     await start($, '/a')
     await settle()
-    const a = await historyButtons($)
+    const a = await archiveButtons($)
     expect(a).toHaveLength(1)
     expect(a[0]).toContain('Alpha')
   })
@@ -138,7 +138,7 @@ describe('history in the project folder', () => {
     engine(on, { store: { historyShown: true }, files: { [HISTORY]: JSON.stringify([entry(2), entry(1)]) } })
     await start($)
     await settle()
-    const list = await historyButtons($)
+    const list = await archiveButtons($)
     expect(list).toHaveLength(2)
     expect(list[0]).toContain('Flow 2')
   })
@@ -161,7 +161,7 @@ describe('history in the project folder', () => {
     let p = await pane($)
     expect(await p.find({ type: 'Text', text: WARNING })).toBeDefined()
     await p.unmount()
-    const shown = await historyButtons($)
+    const shown = await archiveButtons($)
     expect(shown).toHaveLength(1)
     expect(shown[0]).toContain('Mine')
     await flow($)
@@ -171,7 +171,7 @@ describe('history in the project folder', () => {
     p = await pane($)
     expect(await p.find({ type: 'Text', text: WARNING })).toBeDefined()
     await p.unmount()
-    expect((await historyButtons($)).map(b => (b.includes('Ship it') ? 'Ship it' : 'Mine'))).toEqual(['Ship it', 'Mine'])
+    expect((await archiveButtons($)).map(b => (b.includes('Ship it') ? 'Ship it' : 'Mine'))).toEqual(['Ship it', 'Mine'])
   })
 
   test('a file that is there but cannot be read (oversized) is never overwritten', async ($, on) => {
@@ -180,7 +180,7 @@ describe('history in the project folder', () => {
     await start($)
     await settle()
     const p = await pane($)
-    expect(await p.find({ type: 'Text', text: /no history yet/ })).toBeDefined()
+    expect(await p.find({ type: 'Text', text: /no archive yet/ })).toBeDefined()
     expect(await p.find({ type: 'Text', text: WARNING })).toBeDefined()
     await p.unmount()
     expect(String((await flow($)).result)).toContain('ok')
@@ -194,7 +194,7 @@ describe('history in the project folder', () => {
     const { files, store, clock } = engine(on, { store: { historyShown: true, history: old } })
     await start($)
     await settle()
-    const shown = await historyButtons($)
+    const shown = await archiveButtons($)
     expect(shown).toHaveLength(2)
     expect(shown.some(s => s.includes('Other'))).toBe(false)
     await flow($)
@@ -224,7 +224,7 @@ describe('history in the project folder', () => {
     expect(String((await flow($)).result)).toContain('ok')
     expect((store.history as any[]).map(e => e.title)).toEqual(['Ship it'])
     expect(HISTORY in files).toBe(false)
-    const shown = await historyButtons($)
+    const shown = await archiveButtons($)
     expect(shown).toHaveLength(1)
     expect(await planTool($, { id: 'work', title: 'x', stages: STAGES })).toBe('work: 0/2, running, active "write tests"')
     expect((store.plans as any).s).toHaveLength(1)
@@ -251,16 +251,16 @@ describe('history in the project folder', () => {
     clock.now = NOW + 60_000
     await start($)
     await settle()
-    expect(await historyButtons($)).toHaveLength(1)
+    expect(await archiveButtons($)).toHaveLength(1)
     await flow($, 'Second')
     expect(titles(files[HISTORY])).toEqual(['Second', 'Ship it'])
     expect(JSON.stringify(store.history)).toBe(kept)
     await start($)
     await settle()
     const p = await pane($)
-    const groups = (await p.findAll({ type: 'Button' })).map((b: any) => String(b.props.key)).filter((k: string) => /^history-\d+-\/work\/app$/.test(k))
+    const groups = (await p.findAll({ type: 'Button' })).map((b: any) => String(b.props.key)).filter((k: string) => /^archive-\d+-\/work\/app$/.test(k))
     await p.unmount()
-    expect(groups).toEqual([`history-${NOW + 60_000}-/work/app`, `history-${NOW}-/work/app`])
+    expect(groups).toEqual([`archive-${NOW + 60_000}-/work/app`, `archive-${NOW}-/work/app`])
   })
 })
 

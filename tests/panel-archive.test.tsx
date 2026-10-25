@@ -81,7 +81,7 @@ const terminalText = async ($: any) => {
   return texts.map((t: any) => t.text).join('\n')
 }
 
-describe('history of flows', () => {
+describe('the archive of flows', () => {
   test('finishing a flow stores one entry, and finishing again does not duplicate it', async ($, on) => {
     const { store } = engine(on)
     await start($)
@@ -238,27 +238,27 @@ describe('history of flows', () => {
     const done: any = await progress($, { finished: true })
     expect(String(done?.result ?? done)).toContain('ok')
     const p = await pane($)
-    await p.press({ key: 'history' })
+    await p.press({ key: 'archive' })
     await settle()
     expect(await p.find({ type: 'Button', text: /Ship it/ })).toBeDefined()
     await p.unmount()
   })
 })
 
-describe('history section in the panel', () => {
-  test('is off by default, the History button shows it and the choice is stored', async ($, on) => {
+describe('archive section in the panel', () => {
+  test('is off by default, the Archive button shows it and the choice is stored', async ($, on) => {
     const { store } = engine(on, { store: { history: [entry(1)] } })
     await start($)
     await settle()
     let p = await pane($)
-    expect(await p.find({ type: 'Button', text: /▸ History/ })).toBeDefined()
+    expect(await p.find({ type: 'Button', text: /▸ Archive/ })).toBeDefined()
     expect(await p.find({ type: 'Button', text: /Old flow 1/ })).toBeUndefined()
-    await p.press({ key: 'history' })
+    await p.press({ key: 'archive' })
     await settle()
     expect(store.historyShown).toBe(true)
     await p.unmount()
     p = await pane($)
-    expect(await p.find({ type: 'Button', text: /▾ History/ })).toBeDefined()
+    expect(await p.find({ type: 'Button', text: /▾ Archive/ })).toBeDefined()
     expect(await p.find({ type: 'Button', text: /▸ Old flow 1 .* · 1\/2 · finished/ })).toBeDefined()
     expect(await p.find({ type: 'Text', text: /≈\$1\.50 · 12k tokens · 30:00/ })).toBeDefined()
     await p.unmount()
@@ -283,18 +283,18 @@ describe('history section in the panel', () => {
     await settle()
     const p = await pane($)
     expect(await p.find({ type: 'Text', text: /write tests \(careful\)/ })).toBeUndefined()
-    await p.press({ key: 'history-e1' })
+    await p.press({ key: 'archive-e1' })
     await settle()
     expect(await p.find({ type: 'Button', text: /▾ Old flow 1 .* · finished/ })).toBeDefined()
     expect(await p.find({ type: 'Text', text: /✓ write tests \(careful\)/ })).toBeDefined()
     expect(await p.find({ type: 'Text', text: /○ wire it \(medium\)/ })).toBeDefined()
-    await p.press({ key: 'history-e1' })
+    await p.press({ key: 'archive-e1' })
     await settle()
     expect(await p.find({ type: 'Text', text: /write tests \(careful\)/ })).toBeUndefined()
     await p.unmount()
   })
 
-  test('the history shows in the compact panel too', async ($, on) => {
+  test('the archive shows in the compact panel too', async ($, on) => {
     engine(on, { store: { historyShown: true, history: [entry(1)] } })
     await start($)
     await settle()
@@ -309,12 +309,12 @@ describe('history section in the panel', () => {
     }
   })
 
-  test('the empty history says so', async ($, on) => {
+  test('the empty archive says so', async ($, on) => {
     engine(on, { store: { historyShown: true } })
     await start($)
     await settle()
     const p = await pane($)
-    expect(await p.find({ type: 'Text', text: /no history yet/ })).toBeDefined()
+    expect(await p.find({ type: 'Text', text: /no archive yet/ })).toBeDefined()
     await p.unmount()
   })
 
@@ -328,24 +328,24 @@ describe('history section in the panel', () => {
     await p.unmount()
   })
 
-  for (const [name, history] of [
+  for (const [name, saved] of [
     ['a string', 'nope'],
     ['a list with a null', [null, entry(1)]],
     ['an object', { id: 1 }],
     ['a number', 42],
   ] as [string, unknown][]) {
     test(`garbage in the store (${name}) breaks neither the session start nor the panel`, async ($, on) => {
-      const { store } = engine(on, { store: { historyShown: true, history } })
+      const { store } = engine(on, { store: { historyShown: true, history: saved } })
       await start($)
       await settle()
       const p = await pane($)
-      if (Array.isArray(history)) expect(await p.find({ type: 'Button', text: /Old flow 1/ })).toBeDefined()
-      else expect(await p.find({ type: 'Text', text: /no history yet/ })).toBeDefined()
+      if (Array.isArray(saved)) expect(await p.find({ type: 'Button', text: /Old flow 1/ })).toBeDefined()
+      else expect(await p.find({ type: 'Text', text: /no archive yet/ })).toBeDefined()
       await p.unmount()
       await plan($, 'After garbage')
       await progress($, { finished: true })
       expect(stored(store)[0].title).toBe('After garbage')
-      expect(stored(store).length).toBe(Array.isArray(history) ? 2 : 1)
+      expect(stored(store).length).toBe(Array.isArray(saved) ? 2 : 1)
     })
   }
 })

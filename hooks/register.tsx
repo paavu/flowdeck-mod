@@ -1,12 +1,16 @@
 import { atom, read, update } from 'claude-code'
-import type { EngineInterface, Register, RenderChildren } from 'claude-code'
+import type { EngineInterface, Register } from 'claude-code'
 
-import type { AgentRun, Flow, HistoryAgent, HistoryEntry, HistorySegment, Panel, Phase, PlannedTask, PlanStage, Reading, Samples, StepStatus, TaskPlan, UsageWindow } from '../types'
+import type { AgentRun, ArchiveEntry, ArchiveVolume, Flow, Panel, Phase, PlannedTask, PlanStage, Reading, Samples, StepStatus, TaskPlan, UsageWindow } from '../types'
 import { derive, finishItems, hasItemOps, ITEM_H, itemAlt, itemLine, itemsOf, itemSvg, stepItems } from './agent-items'
 import type { StepInput } from './agent-items'
 import { agentState, HOUSEKEEPING, splitHead, stateText } from './agent-state'
 import { contextRows, contextSvg, toReading } from './context'
-import { addEntry, ARCHIVE_FILE, archivedEnds, archiveNumber, byteLength, EXTRA_FILE, formatEntry, isWorthKeeping, MAX_TEXT, mergeEntries, parseHistory, parseIndex, placeByEnd, rotate, SEGMENT_MAX, sideName, sideStart, snapshot, spanOf, spanText, summarize, withoutArchivedBy, withoutCopies, WRITE_MAX } from './history'
+import { isWorthKeeping, snapshot, VOLUME_MAX } from './archive'
+import { dataDir, getFile, loadLatest, parseJson, readVolume, saveToProject, saveToStore, writeData } from './archive-store'
+import type { Io, Latest } from './archive-store'
+import { ARCHIVE_PAGE, archiveSection, UNREADABLE } from './archive-view'
+import type { FlowDrawing, FlowView, Planned } from './archive-view'
 import { importPlan, isFinished, normalize, percent, PLAN_ID, placeBar, planId, STATUSES, str, where } from './plan'
 import { planBandSvg, planBandText, planRows, planSvg, STATE_COLOR, stateLabel } from './plan-view'
 import { record, toWindows, usageRows, usageSvg } from './usage'
@@ -20,23 +24,23 @@ const panel = atom({ plugin: 'flowdeck', key: 'panel' } as const, {
   isUsageShown: true,
   isPlansShown: true,
   isBandHidden: false,
-  isHistoryShown: false,
+  isArchiveShown: false,
   openEntries: [] as string[],
   openAgents: [] as string[],
   openFinished: [] as string[],
-  historyLimit: 10,
-  historyListOpen: false,
-  historySegment: null as string | null,
-  historyError: '',
-  historyWarning: '',
+  archiveLimit: 10,
+  archiveListOpen: false,
+  archiveVolume: null as string | null,
+  archiveError: '',
+  archiveWarning: '',
   autoOpenedFor: '',
 })
 const usageState = atom({ plugin: 'flowdeck', key: 'usage' } as const, { windows: [] as UsageWindow[], samples: {} as Samples })
 const reading = atom({ plugin: 'flowdeck', key: 'reading' } as const, null as Reading | null)
 const now = atom({ plugin: 'flowdeck', key: 'now' } as const, 0)
-const history = atom({ plugin: 'flowdeck', key: 'history' } as const, [] as HistoryEntry[])
-// The archive files of this project, newest first.
-const segments = atom({ plugin: 'flowdeck', key: 'segments' } as const, [] as HistorySegment[])
+const archive = atom({ plugin: 'flowdeck', key: 'archive' } as const, [] as ArchiveEntry[])
+// The archive volumes of this project, newest first.
+const volumes = atom({ plugin: 'flowdeck', key: 'volumes' } as const, [] as ArchiveVolume[])
 const flowMeta = atom({ plugin: 'flowdeck', key: 'flowMeta' } as const, null as { startedAt: number; project: string } | null)
 const plans = atom({ plugin: 'flowdeck', key: 'plans' } as const, [] as TaskPlan[])
 
@@ -129,12 +133,13 @@ const STRINGS = {
 // Module scope is fine here: session.start sets it again on every (re)load.
 let lang: Lang = 'en'
 const tr = () => STRINGS[lang]
-// The session's working folder, the project a history entry names; set the same way.
+// The session's working folder, the project an archive entry names; set the same way.
 let project = ''
 // The session the task plans are saved under; empty when the engine names none.
 let sessionId = ''
-// What one history file stays under, in UTF-8 bytes (history.json rotates past it); FLOWDECK_HISTORY_SEGMENT_MAX can only lower it (the tests use a small one).
-let segmentMax = SEGMENT_MAX
+// What one archive file stays under, in UTF-8 bytes (history.json rotates past it); FLOWDECK_ARCHIVE_VOLUME_MAX (or its old
+// name FLOWDECK_HISTORY_SEGMENT_MAX) can only lower it (the tests use a small one).
+let volumeMax = VOLUME_MAX
 
 // The engine's current session id, '' when it cannot say; a /clear changes it without a new session.start.
 const currentSessionId = async ($: EngineInterface): Promise<string> => {
@@ -426,8 +431,6 @@ const fmtTime = (ms: number): string => {
 
 const elapsed = (a: AgentRun, at: number): number => (a.endedAt ?? Math.max(at, a.startedAt)) - a.startedAt
 
-type Planned = PlannedTask & { n: number }
-
 // The tasks no run was started for, numbered in plan order.
 const unstarted = (tasks: PlannedTask[], list: AgentRun[]): Planned[] => {
   const started = new Set(list.map(a => norm(a.description)))
@@ -435,12 +438,6 @@ const unstarted = (tasks: PlannedTask[], list: AgentRun[]): Planned[] => {
 }
 
 const plannedOf = (f: Flow | null, list: AgentRun[]): Planned[] => (!f || f.isFinished ? [] : unstarted(f.tasks ?? [], list))
-
-// A saved run as it ended, with an end: one saved while still going keeps its status and reads as Running at finish, its
-// clock stopped at the save (the end is what tells it from a live run).
-const endedRun = (a: HistoryAgent, end: number): AgentRun => ({ ...a, endedAt: a.endedAt ?? end })
-
-const HISTORY_PAGE = 10
 
 const totals = (list: AgentRun[], at: number) => {
   const cost = list.reduce((s, a) => s + a.costUsd, 0)
@@ -775,311 +772,36 @@ async function autoOpen($: EngineInterface, key: string): Promise<void> {
   void $.ui.open({ id: PANE, title: tr().pane })
 }
 
-// Saved data lives in the project folder, so projects never overwrite each other; '' without a project.
-const dataDir = (): string => (project ? `${project.replace(/[\\/]+$/, '')}/.claude/flowdeck` : '')
-
-// A file's text, or null when it cannot be read (missing, over 4 MiB, refused).
-const readFile = async ($: EngineInterface, path: string): Promise<string | null> => {
-  const text: unknown = await Promise.resolve()
-    .then(() => $.fs.read(path))
-    .catch(() => null)
-  return typeof text === 'string' ? text : null
-}
-
-const parseJson = (text: string | null): unknown => {
-  try {
-    return text === null ? undefined : JSON.parse(text)
-  } catch {
-    return undefined
-  }
-}
-
-// The names in a folder; null when it cannot be listed (a folder not made yet cannot either).
-const listing = async ($: EngineInterface, dir: string): Promise<string[] | null> => {
-  const list: unknown = await Promise.resolve()
-    .then(() => $.fs.list(dir))
-    .catch(() => null)
-  if (!Array.isArray(list)) return null
-  return list.flatMap((v: unknown) => {
-    const o = v && typeof v === 'object' ? (v as { name?: unknown; kind?: unknown }) : {}
-    return typeof o.name === 'string' && o.kind !== 'dir' ? [o.name] : []
-  })
-}
-
-type There = 'yes' | 'no' | 'unknown'
-
-// Whether something is at the path: its stat, else the folder's listing, else `exists`. A read that rejects never means
-// missing by itself, and when all three fail too it is 'unknown', which is never written over.
-const isThere = async ($: EngineInterface, path: string): Promise<There> => {
-  const stat: unknown = await Promise.resolve()
-    .then(() => $.fs.stat(path))
-    .catch(() => null)
-  if (stat && typeof stat === 'object') return 'yes'
-  const cut = path.lastIndexOf('/')
-  const names = await listing($, path.slice(0, cut))
-  if (names) return names.includes(path.slice(cut + 1)) ? 'yes' : 'no'
-  const has: unknown = await Promise.resolve()
-    .then(() => $.fs.exists(path))
-    .catch(() => null)
-  return has === true ? 'yes' : has === false ? 'no' : 'unknown'
-}
-
-// `isUnknown`: not even whether it is there could be told.
-type Got = { state: 'ok'; text: string } | { state: 'missing' } | { state: 'unreadable'; isUnknown: boolean }
-
-// A file's text; one that is there but cannot be read, or that may be there, is told apart from a missing one, which alone may be created.
-const getFile = async ($: EngineInterface, path: string): Promise<Got> => {
-  const text = await readFile($, path)
-  if (text !== null) return { state: 'ok', text }
-  const there = await isThere($, path)
-  return there === 'no' ? { state: 'missing' } : { state: 'unreadable', isUnknown: there === 'unknown' }
-}
-
-// One whole file; a text over WRITE_MAX bytes is never sent and counts as a failed write.
-const writeText = async ($: EngineInterface, path: string, text: string): Promise<boolean> => {
-  if (byteLength(text) > WRITE_MAX) return false
-  return Promise.resolve()
-    .then(() => $.fs.write(path, text))
-    .then(
-      () => true,
-      () => false,
-    )
-}
-
-// Writes the whole file, no bigger than `max` bytes (SEGMENT_MAX for side files, archives and plans; history.json may pass it
-// up to WRITE_MAX while it cannot rotate); the folder gets a `*` .gitignore first when it surely has none, so nothing in it
-// is committed. False when the data write fails or is too big.
-async function writeData($: EngineInterface, name: string, data: unknown, max = WRITE_MAX): Promise<boolean> {
-  const dir = dataDir()
-  const text = JSON.stringify(data)
-  if (byteLength(text) > max) return false
-  if ((await getFile($, `${dir}/.gitignore`)).state === 'missing') await writeText($, `${dir}/.gitignore`, '*\n')
-  return writeText($, `${dir}/${name}`, text)
-}
-
-const isOwn = (e: HistoryEntry): boolean => e.project === project.trim().slice(0, MAX_TEXT)
-
-// The shared store's history (the one before project files): this project's entries, or all without a project.
-const storedHistory = async ($: EngineInterface): Promise<HistoryEntry[]> => {
-  const list = parseHistory(await $.store.get('history').catch(() => undefined))
-  return project ? list.filter(isOwn) : list
-}
-
-// History files in `<project>/.claude/flowdeck/`, none ever deleted: `history.json` the active segment (the newest),
-// `history-<n>.json` the archives (older, written once), `history-index.json` their summaries (with the start and end of
-// each flow they hold) and the side files merged so far, `history-extra-<startedAt>.json` one side file per flow, written
-// first on every save of it.
-type Active = { state: 'ok'; entries: HistoryEntry[]; size: number } | { state: 'missing' } | { state: 'unreadable' }
-type Index = { state: 'ok' | 'missing'; segments: HistorySegment[]; merged: string[] } | { state: 'unreadable' }
-
-// A history.json that may be there but cannot be read, or that does not parse, is 'unreadable'; only a missing one is created.
-const readActive = async ($: EngineInterface): Promise<Active> => {
-  const got = await getFile($, `${dataDir()}/history.json`)
-  if (got.state === 'missing') return got
-  if (got.state !== 'ok') return { state: 'unreadable' }
-  const raw = parseJson(got.text)
-  return Array.isArray(raw) ? { state: 'ok', entries: parseHistory(raw), size: byteLength(got.text) } : { state: 'unreadable' }
-}
-
-const readIndex = async ($: EngineInterface): Promise<Index> => {
-  const got = await getFile($, `${dataDir()}/history-index.json`)
-  if (got.state === 'missing') return { state: 'missing', segments: [], merged: [] }
-  const index = got.state === 'ok' ? parseIndex(parseJson(got.text)) : null
-  return index ? { state: 'ok', ...index } : { state: 'unreadable' }
-}
-
-// An archive's entries, each id once; null when it cannot be read or holds no list.
-const readArchive = async ($: EngineInterface, file: string): Promise<{ entries: HistoryEntry[]; size: number } | null> => {
-  const text = await readFile($, `${dataDir()}/${file}`)
-  const raw = parseJson(text)
-  return text !== null && Array.isArray(raw) ? { entries: mergeEntries(parseHistory(raw)), size: byteLength(text) } : null
-}
-
-// The archives, newest first: the index's, and any it misses (a rotation cut short before the index), summed up by reading
-// them. An archive indexed before the index listed its flows is read to list them.
-async function knownSegments($: EngineInterface, indexed: HistorySegment[], names: string[]): Promise<HistorySegment[]> {
-  const have = new Set(indexed.map(s => s.file))
-  const known: HistorySegment[] = []
-  for (const s of indexed) {
-    const a = s.flows ? null : await readArchive($, s.file)
-    known.push(a ? { ...s, flows: summarize(s.file, a.entries, a.size).flows } : s)
-  }
-  for (const file of names) {
-    if (!ARCHIVE_FILE.test(file) || have.has(file)) continue
-    const a = await readArchive($, file)
-    if (a) known.push(summarize(file, a.entries, a.size))
-  }
-  return known.sort((a, b) => archiveNumber(b.file) - archiveNumber(a.file))
-}
-
-// The flow starts a side file need not be read for: a flow history.json holds as finished (its last save), or one an archive holds.
-const accountedBy = (active: Active, ends: Map<number, number>) => {
-  const finished = new Set(active.state === 'ok' ? active.entries.filter(e => e.status === 'finished').map(e => Math.round(e.startedAt)) : [])
-  return (start: number): boolean => finished.has(start) || ends.has(start)
-}
-
-// The side files whose flow is not accounted for, newest first. The index's `merged` is not trusted on its own: another
-// session may have written history.json without the flow after it was marked, and its side file then brings it back.
-async function readExtras($: EngineInterface, names: string[], isAccounted: (start: number) => boolean): Promise<{ files: string[]; entries: HistoryEntry[] }> {
-  const files: string[] = []
-  const lists: HistoryEntry[][] = []
-  for (const file of names.filter(n => EXTRA_FILE.test(n)).sort().reverse()) {
-    const start = sideStart(file)
-    if (start !== null && isAccounted(start)) continue
-    const raw = parseJson(await readFile($, `${dataDir()}/${file}`))
-    if (!Array.isArray(raw)) continue
-    files.push(file)
-    lists.push(parseHistory(raw))
-  }
-  return { files, entries: mergeEntries(...lists) }
-}
-
-// The list without exact copies of what the newest archives hold, walking back until an archive holds none.
-async function withoutArchived($: EngineInterface, list: HistoryEntry[], segs: HistorySegment[]): Promise<HistoryEntry[]> {
-  let next = list
-  for (const s of segs) {
-    const a = await readArchive($, s.file)
-    if (!a) break
-    const r = withoutCopies(next, a.entries)
-    if (!r.removed) break
-    next = r.list
-  }
-  return next
-}
-
-const union = (a: string[], b: string[]): string[] => [...a, ...b.filter(x => !a.includes(x))]
-
-type Latest = { entries: HistoryEntry[]; segments: HistorySegment[]; isUnreadable: boolean }
-
-// The latest segment as the panel shows it, writing nothing: history.json, the side files it does not account for, and this
-// project's entries in the shared store (where a failed write sent them), each flow once in its newest snapshot. What an
-// archive holds as it is or newer is not shown again, whatever the size of history.json.
-async function loadLatest($: EngineInterface): Promise<Latest> {
-  if (!project) return { entries: await storedHistory($), segments: [], isUnreadable: false }
-  const names = (await listing($, dataDir())) ?? []
-  const index = await readIndex($)
-  const segs = await knownSegments($, index.state === 'unreadable' ? [] : index.segments, names)
-  const active = await readActive($)
-  const ends = archivedEnds(segs)
-  const extras = await readExtras($, names, accountedBy(active, ends))
-  const entries = placeByEnd(active.state === 'ok' ? active.entries : [], mergeEntries(extras.entries, await storedHistory($)))
-  return { entries: withoutArchivedBy(entries, ends), segments: segs, isUnreadable: active.state === 'unreadable' }
-}
-
-const SIDE_SLOTS = 100
-
-// The flow's own side file, written before anything else: the slot that holds this flow already, else the first free one.
-// A slot holding anything else, or one that cannot be read, is never written over; a newer copy of the flow stays as it is.
-// The slot's name, or null when nothing could be written.
-async function writeSide($: EngineInterface, entry: HistoryEntry): Promise<string | null> {
-  for (let k = 1; k <= SIDE_SLOTS; k++) {
-    const file = sideName(entry.startedAt, k)
-    const got = await getFile($, `${dataDir()}/${file}`)
-    if (got.state === 'unreadable') {
-      if (got.isUnknown) return null // the fs cannot tell what is there: write nothing
-      continue
-    }
-    if (got.state === 'ok') {
-      const raw = parseJson(got.text)
-      const held = Array.isArray(raw) && raw.length === 1 ? parseHistory(raw) : []
-      if (held.length !== 1 || held[0]!.id !== entry.id) continue
-      if (held[0]!.endedAt > entry.endedAt) return file
-    }
-    return (await writeData($, file, [entry], SEGMENT_MAX)) ? file : null
-  }
-  return null
-}
-
-type Saved = { isSaved: boolean; latest: HistoryEntry[]; segments?: HistorySegment[]; isUnreadable?: boolean }
-
-// Append-only first: the flow's own side file is written before anything else, so no overwrite of history.json or the index
-// by another session can lose it (the next load reads it back). Then the folder is read again and merged: history.json, the
-// side files it does not account for and this project's entries in the shared store. Over the limit, the oldest entries move
-// out in this order: (a) each new archive, (b) the index, (c) only then history.json without them, so a crash leaves copies,
-// never a gap. A failed or too big write keeps everything in history.json when that fits; `isSaved` false sends the entry to
-// the shared store too.
-async function saveToProject($: EngineInterface, entry: HistoryEntry): Promise<Saved> {
-  const dir = dataDir()
-  await writeSide($, entry)
-  const names = (await listing($, dir)) ?? []
-  const index = await readIndex($)
-  const active = await readActive($)
-  const indexed = index.state === 'unreadable' ? [] : index.segments
-  const merged = index.state === 'unreadable' ? [] : index.merged
-  const segs = await knownSegments($, indexed, names)
-  const ends = archivedEnds(segs)
-  const extras = await readExtras($, names, accountedBy(active, ends))
-  const stored = withoutArchivedBy(await storedHistory($), ends)
-  if (active.state === 'unreadable') {
-    // There but not usable, or not known to be absent: it is never overwritten; the side file and the store keep the entry.
-    return { isSaved: false, latest: withoutArchivedBy(addEntry(placeByEnd([], mergeEntries(extras.entries, stored)), entry), ends), segments: segs, isUnreadable: true }
-  }
-  const all = addEntry(placeByEnd(active.state === 'ok' ? active.entries : [], mergeEntries(withoutArchivedBy(extras.entries, ends), stored)), entry)
-  const isMerging = extras.files.some(f => !merged.includes(f))
-  const keepAll = async (): Promise<Saved> => ({ isSaved: await writeData($, 'history.json', all), latest: withoutArchivedBy(all, ends), segments: segs })
-  // An index that cannot be read is never overwritten, so nothing rotates: history.json grows past the limit (a soft one) up
-  // to the largest write, and after that the side files and the store keep the new flows.
-  if (index.state === 'unreadable' || !rotate(all, segmentMax).archives.length) {
-    const saved = await keepAll()
-    if (saved.isSaved && isMerging && index.state !== 'unreadable') await writeData($, 'history-index.json', { segments: [...segs].reverse(), merged: union(merged, extras.files) })
-    return saved
-  }
-  const list = await withoutArchived($, all, segs)
-  const { kept, archives } = rotate(list, segmentMax)
-  const made: HistorySegment[] = []
-  let n = Math.max(0, ...segs.map(s => archiveNumber(s.file)), ...names.map(archiveNumber)) + 1
-  for (const chunk of archives) {
-    let there = await isThere($, `${dir}/history-${n}.json`)
-    while (there === 'yes') there = await isThere($, `${dir}/history-${++n}.json`)
-    // A name that may be taken is never written over: nothing rotates this time.
-    if (there === 'unknown') return keepAll()
-    const file = `history-${n}.json`
-    if (!(await writeData($, file, chunk, SEGMENT_MAX))) return keepAll()
-    made.push(summarize(file, chunk))
-    n++
-  }
-  const known = [...segs, ...made].sort((a, b) => archiveNumber(a.file) - archiveNumber(b.file))
-  const knownEnds = archivedEnds(known)
-  const isHealing = known.length !== indexed.length
-  if (isHealing && !(await writeData($, 'history-index.json', { segments: known, merged }))) return keepAll()
-  const shown = [...known].reverse()
-  if (!(await writeData($, 'history.json', kept))) return { isSaved: false, latest: withoutArchivedBy(list, knownEnds), segments: shown }
-  // The side files are marked merged only once history.json holds them.
-  if (isMerging) await writeData($, 'history-index.json', { segments: known, merged: union(merged, extras.files) })
-  return { isSaved: true, latest: withoutArchivedBy(kept, knownEnds), segments: shown }
-}
-
-const UNREADABLE = 'history.json could not be read; showing recovered entries (the file is untouched)'
+// The engine calls archive-store.ts makes (the plans' files use them too): `$` itself never crosses an import.
+const io = ($: EngineInterface): Io => ({
+  read: path => $.fs.read(path),
+  write: (path, text) => $.fs.write(path, text),
+  stat: path => $.fs.stat(path),
+  list: dir => $.fs.list(dir),
+  exists: path => $.fs.exists(path),
+  storeGet: () => $.store.get('history'), // the store key keeps its name from before the rename
+  storeSet: value => $.store.set('history', value),
+})
 
 // Without a project folder, or when the project files cannot take it, the save goes to the shared store as before.
-// Only the latest segment's view takes the entry; an archive being shown stays as it is.
-async function saveHistory($: EngineInterface, entry: HistoryEntry): Promise<void> {
+// Only the latest part's view takes the entry; a volume being shown stays as it is.
+async function saveArchive($: EngineInterface, entry: ArchiveEntry): Promise<void> {
   if (!isWorthKeeping(entry)) return
-  const isLatest = async (): Promise<boolean> => (await read($, panel)).historySegment == null
-  let view: HistoryEntry[] | null = null
+  const isLatest = async (): Promise<boolean> => (await read($, panel)).archiveVolume == null
+  let view: ArchiveEntry[] | null = null
   if (project) {
-    const saved = await saveToProject($, entry).catch(() => null)
-    const segs = saved?.segments
-    if (segs) await update($, segments, () => segs)
-    if (saved) await update($, panel, prev => ({ ...prev, historyWarning: saved.isUnreadable ? UNREADABLE : '' }))
+    const saved = await saveToProject(io($), project, volumeMax, entry).catch(() => null)
+    const vols = saved?.volumes
+    if (vols) await update($, volumes, () => vols)
+    if (saved) await update($, panel, prev => ({ ...prev, archiveWarning: saved.isUnreadable ? UNREADABLE : '' }))
     if (saved?.isSaved) {
-      if (await isLatest()) await update($, history, () => saved.latest)
+      if (await isLatest()) await update($, archive, () => saved.latest)
       return
     }
     view = saved?.latest ?? null
   }
-  // When the store read fails, only this session's view is updated, so a passing outage never overwrites the store.
-  let base: HistoryEntry[]
-  let isRead = true
-  try {
-    base = parseHistory(await $.store.get('history'))
-  } catch {
-    base = await read($, history)
-    isRead = false
-  }
-  const next = addEntry(base, entry)
-  if (isRead) await $.store.set('history', next).catch(() => {})
-  if (await isLatest()) await update($, history, () => view ?? next)
+  const next = await saveToStore(io($), entry, () => read($, archive))
+  if (await isLatest()) await update($, archive, () => view ?? next)
 }
 
 type Meta = { startedAt: number; project: string }
@@ -1101,7 +823,7 @@ async function recordFlow($: EngineInterface, f: Flow, status: 'finished' | 'ope
     const start = meta.startedAt
     // Only the agents that began during this flow: one still running from the flow before is counted there.
     const list = (at ? at.agents : await read($, agents)).filter(a => isFresh || a.startedAt >= start)
-    await saveHistory($, snapshot({ flow: f, agents: list, project: meta.project, startedAt: meta.startedAt, endedAt, status }))
+    await saveArchive($, snapshot({ flow: f, agents: list, project: meta.project, startedAt: meta.startedAt, endedAt, status }))
     return meta
   } catch {
     // A failing store or clock costs the record, not the call.
@@ -1180,16 +902,16 @@ let plansAside = ''
 // that cannot be read, does not parse, may be there or would pass the limit is never written. The plans then go to the
 // session's side file, never over one that cannot be read or parsed. False when neither could take them.
 async function savePlansToProject($: EngineInterface, list: TaskPlan[]): Promise<boolean> {
-  const dir = dataDir()
+  const dir = dataDir(project)
   if (plansAside !== sessionId) {
-    const got = await getFile($, `${dir}/plans.json`)
+    const got = await getFile(io($), `${dir}/plans.json`)
     const raw = got.state === 'ok' ? parseJson(got.text) : got.state === 'missing' ? {} : undefined
-    if (isPlansObject(raw) && (await writeData($, 'plans.json', mergePlans(raw, list), SEGMENT_MAX))) return true
+    if (isPlansObject(raw) && (await writeData(io($), dir, 'plans.json', mergePlans(raw, list), VOLUME_MAX))) return true
   }
   const file = plansSide(sessionId)
-  const side = await getFile($, `${dir}/${file}`)
+  const side = await getFile(io($), `${dir}/${file}`)
   if (side.state === 'unreadable' || (side.state === 'ok' && !Array.isArray(parseJson(side.text)))) return false
-  if (!(await writeData($, file, list, SEGMENT_MAX))) return false
+  if (!(await writeData(io($), dir, file, list, VOLUME_MAX))) return false
   plansAside = sessionId
   return true
 }
@@ -1198,13 +920,13 @@ async function savePlansToProject($: EngineInterface, list: TaskPlan[]): Promise
 async function loadPlans($: EngineInterface): Promise<TaskPlan[]> {
   plansAside = ''
   if (project) {
-    const side = await getFile($, `${dataDir()}/${plansSide(sessionId)}`)
+    const side = await getFile(io($), `${dataDir(project)}/${plansSide(sessionId)}`)
     const raw = side.state === 'ok' ? parseJson(side.text) : undefined
     if (Array.isArray(raw)) {
       plansAside = sessionId
       return parsePlans({ [sessionId]: raw })[sessionId] ?? []
     }
-    const got = await getFile($, `${dataDir()}/plans.json`)
+    const got = await getFile(io($), `${dataDir(project)}/plans.json`)
     const all = got.state === 'ok' ? parseJson(got.text) : undefined
     if (isPlansObject(all) && sessionId in all) return parsePlans(all)[sessionId] ?? []
   }
@@ -1280,25 +1002,31 @@ export const register: Register = (on, options) => {
     const started = await next(e)
     lang = await detectLang($, options.language).catch((): Lang => 'en')
     project = typeof e.cwd === 'string' ? e.cwd : ''
-    const max = Number(
-      await Promise.resolve()
-        .then(() => $.env.get('FLOWDECK_HISTORY_SEGMENT_MAX'))
-        .catch(() => undefined),
-    )
-    segmentMax = max > 0 && max < SEGMENT_MAX ? max : SEGMENT_MAX
+    // The new name wins when both are set; the old one keeps working.
+    const named: unknown = await Promise.resolve()
+      .then(() => $.env.get('FLOWDECK_ARCHIVE_VOLUME_MAX'))
+      .catch(() => undefined)
+    const old: unknown =
+      named != null && named !== ''
+        ? undefined
+        : await Promise.resolve()
+            .then(() => $.env.get('FLOWDECK_HISTORY_SEGMENT_MAX'))
+            .catch(() => undefined)
+    const max = Number(named != null && named !== '' ? named : old)
+    volumeMax = max > 0 && max < VOLUME_MAX ? max : VOLUME_MAX
     const stored = await $.store.get('contextShown').catch(() => undefined)
     if (typeof stored === 'boolean') await update($, panel, prev => ({ ...prev, isContextShown: stored }))
     const storedUsage = await $.store.get('usageShown').catch(() => undefined)
     if (typeof storedUsage === 'boolean') await update($, panel, prev => ({ ...prev, isUsageShown: storedUsage }))
     const storedPlansShown = await $.store.get('plansShown').catch(() => undefined)
     if (typeof storedPlansShown === 'boolean') await update($, panel, prev => ({ ...prev, isPlansShown: storedPlansShown }))
-    const storedHistoryShown = await $.store.get('historyShown').catch(() => undefined)
-    if (typeof storedHistoryShown === 'boolean') await update($, panel, prev => ({ ...prev, isHistoryShown: storedHistoryShown }))
-    // The project's latest segment, with this project's entries from the shared store merged in.
-    const loaded = await loadLatest($).catch((): Latest => ({ entries: [], segments: [], isUnreadable: false }))
-    await update($, history, () => loaded.entries)
-    await update($, segments, () => loaded.segments)
-    await update($, panel, prev => ({ ...prev, historyListOpen: false, historySegment: null, historyError: '', historyWarning: loaded.isUnreadable ? UNREADABLE : '' }))
+    const storedArchiveShown = await $.store.get('historyShown').catch(() => undefined)
+    if (typeof storedArchiveShown === 'boolean') await update($, panel, prev => ({ ...prev, isArchiveShown: storedArchiveShown }))
+    // The project's latest part, with this project's entries from the shared store merged in.
+    const loaded = await loadLatest(io($), project).catch((): Latest => ({ entries: [], volumes: [], isUnreadable: false }))
+    await update($, archive, () => loaded.entries)
+    await update($, volumes, () => loaded.volumes)
+    await update($, panel, prev => ({ ...prev, archiveListOpen: false, archiveVolume: null, archiveError: '', archiveWarning: loaded.isUnreadable ? UNREADABLE : '' }))
     const sid = (started as { sessionId?: unknown }).sessionId
     sessionId = (await currentSessionId($)) || (typeof sid === 'string' ? sid : '')
     if (sessionId) {
@@ -1461,7 +1189,7 @@ export const register: Register = (on, options) => {
     // A restart ends the open flow as Finish does; the rest of the input then starts the new one.
     if (input.restart === true && prev && !prev.isFinished) prev = await finishFlow($)
     if (isNewFlow(prev, input)) {
-      // The flow being replaced goes to the history first, with its own agents; a finished one is there already.
+      // The flow being replaced goes to the archive first, with its own agents; a finished one is there already.
       if (prev && !prev.isFinished) await recordFlow($, prev, 'finished')
       // Without a clock the record starts when the flow is saved, as for a flow no progress call created.
       const startedAt: number | null = await Promise.resolve()
@@ -1817,8 +1545,8 @@ export const register: Register = (on, options) => {
     const p: Panel = await read($, panel)
     const rd = await read($, reading)
     const us = await read($, usageState)
-    const hist = await read($, history)
-    const segList = await read($, segments)
+    const archiveList = await read($, archive)
+    const volumeList = await read($, volumes)
     const planList = await read($, plans)
     const clockNow = await $.clock.now()
     const at = Math.max(await read($, now), ...list.map(a => a.startedAt), 0)
@@ -1896,15 +1624,15 @@ export const register: Register = (on, options) => {
         }}
       />
     )
-    const toggleHistory = (
+    const toggleArchive = (
       <Button
-        key="history"
-        label={`${p.isHistoryShown ? '▾' : '▸'} History`}
+        key="archive"
+        label={`${p.isArchiveShown ? '▾' : '▸'} Archive`}
         plain
         onPress={async () => {
-          const shown = !p.isHistoryShown
-          await update($, panel, prev => ({ ...prev, isHistoryShown: shown }))
-          await $.store.set('historyShown', shown).catch(() => {})
+          const shown = !p.isArchiveShown
+          await update($, panel, prev => ({ ...prev, isArchiveShown: shown }))
+          await $.store.set('historyShown', shown).catch(() => {}) // the store key keeps its name from before the rename
         }}
       />
     )
@@ -1914,7 +1642,7 @@ export const register: Register = (on, options) => {
         {toggleUsage}
         {togglePlans}
         {toggleBand}
-        {toggleHistory}
+        {toggleArchive}
       </Box>
     )
     const finishFlowButton = f && !f.isFinished ? <Button key="flow-finish" label="Finish flow" plain onPress={() => finishOpenFlow($)} /> : null
@@ -1928,9 +1656,9 @@ export const register: Register = (on, options) => {
     )
     const summary = `≈${fmtCost(t.cost)}, ${fmtTokens(t.tokens)} ${s.tokensWord}, ${fmtTime(t.time)}`
     // An agent that reported its steps folds them out under its row; open only in this session.
-    // `fp` prefixes a history group's fold state (`<entryId>:<agentId>`), so folding a row there never folds the live one.
+    // `fp` prefixes an archive group's fold state (`<entryId>:<agentId>`), so folding a row there never folds the live one.
     const isUnfolded = (a: AgentRun, fp = '') => (p.openAgents ?? []).includes(fp + a.id)
-    // `kp` prefixes the keys of a history group's rows, so they never share a key with the live ones.
+    // `kp` prefixes the keys of an archive group's rows, so they never share a key with the live ones.
     const foldButton = (a: AgentRun, kp = '', fp = '') => (
       <Button
         key={`${kp}agent-fold-${a.id}`}
@@ -1951,22 +1679,8 @@ export const register: Register = (on, options) => {
     const cols = Math.max(24, e.props.bodyColumns || 40)
     const barW = Math.max(6, Math.min(20, cols - 34))
 
-    // One flow as the panel draws it, live or from the history: the header (title and the three tiles, then
-    // `controls`) and, on demand, the body (running, the `Finished · N` fold, planned). `at` is the clock the rows count to.
-    type FlowView = {
-      kp: string
-      fp: string
-      title: string
-      list: AgentRun[]
-      planned: Planned[]
-      at: number
-      t: ReturnType<typeof totals>
-      isDoneCollapsed: boolean
-      doneKey: string
-      onDone: () => unknown
-      controls: RenderChildren
-    }
-    const flowView = (v: FlowView): { header: RenderChildren; body: () => RenderChildren } => {
+    // One flow as the panel draws it, live or from the archive (FlowView in archive-view.tsx says what it takes).
+    const flowView = (v: FlowView): FlowDrawing => {
       const { kp, fp, at } = v
       const running = v.list.filter(a => a.status === 'running').reverse()
       const finished = v.list.filter(a => a.status !== 'running').reverse()
@@ -2121,110 +1835,44 @@ export const register: Register = (on, options) => {
       const open = ids ?? []
       return open.includes(id) ? open.filter(x => x !== id) : [...open, id]
     }
-    // A past flow as a group: its fold (title, date, done/total, how it ended) and its tiles always;
-    // opened, the flow as it ended with its finished list folded, or the task list of an entry saved without runs.
-    const historyGroup = (entry: HistoryEntry, i: number) => {
-      const { head, line, lines } = formatEntry(entry)
-      const isOpen = p.openEntries.includes(entry.id)
-      const runs = (entry.agents ?? []).map(a => endedRun(a, entry.endedAt))
-      const tasks = entry.tasks.map(tk => ({ title: tk.title, tier: tk.tier, after: tk.after ?? [] }))
-      const view = flowView({
-        kp: `history-${entry.id}-`,
-        fp: `${entry.id}:`,
-        title: head,
-        list: runs,
-        planned: unstarted(tasks, runs),
-        at: entry.endedAt,
-        t: { cost: entry.cost, tokens: entry.tokens, time: entry.time },
-        isDoneCollapsed: !(p.openFinished ?? []).includes(entry.id),
-        doneKey: `history-finished-${entry.id}`,
-        onDone: () => update($, panel, prev => ({ ...prev, openFinished: toggleIn(prev.openFinished, entry.id) })),
-        controls: null,
-      })
-      const body = !isOpen
-        ? null
-        : runs.length
-          ? Svg
-            ? view.body()
-            : <Box flexDirection="column" marginTop={1}>{view.body()}</Box>
-          : lines.map((l, k) => (
-              <Text key={`history-${entry.id}-${k}`} dimColor wrap="truncate-end">
-                {l}
-              </Text>
-            ))
-      return (
-        <Box key={`history-row-${entry.id}`} flexDirection="column" marginTop={i ? 1 : 0}>
-          {i > 0 && Svg && <Svg source={svg(W, 1, `<line class="ln" x1="0" y1="0.5" x2="${W}" y2="0.5"/>`)} alt="" width={W} height={1} />}
-          <Button key={`history-${entry.id}`} plain onPress={() => update($, panel, prev => ({ ...prev, openEntries: toggleIn(prev.openEntries, entry.id) }))}>
-            {`${isOpen ? '▾' : '▸'} ${head}`} <Text dimColor>{line}</Text>
-          </Button>
-          {view.header}
-          {body}
-        </Box>
-      )
-    }
-    const shownHistory = hist.slice(0, p.historyLimit ?? HISTORY_PAGE)
-    const flows = (n: number): string => `${n} ${n === 1 ? 'flow' : 'flows'}`
-    // Browsing only reads: an archive's entries replace the shown ones, Back to latest reads history.json again.
-    const openSegment = async (file: string) => {
-      const a = project ? await readArchive($, file) : null
+    // Browsing only reads: a volume's entries replace the shown ones, Back to latest reads history.json again.
+    const openVolume = async (file: string) => {
+      const a = project ? await readVolume(io($), dataDir(project), file) : null
       if (!a) {
-        await update($, panel, prev => ({ ...prev, historyError: file }))
+        await update($, panel, prev => ({ ...prev, archiveError: file }))
         return
       }
-      await update($, history, () => a.entries)
-      await update($, panel, prev => ({ ...prev, historySegment: file, historyListOpen: false, historyError: '', historyLimit: HISTORY_PAGE }))
+      await update($, archive, () => a.entries)
+      await update($, panel, prev => ({ ...prev, archiveVolume: file, archiveListOpen: false, archiveError: '', archiveLimit: ARCHIVE_PAGE }))
     }
     const backToLatest = async () => {
-      const loaded = await loadLatest($).catch(() => null)
+      const loaded = await loadLatest(io($), project).catch(() => null)
       if (!loaded) return
-      await update($, history, () => loaded.entries)
-      await update($, segments, () => loaded.segments)
-      await update($, panel, prev => ({ ...prev, historySegment: null, historyError: '', historyWarning: loaded.isUnreadable ? UNREADABLE : '', historyLimit: HISTORY_PAGE }))
+      await update($, archive, () => loaded.entries)
+      await update($, volumes, () => loaded.volumes)
+      await update($, panel, prev => ({ ...prev, archiveVolume: null, archiveError: '', archiveWarning: loaded.isUnreadable ? UNREADABLE : '', archiveLimit: ARCHIVE_PAGE }))
     }
-    const span = spanOf(hist)
-    const historySection = !p.isHistoryShown ? null : (
-      <Box key="history-section" flexDirection="column">
-        {p.historySegment != null && <Button key="history-latest" label="Back to latest" plain onPress={backToLatest} />}
-        {segList.length > 0 && (
-          <Button
-            key="history-older"
-            label={`${p.historyListOpen ? '▾' : '▸'} Older history (${segList.length} ${segList.length === 1 ? 'file' : 'files'})`}
-            plain
-            onPress={() => update($, panel, prev => ({ ...prev, historyListOpen: !prev.historyListOpen, historyError: '' }))}
-          />
-        )}
-        {p.historyListOpen &&
-          segList.map(sg => (
-            <Box key={`history-seg-row-${sg.file}`} flexDirection="column">
-              <Button key={`history-seg-${sg.file}`} label={spanText(sg.from, sg.to)} plain onPress={() => openSegment(sg.file)} />
-              <Text dimColor wrap="truncate-end">
-                {`${flows(sg.count)} · ≈${fmtCost(sg.cost)} · ${fmtTokens(sg.tokens)} ${s.tokensWord} · ${fmtTime(sg.time)}`}
-              </Text>
-            </Box>
-          ))}
-        {p.historyError ? <Text dimColor>{`could not load ${p.historyError}`}</Text> : null}
-        {p.historySegment == null && p.historyWarning ? (
-          <Text key="history-warning" dimColor>
-            {p.historyWarning}
-          </Text>
-        ) : null}
-        {hist.length > 0 && (
-          <Text dimColor wrap="truncate-end">
-            {`Showing ${spanText(span.from, span.to)} · ${flows(hist.length)}`}
-          </Text>
-        )}
-        {hist.length === 0 ? <Text dimColor>no history yet</Text> : shownHistory.map(historyGroup)}
-        {hist.length > shownHistory.length && (
-          <Button
-            key="history-more"
-            label={`Show older (${hist.length - shownHistory.length})`}
-            plain
-            onPress={() => update($, panel, prev => ({ ...prev, historyLimit: (prev.historyLimit ?? HISTORY_PAGE) + HISTORY_PAGE }))}
-          />
-        )}
-      </Box>
-    )
+    const archivePart = archiveSection({
+      ui: { Box, Text, Button },
+      Svg,
+      W,
+      svg,
+      fmt: { cost: fmtCost, tokens: fmtTokens, time: fmtTime },
+      tokensWord: s.tokensWord,
+      p,
+      entries: archiveList,
+      volumes: volumeList,
+      flowView,
+      unstarted,
+      on: {
+        entry: id => update($, panel, prev => ({ ...prev, openEntries: toggleIn(prev.openEntries, id) })),
+        finished: id => update($, panel, prev => ({ ...prev, openFinished: toggleIn(prev.openFinished, id) })),
+        list: () => update($, panel, prev => ({ ...prev, archiveListOpen: !prev.archiveListOpen, archiveError: '' })),
+        volume: openVolume,
+        latest: backToLatest,
+        more: () => update($, panel, prev => ({ ...prev, archiveLimit: (prev.archiveLimit ?? ARCHIVE_PAGE) + ARCHIVE_PAGE })),
+      },
+    })
     const live = (): ReturnType<typeof flowView> =>
       flowView({
         kp: '',
@@ -2276,7 +1924,7 @@ export const register: Register = (on, options) => {
             {usageSection}
             {plansSection}
             {toggles}
-            {historySection}
+            {archivePart}
           </Box>
         )
       }
@@ -2289,7 +1937,7 @@ export const register: Register = (on, options) => {
           {plansSection}
           {view.header}
           {view.body()}
-          {historySection}
+          {archivePart}
         </Box>
       )
     }
@@ -2359,7 +2007,7 @@ export const register: Register = (on, options) => {
             {view.body()}
           </Box>
         )}
-        {historySection}
+        {archivePart}
       </Box>
     )
   })

@@ -74,12 +74,12 @@ export type AgentRun = {
   isAsked?: boolean
 }
 
-export type HistoryTask = { title: string; tier: string; after?: number[] }
+export type ArchiveTask = { title: string; tier: string; after?: number[] }
 
 /** An agent run as it was when its flow was saved, without the live-only fields. */
-export type HistoryAgent = Omit<AgentRun, 'tool' | 'isAsked'>
+export type ArchiveAgent = Omit<AgentRun, 'tool' | 'isAsked'>
 
-export type HistoryEntry = {
+export type ArchiveEntry = {
   id: string
   project: string
   title: string
@@ -88,16 +88,16 @@ export type HistoryEntry = {
   status: 'finished' | 'open'
   done: number
   total: number
-  tasks: HistoryTask[]
+  tasks: ArchiveTask[]
   cost: number // USD
   tokens: number
   time: number // ms
   /** The flow's runs at the end; absent in entries saved before runs were kept. */
-  agents?: HistoryAgent[]
+  agents?: ArchiveAgent[]
 }
 
-/** One archive file in `history-index.json`: its entries summed up. */
-export type HistorySegment = {
+/** One archive volume (a `history-<n>.json` file) in the volume index `history-index.json`: its entries summed up. */
+export type ArchiveVolume = {
   file: string // `history-<n>.json`
   count: number
   from: number // earliest startedAt
@@ -117,22 +117,23 @@ export type Panel = {
   isUsageShown: boolean
   isPlansShown: boolean
   isBandHidden: boolean
-  isHistoryShown: boolean
+  /** Stored under the engine-store key `historyShown`, its name from before the rename. */
+  isArchiveShown: boolean
   openEntries: string[]
   /** Agent rows unfolded to show their items; this session only. */
   openAgents: string[]
-  /** History groups whose finished list is open; this session only. */
+  /** Archive groups whose finished list is open; this session only. */
   openFinished: string[]
-  /** How many history groups are shown; this session only. */
-  historyLimit: number
-  /** The list of archive files is open; this session only. */
-  historyListOpen: boolean
-  /** The archive file shown, null for the latest segment; this session only. */
-  historySegment: string | null
-  /** The archive file that could not be loaded, '' when none; this session only. */
-  historyError: string
+  /** How many archive groups are shown; this session only. */
+  archiveLimit: number
+  /** The list of archive volumes is open; this session only. */
+  archiveListOpen: boolean
+  /** The volume file shown, null for the latest part (history.json); this session only. */
+  archiveVolume: string | null
+  /** The volume file that could not be loaded, '' when none; this session only. */
+  archiveError: string
   /** Why the latest view shows only recovered entries ('' when history.json was read); this session only. */
-  historyWarning?: string
+  archiveWarning?: string
   autoOpenedFor: string
 }
 
@@ -162,8 +163,8 @@ declare module 'claude-code' {
       reading: Reading | null
       usage: { windows: UsageWindow[]; samples: Samples }
       now: number
-      history: HistoryEntry[]
-      segments: HistorySegment[]
+      archive: ArchiveEntry[]
+      volumes: ArchiveVolume[]
       flowMeta: { startedAt: number; project: string } | null
       plans: TaskPlan[]
     }

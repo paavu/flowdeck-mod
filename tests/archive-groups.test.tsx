@@ -1,8 +1,8 @@
 import { describe, expect, test } from 'claude-code/testing'
 
-import { addEntry, entryDate, formatEntry, MAX_AGENTS, MAX_HISTORY_BYTES, parseHistory, snapshot, splitBySize } from '../hooks/history'
+import { addEntry, entryDate, formatEntry, MAX_AGENTS, MAX_ARCHIVE_BYTES, parseArchive, snapshot, splitBySize } from '../hooks/archive'
 import { STATE_COLOR } from '../hooks/plan-view'
-import type { AgentRun, Flow, HistoryEntry } from '../types'
+import type { AgentRun, Flow, ArchiveEntry } from '../types'
 import { utf8 } from './fake-fs'
 
 const MIN = 60_000
@@ -47,7 +47,7 @@ const run = (over: Partial<AgentRun> = {}): AgentRun => ({
 const snap = (agents: AgentRun[], over: Partial<Parameters<typeof snapshot>[0]> = {}) =>
   snapshot({ flow: flow(), agents, project: '/work/app', startedAt: NOW - 2 * HOUR, endedAt: NOW - HOUR, status: 'finished', ...over })
 
-describe('history entries hold the flow', () => {
+describe('archive entries hold the flow', () => {
   test('snapshot stores the agents without the live fields, and the tasks with their after', () => {
     const e = snap([run({ tool: 'Bash', isAsked: true, items: [{ title: 'one', status: 'done', startedAt: 1, doneAt: 2 }] })])
     expect(e.agents?.length).toBe(1)
@@ -121,42 +121,42 @@ describe('history entries hold the flow', () => {
       expect(t.after).toHaveLength(100)
     }
     // what is written is what a read gives back
-    expect(parseHistory(JSON.parse(JSON.stringify([e])))).toEqual([e])
+    expect(parseArchive(JSON.parse(JSON.stringify([e])))).toEqual([e])
   })
 
-  test('parseHistory: old entries without agents load as they are, and the new fields survive a round trip', () => {
+  test('parseArchive: old entries without agents load as they are, and the new fields survive a round trip', () => {
     const old = { id: 'old', project: '/work/app', title: 'Old', startedAt: 1, endedAt: 2, status: 'finished', done: 1, total: 2, tasks: [{ title: 'a', tier: 'light' }], cost: 1, tokens: 2, time: 3 }
-    const [o] = parseHistory([old])
+    const [o] = parseArchive([old])
     expect(o!.agents).toBeUndefined()
     expect(o!.tasks).toEqual([{ title: 'a', tier: 'light' }])
     const e = snap([run({ items: [{ title: 'one', status: 'active', startedAt: 5 }] }), run({ id: 'a2', agentId: undefined, effort: undefined, status: 'failed', stepDone: 1, stepTotal: 3, stepNote: 'two' })])
-    expect(parseHistory(JSON.parse(JSON.stringify([e, old])))).toEqual([e, o!])
+    expect(parseArchive(JSON.parse(JSON.stringify([e, old])))).toEqual([e, o!])
   })
 
-  test('parseHistory drops broken agents and bad after numbers, keeps the entry', () => {
+  test('parseArchive drops broken agents and bad after numbers, keeps the entry', () => {
     const e = snap([run()])
     const raw = JSON.parse(JSON.stringify(e))
     raw.agents.push(null, 7, { id: 'x' }, { ...raw.agents[0], id: 'bad-status', status: 'weird' }, { ...raw.agents[0], id: 'bad-start', startedAt: 'soon' })
     raw.tasks[1].after = [1, 'two', -3, 2.5, 3]
     raw.tasks[2].after = 'nope'
-    const [p] = parseHistory([raw, 'junk'])
+    const [p] = parseArchive([raw, 'junk'])
     expect(p!.agents!.map(a => a.id)).toEqual(['a1'])
     expect(p!.tasks[1]!.after).toEqual([1, 3])
     expect(p!.tasks[2]!.after).toBeUndefined()
-    const [noList] = parseHistory([{ ...raw, agents: 'nope' }])
+    const [noList] = parseArchive([{ ...raw, agents: 'nope' }])
     expect(noList!.agents).toBeUndefined()
   })
 })
 
-describe('history is never cut', () => {
-  const big = (i: number): HistoryEntry => {
+describe('the archive is never cut', () => {
+  const big = (i: number): ArchiveEntry => {
     const items = Array.from({ length: 12 }, (_, k) => ({ title: `item ${k} ${'y'.repeat(40)}`, status: 'done' as const, startedAt: k, doneAt: k + 1 }))
     const agents = Array.from({ length: 60 }, (_, k) => run({ id: `e${i}-r${k}`, startedAt: NOW + k, description: 'd'.repeat(200), stepNote: 'n'.repeat(200), items }))
     return snap(agents, { startedAt: NOW + i * MIN, endedAt: NOW + i * MIN + 1 })
   }
 
   test('addEntry keeps every flow: no cap on the count', () => {
-    let h: HistoryEntry[] = []
+    let h: ArchiveEntry[] = []
     for (let i = 0; i < 120; i++) h = addEntry(h, snap([run()], { startedAt: NOW + i, endedAt: NOW + i + 1 }))
     expect(h.length).toBe(120)
     expect(h[0]!.startedAt).toBe(NOW + 119)
@@ -165,8 +165,8 @@ describe('history is never cut', () => {
   test('splitBySize keeps the newest under 2,500,000 bytes and returns the rest as overflow', () => {
     const base = big(0)
     const list = Array.from({ length: 400 }, (_, i) => ({ ...base, id: `big-${399 - i}`, startedAt: NOW + (399 - i) * MIN })) // newest first
-    const { kept, overflow } = splitBySize(list, MAX_HISTORY_BYTES)
-    expect(MAX_HISTORY_BYTES).toBe(2_500_000)
+    const { kept, overflow } = splitBySize(list, MAX_ARCHIVE_BYTES)
+    expect(MAX_ARCHIVE_BYTES).toBe(2_500_000)
     expect(utf8(JSON.stringify(kept))).toBeLessThan(2_500_000)
     expect(kept.length).toBeGreaterThan(0)
     expect(overflow.length).toBeGreaterThan(0)
@@ -174,12 +174,12 @@ describe('history is never cut', () => {
     expect([...kept, ...overflow].map(e => e.id)).toEqual(list.map(e => e.id))
     // one more would pass the limit
     expect(utf8(JSON.stringify([...kept, overflow[0]]))).toBeGreaterThanOrEqual(2_500_000)
-    const small = splitBySize(list.slice(0, 2), MAX_HISTORY_BYTES)
+    const small = splitBySize(list.slice(0, 2), MAX_ARCHIVE_BYTES)
     expect(small.kept.length).toBe(2)
     expect(small.overflow).toEqual([])
   })
 
-  test('addEntry on a history past the limit still keeps everything', () => {
+  test('addEntry on an archive past the limit still keeps everything', () => {
     const base = big(0)
     const list = Array.from({ length: 30 }, (_, i) => ({ ...base, id: `big-${29 - i}` }))
     const next = addEntry(list, { ...base, id: 'big-30' })
@@ -190,7 +190,7 @@ describe('history is never cut', () => {
 
 describe('the group date', () => {
   const at = (y: number, mo: number, d: number, h: number, mi: number) => Date.UTC(y, mo - 1, d, h, mi)
-  const e = (startedAt: number, endedAt: number, status: 'finished' | 'open' = 'finished') => ({ ...snap([]), startedAt, endedAt, status }) as HistoryEntry
+  const e = (startedAt: number, endedAt: number, status: 'finished' | 'open' = 'finished') => ({ ...snap([]), startedAt, endedAt, status }) as ArchiveEntry
 
   test('same day: the end date and time', () => {
     expect(entryDate(e(at(2026, 10, 26, 9, 0), at(2026, 10, 26, 10, 42)), 'UTC')).toBe('Oct 26, 2026 · 10:42 AM')
@@ -223,7 +223,7 @@ describe('the group date', () => {
   })
 })
 
-// --- in the panel (no fs hook: the shared-store fallback, as in panel-history)
+// --- in the panel (no fs hook: the shared-store fallback, as in panel-archive)
 
 function engine(on: any, opts: { store?: Record<string, unknown> } = {}) {
   const store = opts.store ?? {}
@@ -279,7 +279,7 @@ const desktop = async ($: any) => {
 }
 
 // Two saved flows with their agents: the newer one has a done run, a failed run with items and an unstarted task.
-const groupA = (): HistoryEntry =>
+const groupA = (): ArchiveEntry =>
   ({
     ...snap(
       [
@@ -292,25 +292,25 @@ const groupA = (): HistoryEntry =>
     cost: 1.5,
     tokens: 12_000,
     time: 30 * MIN,
-  }) as HistoryEntry
-const groupB = (): HistoryEntry =>
+  }) as ArchiveEntry
+const groupB = (): ArchiveEntry =>
   ({
     ...snap([run({ id: 'b1', agentId: 'b1', description: 'only task' })], { flow: flow({ title: 'Flow B', tasks: [{ title: 'only task', tier: 'careful', after: [] }], total: 1, done: 1 }), startedAt: NOW - 30 * HOUR, endedAt: NOW - 25 * HOUR }),
     id: 'gB',
     cost: 0.75,
     tokens: 3_000,
     time: 90_000,
-  }) as HistoryEntry
+  }) as ArchiveEntry
 const DATE = /[A-Z][a-z]{2} \d{1,2}.*, \d{4} · \d{1,2}:\d{2} [AP]M/
 
-describe('history groups in the panel', () => {
+describe('archive groups in the panel', () => {
   test('two groups show titles, dates and the three tiles, folded by default', async ($, on) => {
     engine(on, { store: { historyShown: true, history: [groupA(), groupB()] } })
     await start($)
     await settle()
     const t = await terminal($)
-    const groups = t.buttons.filter((b: any) => /^history-g/.test(String(b.props.key)))
-    expect(groups.map((b: any) => String(b.props.key))).toEqual(['history-gA', 'history-gB'])
+    const groups = t.buttons.filter((b: any) => /^archive-g/.test(String(b.props.key)))
+    expect(groups.map((b: any) => String(b.props.key))).toEqual(['archive-gA', 'archive-gB'])
     expect(JSON.stringify(groups[0])).toContain('▸ Flow A')
     expect(JSON.stringify(groups[0])).toContain(`${entryDate(groupA())} · 1/3 · finished`)
     expect(JSON.stringify(groups[1])).toContain(`${entryDate(groupB())} · 1/1 · finished`)
@@ -328,7 +328,7 @@ describe('history groups in the panel', () => {
     expect(String(headers[0].props.source)).toContain('30:00')
     expect(String(headers[1].props.source)).toContain('1:30')
     expect(d.svgs.filter((s: any) => Number(s.props.height) === 66).length).toBe(0)
-    expect(d.keys).toContain('history-gA')
+    expect(d.keys).toContain('archive-gA')
   })
 
   test('opening a group shows Finished · N collapsed, then the rows with their final states and stats, and the unstarted task', async ($, on) => {
@@ -336,16 +336,16 @@ describe('history groups in the panel', () => {
     await start($)
     await settle()
     for (const surface of ['terminal', 'desktop'] as const) {
-      await press($, surface, 'history-gA')
+      await press($, surface, 'archive-gA')
       let t = await terminal($)
-      const fin = t.buttons.find((b: any) => String(b.props.key) === 'history-finished-gA')
+      const fin = t.buttons.find((b: any) => String(b.props.key) === 'archive-finished-gA')
       expect(String(fin?.props.label)).toBe('▸ Finished · 2')
       expect(t.text).not.toMatch(/write tests/)
       expect(t.text).toMatch(/Planned · 1/)
       expect(t.text).toMatch(/3\. polish/)
-      await press($, surface, 'history-finished-gA')
+      await press($, surface, 'archive-finished-gA')
       t = await terminal($)
-      expect(String(t.buttons.find((b: any) => String(b.props.key) === 'history-finished-gA')?.props.label)).toBe('▾ Finished · 2')
+      expect(String(t.buttons.find((b: any) => String(b.props.key) === 'archive-finished-gA')?.props.label)).toBe('▾ Finished · 2')
       expect(t.text).toMatch(/write tests/)
       expect(t.text).toMatch(/wire it/)
       expect(t.text).toMatch(/Done/)
@@ -359,8 +359,8 @@ describe('history groups in the panel', () => {
       expect(String(done?.props.source)).toContain('5:00')
       expect(d.alts.some((a: string) => /^3\. polish: planned/.test(a))).toBe(true)
       // the other group stays folded
-      expect(t.keys).not.toContain('history-finished-gB')
-      await press($, surface, 'history-finished-gA', 'history-gA')
+      expect(t.keys).not.toContain('archive-finished-gB')
+      await press($, surface, 'archive-finished-gA', 'archive-gA')
       t = await terminal($)
       expect(t.text).not.toMatch(/write tests/)
     }
@@ -370,11 +370,11 @@ describe('history groups in the panel', () => {
     engine(on, { store: { historyShown: true, history: [groupA()] } })
     await start($)
     await settle()
-    await press($, 'terminal', 'history-gA', 'history-finished-gA')
+    await press($, 'terminal', 'archive-gA', 'archive-finished-gA')
     let t = await terminal($)
-    expect(t.keys).toContain('history-gA-agent-fold-a2')
+    expect(t.keys).toContain('archive-gA-agent-fold-a2')
     expect(t.text).not.toMatch(/patch it/)
-    await press($, 'terminal', 'history-gA-agent-fold-a2')
+    await press($, 'terminal', 'archive-gA-agent-fold-a2')
     t = await terminal($)
     expect(t.text).toMatch(/read code\s+1m 0s/)
     expect(t.text).toMatch(/patch it/)
@@ -391,15 +391,15 @@ describe('history groups in the panel', () => {
     await settle()
     for (const surface of ['terminal', 'desktop'] as const) {
       let t = await terminal($)
-      expect(JSON.stringify(t.buttons.find((b: any) => String(b.props.key) === 'history-old'))).toContain('ended with the session')
+      expect(JSON.stringify(t.buttons.find((b: any) => String(b.props.key) === 'archive-old'))).toContain('ended with the session')
       expect(t.text).toContain('≈$1.50 · 12k tokens · 30:00')
       expect(t.text).not.toMatch(/write tests/)
-      await press($, surface, 'history-old')
+      await press($, surface, 'archive-old')
       t = await terminal($)
       expect(t.text).toMatch(/✓ write tests \(careful\)/)
       expect(t.text).toMatch(/○ wire it \(medium\)/)
-      expect(t.keys).not.toContain('history-finished-old')
-      await press($, surface, 'history-old')
+      expect(t.keys).not.toContain('archive-finished-old')
+      await press($, surface, 'archive-old')
     }
   })
 
@@ -409,7 +409,7 @@ describe('history groups in the panel', () => {
     const { clock } = engine(on, { store: { historyShown: true, history: [e] } })
     await start($)
     await settle()
-    await press($, 'terminal', 'history-gR')
+    await press($, 'terminal', 'archive-gR')
     let t = await terminal($)
     expect(t.text).toMatch(/Running at finish/)
     expect(t.text).toMatch(/2:00/)
@@ -435,7 +435,7 @@ describe('history groups in the panel', () => {
     await progress($, { finished: true })
     const saved = (store.history as any[])[0]
     expect(saved.agents.map((a: any) => [a.id, a.status, a.endedAt])).toEqual([['w1', 'running', NOW + 61_000]])
-    await press($, 'terminal', `history-${saved.id}`)
+    await press($, 'terminal', `archive-${saved.id}`)
     const t = await terminal($)
     expect(t.text).toMatch(/Running at finish/)
     expect(t.text).toMatch(/1:00/)
@@ -449,21 +449,21 @@ describe('history groups in the panel', () => {
     await progress($, { title: 'Live', total: 1, done: 0, phase: 'delegate', tasks: [{ title: 'wire it', tier: 'medium' }] })
     await $.agent.spawn({ subagentType: 'flowdeck-medium', description: 'wire it', tool_use_id: 'a2' } as any)
     await $.tool.call({ tool: 'mcp__flowdeck__step', agentId: 'a2', steps: [{ title: 'live one' }, { title: 'live two' }] } as any)
-    await press($, 'terminal', 'history-gA', 'history-finished-gA', 'history-gC', 'history-finished-gC', 'history-gA-agent-fold-a2')
+    await press($, 'terminal', 'archive-gA', 'archive-finished-gA', 'archive-gC', 'archive-finished-gC', 'archive-gA-agent-fold-a2')
     const count = (text: string, word: string) => text.split(word).length - 1
     let t = await terminal($)
     expect(count(t.text, '✗ patch it')).toBe(1)
     // the live row's second step shows only when that row is unfolded
     expect(t.text).not.toMatch(/live two/)
     const label = (key: string) => String(t.buttons.find((b: any) => String(b.props.key) === key)?.props.label)
-    expect(label('history-gA-agent-fold-a2')).toBe('▾')
-    expect(label('history-gC-agent-fold-a2')).toBe('▸')
+    expect(label('archive-gA-agent-fold-a2')).toBe('▾')
+    expect(label('archive-gC-agent-fold-a2')).toBe('▸')
     expect(label('agent-fold-a2')).toBe('▸')
     await press($, 'terminal', 'agent-fold-a2')
     t = await terminal($)
     expect(t.text).toMatch(/live two/)
     expect(count(t.text, '✗ patch it')).toBe(1)
-    expect(label('history-gC-agent-fold-a2')).toBe('▸')
+    expect(label('archive-gC-agent-fold-a2')).toBe('▸')
   })
 
   test('twelve groups show the newest ten and Show older reveals the rest', async ($, on) => {
@@ -473,15 +473,15 @@ describe('history groups in the panel', () => {
     await settle()
     for (const surface of ['terminal', 'desktop'] as const) {
       const p = await pane($, surface)
-      expect((await p.findAll({ type: 'Button' })).filter((b: any) => /^history-g\d+$/.test(String(b.props.key))).length).toBe(10)
-      const more = await p.find({ type: 'Button', key: 'history-more' })
+      expect((await p.findAll({ type: 'Button' })).filter((b: any) => /^archive-g\d+$/.test(String(b.props.key))).length).toBe(10)
+      const more = await p.find({ type: 'Button', key: 'archive-more' })
       expect(String(more?.props.label)).toBe('Show older (2)')
       await p.unmount()
     }
-    await press($, 'terminal', 'history-more')
+    await press($, 'terminal', 'archive-more')
     const t = await terminal($)
-    expect(t.buttons.filter((b: any) => /^history-g\d+$/.test(String(b.props.key))).length).toBe(12)
-    expect(t.keys).not.toContain('history-more')
+    expect(t.buttons.filter((b: any) => /^archive-g\d+$/.test(String(b.props.key))).length).toBe(12)
+    expect(t.keys).not.toContain('archive-more')
   })
 
   test('a flow finished through finishFlow is saved with its agents and appears as a group', async ($, on) => {
@@ -498,10 +498,10 @@ describe('history groups in the panel', () => {
     expect(saved.agents.map((a: any) => [a.id, a.status, a.endedAt])).toEqual([['w1', 'done', NOW + 61_000]])
     expect(saved.tasks[1]).toEqual({ title: 'wire it', tier: 'medium', after: [] })
     const id = saved.id
-    await press($, 'terminal', `history-${id}`, `history-finished-${id}`)
+    await press($, 'terminal', `archive-${id}`, `archive-finished-${id}`)
     const t = await terminal($)
-    expect(String(t.buttons.find((b: any) => String(b.props.key) === `history-finished-${id}`)?.props.label)).toBe('▾ Finished · 1')
+    expect(String(t.buttons.find((b: any) => String(b.props.key) === `archive-finished-${id}`)?.props.label)).toBe('▾ Finished · 1')
     expect(t.text).toMatch(/2\. wire it/)
-    expect(t.keys).toContain(`history-${id}`)
+    expect(t.keys).toContain(`archive-${id}`)
   })
 })

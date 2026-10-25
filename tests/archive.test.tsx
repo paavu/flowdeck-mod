@@ -1,7 +1,7 @@
 import { describe, expect, test } from 'claude-code/testing'
 
-import { addEntry, formatEntry, isWorthKeeping, parseHistory, snapshot } from '../hooks/history'
-import type { AgentRun, Flow, HistoryEntry } from '../types'
+import { addEntry, formatEntry, isWorthKeeping, parseArchive, snapshot } from '../hooks/archive'
+import type { AgentRun, Flow, ArchiveEntry } from '../types'
 
 const MIN = 60_000
 const START = Date.UTC(2026, 9, 25, 10, 0)
@@ -46,7 +46,7 @@ const agents = [run(), run({ id: 'b', startedAt: START + 5 * MIN, endedAt: undef
 const snap = (over: Partial<Parameters<typeof snapshot>[0]> = {}) =>
   snapshot({ flow: flow(), agents, project: '/Users/me/proj', startedAt: START, endedAt: END, status: 'finished', ...over })
 
-const entry = (i: number, over: Partial<HistoryEntry> = {}): HistoryEntry => ({
+const entry = (i: number, over: Partial<ArchiveEntry> = {}): ArchiveEntry => ({
   ...snap({ startedAt: START + i, endedAt: END + i }),
   ...over,
 })
@@ -111,7 +111,7 @@ describe('addEntry', () => {
   })
 
   test('never drops an entry', () => {
-    let h: HistoryEntry[] = []
+    let h: ArchiveEntry[] = []
     for (let i = 0; i < 60; i++) h = addEntry(h, entry(i))
     expect(h.length).toBe(60)
     expect(h[0]!.id).toBe(entry(59).id)
@@ -133,24 +133,24 @@ describe('addEntry', () => {
   })
 })
 
-describe('parseHistory', () => {
-  test('anything that is not an array gives an empty history', () => {
-    expect(parseHistory(null)).toEqual([])
-    expect(parseHistory('nope')).toEqual([])
-    expect(parseHistory({ a: 1 })).toEqual([])
-    expect(parseHistory(undefined)).toEqual([])
+describe('parseArchive', () => {
+  test('anything that is not an array gives an empty archive', () => {
+    expect(parseArchive(null)).toEqual([])
+    expect(parseArchive('nope')).toEqual([])
+    expect(parseArchive({ a: 1 })).toEqual([])
+    expect(parseArchive(undefined)).toEqual([])
   })
 
   test('drops bad items and keeps good ones', () => {
     const good = entry(1)
-    const out = parseHistory([null, 4, { id: 'x' }, { ...good, status: 'weird' }, good])
+    const out = parseArchive([null, 4, { id: 'x' }, { ...good, status: 'weird' }, good])
     expect(out).toEqual([good])
   })
 
   test('clamps numbers, caps task lists, trims and caps strings', () => {
     const tasks = Array.from({ length: 300 }, (_, i) => ({ title: `t${i}`, tier: 'light' }))
     const raw = { ...entry(1), cost: -3, tokens: -1, time: -5, title: `  ${'x'.repeat(300)}  `, project: '  /p  ', tasks }
-    const [e] = parseHistory(JSON.parse(JSON.stringify([raw])))
+    const [e] = parseArchive(JSON.parse(JSON.stringify([raw])))
     expect(e!.cost).toBe(0)
     expect(e!.tokens).toBe(0)
     expect(e!.time).toBe(0)
@@ -159,9 +159,9 @@ describe('parseHistory', () => {
     expect(e!.project).toBe('/p')
   })
 
-  test('a round trip through JSON gives the same history', () => {
+  test('a round trip through JSON gives the same archive', () => {
     const h = [entry(2), entry(1)]
-    expect(parseHistory(JSON.parse(JSON.stringify(h)))).toEqual(h)
+    expect(parseArchive(JSON.parse(JSON.stringify(h)))).toEqual(h)
   })
 })
 

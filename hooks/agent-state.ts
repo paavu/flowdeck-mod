@@ -9,7 +9,7 @@ export type AgentState = { name: string; color: string }
 
 type Shown = Pick<AgentRun, 'status'> & Partial<Pick<AgentRun, 'tool' | 'isAsked' | 'endedAt'>>
 
-// A live run has no end yet; one that is running with an end was saved in a flow's history while it still ran.
+// A live run has no end yet; one that is running with an end was saved in the archive while it still ran.
 export const isRunningAtFinish = (a: Shown): boolean => a.status === 'running' && a.endedAt !== undefined
 
 export const agentState = (a: Shown): AgentState => {
