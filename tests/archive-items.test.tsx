@@ -218,7 +218,7 @@ describe('archiving finished items of the live flow', () => {
     const header = (s: string) => s.split('\n').find(l => /^≈\$/.test(l))
     const before = await terminal($)
     const d0 = await desktop($)
-    expect(before.text).not.toMatch(/\d\. task 1/) // never shown as planned: it has a run
+    expect(before.text).not.toMatch(/▢ \d\. task 1/) // never shown as planned: it has a run
     await press($, 'archive-item-w2')
     const after = await terminal($)
     const d1 = await desktop($)
@@ -226,7 +226,7 @@ describe('archiving finished items of the live flow', () => {
     expect(header(after.text)).toContain('≈$0.80')
     expect(d1.alts.find(a => a.startsWith('Ship it:'))).toBe(d0.alts.find(a => a.startsWith('Ship it:')))
     expect(after.text).toContain('2. never started')
-    expect(after.text).not.toMatch(/\d\. task [12]/)
+    expect(after.text).not.toMatch(/▢ \d\. task [12]/)
   })
 })
 

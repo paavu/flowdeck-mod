@@ -28,7 +28,7 @@ From the first `progress` report on, this flow stays linked to the session. A fl
 ## Progress bar
 
 If the tool `mcp__flowdeck__progress` is available, keep it current; skip silently if it is not. Call it:
-- after presenting the plan: `title` (a few words), `total` (number of worker tasks), `tasks` (`[{ title, tier, after }]` in plan order; `tier` without the `flowdeck-` prefix, `after` the numbers of the tasks it waits for), `phase: "delegate"` (or `"design"` while in section 2);
+- after presenting the plan: `title` (a few words), `total` (number of worker tasks), `tasks` (`[{ title, tier, after }]` in plan order; `tier` without the `flowdeck-` prefix, `after` the numbers (from 1) of the tasks it waits for: give it to every task that depends on another, leave it out for a task that can start at once), `phase: "delegate"` (or `"design"` while in section 2);
 - each time a task is accepted in review: `done` (accepted so far); switch `phase` to `"review"` while reviewing;
 - if re-planning changes the tasks: the new `tasks` and `total`;
 - when a new task appears later in the session: `add: [{ title, tier }]` (appends; keeps `done`; a title already in the flow is ignored);
@@ -95,7 +95,7 @@ Heuristics:
 
 ## 4. Delegate
 
-- Use the Agent tool with `subagent_type` = the tier agent name exactly as the Agent tool lists it (`flowdeck-careful` or `flowdeck:flowdeck-careful`). Run independent tasks in parallel in one message; chain dependent ones.
+- Use the Agent tool with `subagent_type` = the tier agent name exactly as the Agent tool lists it (`flowdeck-careful` or `flowdeck:flowdeck-careful`). Run independent tasks in parallel in one message; chain dependent ones. The panel marks a planned task `ready` when everything in its `after` is done (and every task without `after`): launch every `ready` task at once, in parallel, then the next ones as they become ready.
 - Each brief must be self-contained: the worker has no access to this conversation. Include file paths, the decided design specs, constraints from CLAUDE.md that matter, and the exact verification expected.
 - Keep briefs tight. Do not paste the whole plan; paste this task.
 - Do not implement in parallel with workers. While they run, prepare the next briefs or the review checklist.

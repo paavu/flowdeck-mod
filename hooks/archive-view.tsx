@@ -10,7 +10,8 @@ export const ARCHIVE_PAGE = 10
 // The file keeps its original name, so the text names it as it is.
 export const UNREADABLE = 'history.json could not be read; showing recovered entries (the file is untouched)'
 
-export type Planned = PlannedTask & { n: number }
+/** A planned task, numbered in plan order; `ready` once everything it waits for is done. */
+export type Planned = PlannedTask & { n: number; ready?: boolean }
 export type Totals = { cost: number; tokens: number; time: number }
 
 // One flow as the panel draws it, live or from the archive: the header (title and the three tiles, then
@@ -21,6 +22,8 @@ export type FlowView = {
   fp: string
   title: string
   list: AgentRun[]
+  /** The flow's tasks in plan order: a run that belongs to one shows its number and what it waits for. */
+  tasks?: { title: string; after?: number[] }[]
   planned: Planned[]
   at: number
   t: Totals
@@ -83,6 +86,7 @@ function archiveGroup(v: ArchiveView, entry: ArchiveEntry, i: number): RenderChi
         // Archived flows are all finished: the group shows no title.
         title: '',
         list: runs,
+        tasks: entry.tasks,
         planned: [],
         at: entry.endedAt,
         t: { cost: entry.cost, tokens: entry.tokens, time: entry.time },

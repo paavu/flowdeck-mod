@@ -13,6 +13,8 @@ import { ARCHIVE_PAGE, archiveSection, UNREADABLE } from './archive-view'
 import type { FlowDrawing, FlowView, Planned } from './archive-view'
 import { importPlan, isFinished, isStoredStep, normalize, percent, PLAN_ID, placeBar, planId, str, where } from './plan'
 import { planBandSvg, planBandText, planRows, planSvg, STATE_COLOR, stateLabel } from './plan-view'
+import { cleanAfter, linkRuns, norm, taskOf, unstarted } from './tasks'
+import type { TaskLike } from './tasks'
 import { asAgents, asArchive, asFlow, asMeta, asNow, asPanel, asReading, asUsage, asVolumes, PANEL_DEFAULT } from './shapes'
 import { live, record, resetKey, resets, toWindows, usageRows, usageSvg } from './usage'
 
@@ -124,6 +126,7 @@ const STRINGS = {
     tasks: 'Tasks',
     review: 'Review',
     busy: 'running',
+    ready: 'ready',
   },
   ru: {
     pane: 'flowdeck',
@@ -152,6 +155,7 @@ const STRINGS = {
     tasks: 'Задачи',
     review: 'Ревью',
     busy: 'в работе',
+    ready: 'можно начать',
   },
 } as const
 
@@ -229,7 +233,8 @@ const merge = (prev: Flow | null, input: ProgressInput): Flow => {
   const planned = !incoming ? base.tasks : base.isLinked ? unionTasks(base.tasks, incoming) : incoming
   const known = new Set(planned.map(t => t.title.toLowerCase()))
   const fresh = (cleanTasks(input.add) ?? []).filter(t => !known.has(t.title.toLowerCase()) && known.add(t.title.toLowerCase()))
-  const tasks = [...planned, ...fresh]
+  // Waits on unknown tasks, on the task itself or closing a cycle are dropped.
+  const tasks = cleanAfter([...planned, ...fresh])
   const asked = Math.max(0, Math.round(input.total ?? (fresh.length && !input.tasks ? base.total + fresh.length : input.tasks ? tasks.length : base.total)))
   const total = base.isLinked ? Math.max(asked, tasks.length) : asked
   const done = Math.min(total || Infinity, Math.max(0, Math.round(input.done ?? base.done)))
@@ -439,8 +444,6 @@ const modelName = (id: string): string => {
   return `${family.charAt(0).toUpperCase()}${family.slice(1).toLowerCase()} ${major}${minor ? '.' + minor : ''}`
 }
 
-const norm = (s: string): string => s.toLowerCase().replace(/[^\p{L}\p{N}]+/gu, ' ').trim()
-
 const fmtTokens = (n: number): string =>
   n >= 1e6 ? `${(n / 1e6).toFixed(1)}M` : n >= 1e3 ? `${Math.round(n / 1e3)}k` : `${Math.round(n)}`
 
@@ -455,12 +458,6 @@ const fmtTime = (ms: number): string => {
 }
 
 const elapsed = (a: AgentRun, at: number): number => (a.endedAt ?? Math.max(at, a.startedAt)) - a.startedAt
-
-// The tasks no run was started for, numbered in plan order.
-const unstarted = (tasks: PlannedTask[], list: AgentRun[]): Planned[] => {
-  const started = new Set(list.map(a => norm(a.description)))
-  return tasks.map((t, i) => ({ ...t, n: i + 1 })).filter(t => !started.has(norm(t.title)))
-}
 
 const plannedOf = (f: Flow | null, list: AgentRun[]): Planned[] => (!f || f.isFinished ? [] : unstarted(f.tasks ?? [], list))
 
@@ -659,7 +656,12 @@ const AGENT_H = 66
 const TITLE_LINE = 18
 const agentHeight = (titleOutside = false): number => AGENT_H - (titleOutside ? TITLE_LINE : 0)
 
-const agentSvg = (W: number, a: AgentRun, at: number, opts: { titleOutside?: boolean } = {}): string => {
+// What a task waits for, as its meta line says it: `after 2, 3`.
+const afterText = (after: number[] | undefined): string => (after?.length ? `${tr().after} ${after.join(', ')}` : '')
+
+// `after` is the run's task's waits; it follows the effort on the meta line and is the first thing dropped when the
+// line is short: it never takes room from the stats.
+const agentSvg = (W: number, a: AgentRun, at: number, opts: { titleOutside?: boolean; after?: number[] } = {}): string => {
   const out = opts.titleOutside === true
   const dy = out ? TITLE_LINE : 0
   const s = tr()
@@ -667,14 +669,20 @@ const agentSvg = (W: number, a: AgentRun, at: number, opts: { titleOutside?: boo
   const color = colorOf(tier)
   const ctx = ctxOf(a)
   const textW = W - 42 - 22
-  const meta = [a.effort ? `${modelName(a.model)} · ${a.effort}` : modelName(a.model)]
-  if (a.round > 1) meta.push(`${s.round} ${a.round}`)
-  if (a.status === 'failed') meta.push(s.failed)
+  const model = a.effort ? `${modelName(a.model)} · ${a.effort}` : modelName(a.model)
+  const tail: string[] = []
+  if (a.round > 1) tail.push(`${s.round} ${a.round}`)
+  if (a.status === 'failed') tail.push(s.failed)
   const barW = textW
   const progress = progressOf(a)
   const tierWord = tier === 'other' ? a.type : tier
+  const metaW = (m: string[]) => textWidth(`${tierWord}  ${m.join('  ·  ')}`, 11)
   // The stats share the model line, right-aligned; the meta keeps its room first.
-  const stats = fitStats(a, at, '  ', barW - textWidth(`${tierWord}  ${meta.join('  ·  ')}`, 11) - 12, t => textWidth(t, 11))
+  const bare = [model, ...tail]
+  const stats = fitStats(a, at, '  ', barW - metaW(bare) - 12, t => textWidth(t, 11))
+  const waits = afterText(opts.after)
+  const withWaits = [model, waits, ...tail]
+  const meta = waits && metaW(withWaits) + (stats ? textWidth(stats, 11) + 12 : 0) <= barW ? withWaits : bare
   const steps = a.stepTotal ? `${a.stepDone ?? 0}/${a.stepTotal}${a.stepNote ? ' · ' + a.stepNote : ''}` : ''
   const stepsW = barW
   // The state leads the line in its colour; the reported steps follow it.
@@ -702,18 +710,23 @@ ${statusMark(W - 8, out ? 12 : 16, markOf(a), color)}
 const TITLE_INDENT = 42
 const INDENT_SVG = `<svg xmlns="http://www.w3.org/2000/svg" width="${TITLE_INDENT}" height="1" viewBox="0 0 ${TITLE_INDENT} 1"/>`
 
+// A planned row: the tier and its model, what it waits for, and `ready` once that is done (the wait goes first when short).
 const plannedSvg = (W: number, p: Planned): string => {
   const tier = p.tier in TIER_COLOR ? p.tier : 'other'
   const color = colorOf(tier)
   const textW = W - 42 - 22
-  const meta = [TIER_MODEL[tier] ?? '']
-  if (p.after.length) meta.push(`${tr().after} ${p.after.join(', ')}`)
+  const ready = p.ready ? tr().ready : ''
+  const line = (m: string[]) => `${tier}  ${m.filter(Boolean).join('  ·  ')}${ready ? `  ·  ${ready}` : ''}`
+  const full = [TIER_MODEL[tier] ?? '', afterText(p.after)]
+  const meta = textWidth(line(full), 11) <= textW ? full : [TIER_MODEL[tier] ?? '']
+  const readyW = ready ? textWidth(`  ·  ${ready}`, 11) : 0
+  const metaText = fitText(meta.filter(Boolean).join('  ·  '), 11, Math.max(0, textW - textWidth(`${tier}  `, 11) - readyW))
   return svg(
     W,
     46,
     `${crab(0, 6, tier, true)}
 <text class="s" x="42" y="18" font-family="${FONT}" font-size="13" font-weight="600">${xml(fitText(`${p.n}. ${p.title}`, 13, textW))}</text>
-<text x="42" y="34" font-family="${FONT}" font-size="11"><tspan fill="${color}">${xml(tier)}</tspan><tspan class="m">  ${xml(meta.filter(Boolean).join('  ·  '))}</tspan></text>
+<text x="42" y="34" font-family="${FONT}" font-size="11"><tspan fill="${color}">${xml(tier)}</tspan><tspan class="m">  ${xml(metaText)}</tspan>${ready ? `<tspan class="m">  ·  </tspan><tspan fill="${STATE_COLOR.running}" font-weight="600">${xml(ready)}</tspan>` : ''}</text>
 ${statusMark(W - 8, 16, 'planned', color)}
 <line class="ln" x1="0" y1="45.5" x2="${W}" y2="45.5"/>`,
   )
@@ -1284,6 +1297,7 @@ export const register: Register = (on, options) => {
               properties: {
                 title: { type: 'string' },
                 tier: { type: 'string', enum: ['fable', 'heavy', 'careful', 'medium', 'light'] },
+                after: { type: 'array', items: { type: 'integer' }, description: 'Numbers of the tasks this one waits for (1-based, in the whole task list).' },
               },
               required: ['title'],
             },
@@ -1291,13 +1305,18 @@ export const register: Register = (on, options) => {
           tasks: {
             type: 'array',
             description:
-              'The planned worker tasks in order, numbered from 1. Each title must equal the Agent tool `description` the task will be delegated with, so the panel can match runs to tasks.',
+              'The planned worker tasks in order, numbered from 1. Each title must equal the Agent tool `description` the task will be delegated with, so the panel can match runs to tasks. Give `after` to every task that depends on others; the panel marks a planned task `ready` once all it waits for is done, and every ready task should be launched at once, in parallel.',
             items: {
               type: 'object',
               properties: {
                 title: { type: 'string', description: 'A few words; reused verbatim as the Agent description.' },
                 tier: { type: 'string', enum: ['fable', 'heavy', 'careful', 'medium', 'light'] },
-                after: { type: 'array', items: { type: 'integer' }, description: 'Numbers of the tasks this one waits for.' },
+                after: {
+                  type: 'array',
+                  items: { type: 'integer' },
+                  description:
+                    'Numbers (from 1) of the tasks this one waits for; leave out for a task that can start at once. Unknown numbers, the task itself and waits that close a cycle are ignored.',
+                },
               },
               required: ['title', 'tier'],
             },
@@ -1807,6 +1826,14 @@ export const register: Register = (on, options) => {
     // One flow as the panel draws it, live or from the archive (FlowView in archive-view.tsx says what it takes).
     const flowView = (v: FlowView): FlowDrawing => {
       const { kp, fp, at } = v
+      // The task each run belongs to: its number leads the row's name, its waits go on the model line.
+      const tasks: TaskLike[] = v.tasks ?? []
+      const links = linkRuns(tasks, v.list)
+      const taskFor = (a: AgentRun) => taskOf(tasks, links, a)
+      const nameOf = (a: AgentRun): string => {
+        const t = taskFor(a)
+        return t ? `${t.n}. ${a.description || a.type}` : a.description || a.type
+      }
       const running = v.list.filter(a => a.status === 'running').reverse()
       // Archived rows leave the Finished list; the totals and the planned tasks still count them.
       const finished = v.list.filter(a => a.status !== 'running' && !a.archived).reverse()
@@ -1854,7 +1881,7 @@ export const register: Register = (on, options) => {
                 <Box flexDirection="row" alignItems="center" gap={1} flexGrow={1} flexShrink={1} minWidth={0}>
                   <Box flexShrink={1} minWidth={0} overflow="hidden">
                     <Text bold wrap="truncate-end">
-                      {a.description || a.type}
+                      {nameOf(a)}
                     </Text>
                   </Box>
                   {toArchive && <Box flexShrink={0}>{toArchive}</Box>}
@@ -1862,7 +1889,7 @@ export const register: Register = (on, options) => {
                   {items.length > 0 && <Box flexShrink={0}>{foldButton(a, kp, fp)}</Box>}
                 </Box>
               </Box>
-              <Svg source={agentSvg(W, a, at, { titleOutside: true })} alt={alt} width={W} height={agentHeight(true)} />
+              <Svg source={agentSvg(W, a, at, { titleOutside: true, after: taskFor(a)?.after })} alt={alt} width={W} height={agentHeight(true)} />
               {isUnfolded(a, fp) &&
                 items.map((it, i) => (
                   <Svg key={`${kp}agent-item-${a.id}-${i}`} source={svg(W, ITEM_H, itemSvg(W, it, at, fitText))} alt={itemAlt(it, at)} width={W} height={ITEM_H} />
@@ -1899,9 +1926,15 @@ export const register: Register = (on, options) => {
         const progress = progressOf(a)
         const model = a.effort ? `${modelName(a.model)} · ${a.effort}` : modelName(a.model)
         const steps = a.stepTotal ? `${a.stepDone ?? 0}/${a.stepTotal}${a.stepNote ? ' ' + a.stepNote : ''}` : ''
-        const modelLine = `  ${tier === 'other' ? a.type : tier} · ${model}${a.round > 1 ? ` · ${s.round} ${a.round}` : ''}`
+        const tierWord = tier === 'other' ? a.type : tier
+        const round = a.round > 1 ? ` · ${s.round} ${a.round}` : ''
+        const bareLine = `  ${tierWord} · ${model}${round}`
         // The stats end the model line when they fit there, else they are left out.
-        const stats = fitStats(a, at, ' ', cols - modelLine.length - 3, t => t.length)
+        const stats = fitStats(a, at, ' ', cols - bareLine.length - 3, t => t.length)
+        // The task's waits follow the effort only when the stats keep their room.
+        const waits = afterText(taskFor(a)?.after)
+        const waitLine = `  ${tierWord} · ${model} · ${waits}${round}`
+        const modelLine = waits && waitLine.length + 3 + stats.length <= cols ? waitLine : bareLine
         // The state leads the line in its colour, cut only at the row's width.
         const state = agentState(a)
         const head = stateText(a)
@@ -1913,7 +1946,7 @@ export const register: Register = (on, options) => {
             <Box flexDirection="row" gap={1}>
               <Text color={color}>▣</Text>
               <Text bold wrap="truncate-end">
-                {a.description || a.type}
+                {nameOf(a)}
               </Text>
               {archiveButton(a)}
               <Text color={glyphColor(a, color)}>{STATUS_GLYPH[markOf(a)]}</Text>
@@ -1981,15 +2014,27 @@ export const register: Register = (on, options) => {
           ),
           v.planned.map(pl => {
             const tier = pl.tier in TIER_COLOR ? pl.tier : 'other'
+            const ready = pl.ready ? ` · ${s.ready}` : ''
+            const waits = pl.after.length ? ` · ${afterText(pl.after)}` : ''
+            const head = `  ${tier} · ${TIER_MODEL[tier] ?? ''}`
+            // The wait goes first when the line is short; `ready` stays.
+            const shownWaits = (head + waits + ready).length <= cols ? waits : ''
             return (
               <Box key={`${kp}plan-${pl.n}`} flexDirection="column" marginBottom={1}>
                 <Text dimColor wrap="truncate-end">
                   <Text color={colorOf(tier)}>▢</Text> {pl.n}. {pl.title} ◷
                 </Text>
-                <Text dimColor wrap="truncate-end">
-                  {'  '}
-                  {tier} · {TIER_MODEL[tier] ?? ''}
-                  {pl.after.length ? ` · ${s.after} ${pl.after.join(', ')}` : ''}
+                <Text wrap="truncate-end">
+                  <Text dimColor>
+                    {head}
+                    {shownWaits}
+                  </Text>
+                  {ready ? <Text dimColor>{' · '}</Text> : null}
+                  {ready ? (
+                    <Text color={STATE_COLOR.running} bold>
+                      {s.ready}
+                    </Text>
+                  ) : null}
                 </Text>
               </Box>
             )
@@ -2232,6 +2277,7 @@ export const register: Register = (on, options) => {
           fp: '',
           title,
           list,
+          tasks: f?.tasks ?? [],
           planned,
           at,
           t,
