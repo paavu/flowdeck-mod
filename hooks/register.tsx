@@ -4,7 +4,7 @@ import type { Elements, EngineInterface, Register, RenderChildren } from 'claude
 import type { AgentRun, ArchiveEntry, ArchiveVolume, Flow, Panel, Phase, PlannedTask, PlanStage, Reading, Samples, TaskPlan, UsageWindow } from '../types'
 import { derive, finishItems, hasItemOps, ITEM_H, itemAlt, itemLine, itemsOf, itemSvg, stepItems } from './agent-items'
 import type { StepInput } from './agent-items'
-import { agentState, HOUSEKEEPING, splitHead, stateText } from './agent-state'
+import { agentState, HOUSEKEEPING, isSettled, markOf, progressOf, splitHead, stateText } from './agent-state'
 import { contextRows, contextSvg, toReading } from './context'
 import { EXTRA_FILE, isWorthKeeping, keyOf, planEntry, snapshot, VOLUME_MAX } from './archive'
 import { dataDir, getFile, loadLatest, parseJson, readVolume, saveToProject, saveToStore, writeData } from './archive-store'
@@ -606,6 +606,8 @@ const statusMark = (x: number, y: number, status: string, color: string): string
   if (status === 'running') return `<circle class="live" cx="${x}" cy="${y}" r="3.5" fill="${color}"/>`
   if (status === 'done') return `<path d="M${x - 5} ${y}l3.5 3.5 6.5-7" fill="none" stroke="#3B9C5F" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>`
   if (status === 'failed') return `<path d="M${x - 4} ${y - 4}l8 8M${x + 4} ${y - 4}l-8 8" stroke="#D0453F" stroke-width="1.8" stroke-linecap="round"/>`
+  // Ended OK with steps left: a half-filled amber ring, never the tick.
+  if (status === 'incomplete') return `<circle cx="${x}" cy="${y}" r="5" fill="none" stroke="${STATE_COLOR.needs_input}" stroke-width="1.4"/><path d="M${x} ${y - 5}a5 5 0 0 0 0 10z" fill="${STATE_COLOR.needs_input}"/>`
   return `<circle cx="${x}" cy="${y}" r="5" fill="none" stroke="#9a9a96" stroke-width="1.4"/><path d="M${x} ${y - 2.5}v2.8l1.8 1.2" fill="none" stroke="#9a9a96" stroke-width="1.4" stroke-linecap="round"/>`
 }
 
@@ -639,13 +641,6 @@ const headerHeight = (title: string): number => (title ? 72 : 44)
 const ARCHIVE_ICON = '⤓'
 // The usage reset switch: a clock face, single width and without an emoji form (U+23F1 draws as an emoji in some fonts).
 const RESET_ICON = '◷'
-
-// The task's own progress when the worker reports steps; a finished run is full.
-const progressOf = (a: AgentRun): number | null => {
-  if (a.status === 'done') return 1
-  if (a.stepTotal) return Math.min(1, (a.stepDone ?? 0) / a.stepTotal)
-  return null
-}
 
 const ctxOf = (a: AgentRun): number => (a.contextMax ? Math.min(100, Math.round((a.contextTokens / a.contextMax) * 100)) : 0)
 
@@ -698,7 +693,7 @@ ${out ? '' : `<text class="t" x="42" y="18" font-family="${FONT}" font-size="13"
 ${stats ? `<text class="s" x="${42 + barW}" y="${34 - dy}" text-anchor="end" font-family="${FONT}" font-size="11" font-variant-numeric="tabular-nums">${stats}</text>` : ''}
 ${stepsW > 30 ? `<text x="42" y="${49 - dy}" font-family="${FONT}" font-size="11" font-variant-numeric="tabular-nums"><tspan fill="${state.color}">${xml(lead)}</tspan>${rest ? `<tspan class="t">${xml(rest)}</tspan>` : ''}</text>` : ''}
 <rect class="k" x="42" y="${55 - dy}" width="${barW}" height="4" rx="2"/><rect${progress === null ? ' class="m"' : ''} x="42" y="${55 - dy}" width="${fillW}" height="4" rx="2"${progress === null ? '' : ` fill="${state.color}"`}/>
-${statusMark(W - 8, out ? 12 : 16, a.status, color)}
+${statusMark(W - 8, out ? 12 : 16, markOf(a), color)}
 <line class="ln" x1="0" y1="${H - 0.5}" x2="${W}" y2="${H - 0.5}"/>`,
   )
 }
@@ -752,7 +747,12 @@ const ctxBar = (pct: number, width: number): string => {
   return '█'.repeat(filled) + '░'.repeat(Math.max(0, width - filled))
 }
 
-const STATUS_GLYPH: Record<string, string> = { running: '●', done: '✓', failed: '✗', planned: '◷' }
+const STATUS_GLYPH: Record<string, string> = { running: '●', done: '✓', failed: '✗', incomplete: '◐', planned: '◷' }
+// The terminal glyph's colour: green tick, red cross, amber half ring, else the tier colour.
+const glyphColor = (a: AgentRun, tierColor: string): string => {
+  const mark = markOf(a)
+  return mark === 'failed' ? 'red' : mark === 'done' ? 'green' : mark === 'incomplete' ? STATE_COLOR.needs_input : tierColor
+}
 
 // Asks the engine for /context's breakdown (estimated locally, no token-count calls) and the rate-limit windows, in one call.
 async function refreshContext($: EngineInterface): Promise<void> {
@@ -866,9 +866,10 @@ async function saveArchive($: EngineInterface, entry: ArchiveEntry): Promise<boo
 let archiving: Promise<unknown> = Promise.resolve()
 
 // The finished rows of the flow that can still be archived, newest first as the live Finished list shows them: rows
-// that began before the flow belong to the flow before it.
+// that began before the flow belong to the flow before it. An Incomplete row is not finished work: it stays, and a
+// press on a newer row passes over it.
 const archivable = (list: AgentRun[], meta: Meta | null): AgentRun[] =>
-  list.filter(a => a.status !== 'running' && !a.archived && (!meta || a.startedAt >= meta.startedAt)).reverse()
+  list.filter(a => isSettled(a) && !a.archived && (!meta || a.startedAt >= meta.startedAt)).reverse()
 
 // Archives the row and every older finished row not archived yet: the open flow's entry is saved with all its archived
 // rows (`partial`), and only once it was kept do they leave the live list. Never throws into the press.
@@ -1915,7 +1916,7 @@ export const register: Register = (on, options) => {
                 {a.description || a.type}
               </Text>
               {archiveButton(a)}
-              <Text color={a.status === 'failed' ? 'red' : a.status === 'done' ? 'green' : color}>{STATUS_GLYPH[a.status]}</Text>
+              <Text color={glyphColor(a, color)}>{STATUS_GLYPH[markOf(a)]}</Text>
               {items.length > 0 && foldButton(a, kp, fp)}
             </Box>
             <Text dimColor wrap="truncate-end">
@@ -2256,7 +2257,7 @@ export const register: Register = (on, options) => {
             <Text wrap="truncate-end">
               {[...running, ...finished].map(a => (
                 <Text key={a.id} color={colorOf(tierOf(a.type))}>
-                  {STATUS_GLYPH[a.status]}{' '}
+                  {STATUS_GLYPH[markOf(a)]}{' '}
                 </Text>
               ))}
               {planned.map(pl => (

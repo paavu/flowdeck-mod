@@ -541,7 +541,7 @@ describe('where the Archive button shows', () => {
     const { clock } = engine(on)
     await start($)
     await plan($)
-    await finishedRows($, clock, 3, [], () => $.tool.call({ tool: 'mcp__flowdeck__step', agentId: 'w2', steps: [{ title: 'one' }, { title: 'two' }] } as any))
+    await finishedRows($, clock, 3, [], () => $.tool.call({ tool: 'mcp__flowdeck__step', agentId: 'w2', steps: [{ title: 'one', status: 'done' }, { title: 'two' }] } as any)) // both done once the run ends: a complete row
     for (const [cols, W] of [[31, 240], [46, 360], [120, 900]] as const) {
       const d = await desktop($, cols)
       expect(d.drawn).not.toContain('NaN')
@@ -619,7 +619,7 @@ describe('the small archive icon', () => {
     const { clock } = engine(on)
     await start($)
     await plan($)
-    await finishedRows($, clock, 2, [], () => $.tool.call({ tool: 'mcp__flowdeck__step', agentId: 'w2', steps: [{ title: 'one' }, { title: 'two' }] } as any))
+    await finishedRows($, clock, 2, [], () => $.tool.call({ tool: 'mcp__flowdeck__step', agentId: 'w2', steps: [{ title: 'one', status: 'done' }, { title: 'two' }] } as any)) // both done once the run ends: a complete row
     clock.now = NOW + 130_000
     await spawn($, 'w9', 'still going')
     await turnStep($, 'w9')
@@ -676,7 +676,7 @@ describe('the small archive icon', () => {
     const { clock } = engine(on)
     await start($)
     await plan($)
-    await finishedRows($, clock, 2, [], () => $.tool.call({ tool: 'mcp__flowdeck__step', agentId: 'w2', steps: [{ title: 'one' }, { title: 'two' }] } as any))
+    await finishedRows($, clock, 2, [], () => $.tool.call({ tool: 'mcp__flowdeck__step', agentId: 'w2', steps: [{ title: 'one', status: 'done' }, { title: 'two' }] } as any)) // both done once the run ends: a complete row
     for (let cols = 24; cols <= 80; cols += 4) {
       const p = await pane($, 'terminal', cols)
       const root = await p.drawn()
