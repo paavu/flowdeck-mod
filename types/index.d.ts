@@ -38,6 +38,8 @@ export type Flow = {
   isFinished: boolean
   isLinked: boolean
   tasks: PlannedTask[]
+  /** The task numbers (from 1) accepted after review, when `progress` named them; without it the first `done` tasks count as accepted. */
+  accepted?: number[]
 }
 
 export type AgentStatus = 'running' | 'done' | 'failed'
@@ -91,6 +93,8 @@ export type ArchiveEntry = {
   done: number
   total: number
   tasks: ArchiveTask[]
+  /** The task numbers (from 1) accepted after review, when the flow named them; without it the first `done` tasks count. */
+  accepted?: number[]
   cost: number // USD
   tokens: number
   time: number // ms

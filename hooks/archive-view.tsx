@@ -4,6 +4,7 @@ import type { Elements, RenderChildren } from 'claude-code'
 
 import type { AgentRun, ArchiveAgent, ArchiveEntry, ArchiveVolume, Panel, PlannedTask, TaskPlan } from '../types'
 import { formatEntry, groupLine, keyOf, spanOf, spanText } from './archive'
+import { acceptedOf } from './tasks'
 
 export const ARCHIVE_PAGE = 10
 
@@ -23,7 +24,9 @@ export type FlowView = {
   title: string
   list: AgentRun[]
   /** The flow's tasks in plan order: a run that belongs to one shows its number and what it waits for. */
-  tasks?: { title: string; after?: number[] }[]
+  tasks?: { title: string; tier?: string; after?: number[] }[]
+  /** The accepted task numbers (from 1): a run of one never hides an Incomplete state; one without a run is an Accepted row. */
+  accepted?: number[]
   planned: Planned[]
   at: number
   t: Totals
@@ -87,6 +90,7 @@ function archiveGroup(v: ArchiveView, entry: ArchiveEntry, i: number): RenderChi
         title: '',
         list: runs,
         tasks: entry.tasks,
+        accepted: acceptedOf(entry),
         planned: [],
         at: entry.endedAt,
         t: { cost: entry.cost, tokens: entry.tokens, time: entry.time },

@@ -2,6 +2,10 @@
 
 Versions are `M.m.xxxx`; every build bumps the 4-digit build number. Details and rulings: `docs/ledger.md`, `docs/design.md`.
 
+## 1.0.0022 (2026-10-29)
+- `progress` `done` takes the accepted task numbers (`done: [1, 3]`); the flow stores which tasks were accepted. An accepted task without a worker run is an `Accepted · no worker run` row; an accepted task whose run is Incomplete reads `Incomplete · accepted`. A plain count still means the first N tasks.
+- Workers must close their step list (every step `done` or `failed`, skipped ones with a note) before their final report; the orchestrator returns an Incomplete run instead of accepting it.
+
 ## 1.0.0021 (2026-10-29)
 - Workers are linked to their planned task by the mod itself: the exact title first, then a leading task number in the Agent description (`#3 …`, `[3] …`, `task 3 …`), then the closest title, then the only open task of the worker's tier. A task is no longer shown as waiting while a worker started with other words runs it.
 - The skill and the `progress` tool ask for descriptions that begin with the task number (`#3 History module`).

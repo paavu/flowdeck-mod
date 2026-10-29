@@ -3,6 +3,7 @@
 import type { AgentRun, AgentStatus, ArchiveAgent, ArchiveEntry, ArchiveTask, ArchiveVolume, Flow, PlanStage, PlanState, PlanStep, StepStatus, TaskPlan } from '../types'
 import { itemsOf } from './agent-items'
 import { isFinished, isStoredStep } from './plan'
+import { acceptedOf } from './tasks'
 import { hhmm } from './time'
 
 const MAX_TASKS = 100
@@ -125,6 +126,7 @@ export function snapshot(input: {
     done: flow.done,
     total: flow.total,
     tasks: flow.tasks.slice(0, MAX_TASKS).map(t => ({ title: cap(t.title), tier: cap(t.tier), after: afterOf(t.after).slice(0, MAX_TASKS) })),
+    ...(flow.accepted ? { accepted: afterOf(flow.accepted).slice(0, MAX_TASKS) } : {}),
     cost: agents.reduce((s, a) => s + a.costUsd, 0),
     tokens: agents.reduce((s, a) => s + a.tokens, 0),
     // The span from the first start to the last end, as the panel header counts it (parallel runs overlap).
@@ -371,6 +373,7 @@ function parseEntry(v: unknown): ArchiveEntry | null {
   const entry: ArchiveEntry = { id, project, title, startedAt: startedAt!, endedAt: endedAt!, status, done: done!, total: total!, tasks, cost: cost!, tokens: tokens!, time: time! }
   if (Array.isArray(o.agents)) entry.agents = agentsOf(o.agents).slice(-MAX_AGENTS)
   if (o.partial === true) entry.partial = true
+  if (Array.isArray(o.accepted)) entry.accepted = afterOf(o.accepted).slice(0, MAX_TASKS)
   const plan = planOf(o.plan)
   if (plan && plan.stages.length) entry.plan = plan
   return entry
@@ -429,7 +432,8 @@ export function spanText(from: number, to: number, tz?: string): string {
 export function formatEntry(entry: ArchiveEntry, tz?: string): { head: string; line: string; lines: string[] } {
   const head = entry.title.trim() || 'Untitled flow'
   const line = `${entryDate(entry, tz)} · ${entry.done}/${entry.total} · ${statusOf(entry)}`
-  // The flow only counts done tasks, not which ones, so the first `done` in plan order are shown done.
-  const lines = entry.tasks.map((t, i) => `${i < entry.done ? '✓' : '○'} ${t.title} (${t.tier})`)
+  // The accepted tasks are ticked: the ones the flow named, or for an older flow that only counted them the first `done`.
+  const accepted = new Set(acceptedOf(entry))
+  const lines = entry.tasks.map((t, i) => `${accepted.has(i + 1) ? '✓' : '○'} ${t.title} (${t.tier})`)
   return { head, line, lines }
 }

@@ -128,9 +128,14 @@ export function taskOf(tasks: TaskLike[], links: Map<string, number>, a: RunLike
   return t && i !== undefined ? { n: i + 1, after: (t.after ?? []).filter(d => Number.isInteger(d) && d > 0) } : null
 }
 
-// A task is done when a run that belongs to it is complete, or the session task list completed it.
-const doneTasks = (tasks: TaskLike[], runs: RunLike[], links: Map<string, number>): Set<number> => {
-  const done = new Set<number>()
+// The accepted task numbers (from 1): the ones `progress` named, or for a caller that only sent a count, the first `done`
+// tasks in plan order (all an older flow or archive entry can tell). Numbers past the task list are left out.
+export const acceptedOf = (f: { accepted?: number[]; done: number; tasks: unknown[] }): number[] =>
+  (f.accepted ?? Array.from({ length: Math.max(0, Math.min(f.done, f.tasks.length)) }, (_, i) => i + 1)).filter(n => Number.isInteger(n) && n >= 1 && n <= f.tasks.length)
+
+// A task is done when a run that belongs to it is complete, the session task list completed it, or it was accepted.
+const doneTasks = (tasks: TaskLike[], runs: RunLike[], links: Map<string, number>, accepted: number[]): Set<number> => {
+  const done = new Set<number>(accepted.map(n => n - 1))
   tasks.forEach((t, i) => t.counted && done.add(i))
   for (const a of runs) {
     const i = links.get(a.id)
@@ -139,13 +144,20 @@ const doneTasks = (tasks: TaskLike[], runs: RunLike[], links: Map<string, number
   return done
 }
 
-// The tasks no run was started for, numbered in plan order; `ready` when every task it waits for is done (a task that
-// waits for nothing is ready too): those can be started now, in parallel.
-export function unstarted<T extends TaskLike>(tasks: T[], runs: RunLike[]): Numbered<T>[] {
+// The tasks no run was started for and not accepted, numbered in plan order; `ready` when every task it waits for is done
+// (a task that waits for nothing is ready too): those can be started now, in parallel.
+export function unstarted<T extends TaskLike>(tasks: T[], runs: RunLike[], accepted: number[] = []): Numbered<T>[] {
   const links = linkRuns(tasks, runs)
   const started = new Set(links.values())
-  const done = doneTasks(tasks, runs, links)
+  const done = doneTasks(tasks, runs, links, accepted)
+  const isAccepted = new Set(accepted)
   return tasks
     .map((t, i) => ({ ...t, n: i + 1, ready: (t.after ?? []).every(d => done.has(d - 1)) }))
-    .filter((_, i) => !started.has(i))
+    .filter((_, i) => !started.has(i) && !isAccepted.has(i + 1))
+}
+
+// The accepted tasks no run belongs to (the orchestrator did them, or one run covered several): drawn as Accepted rows.
+export function acceptedOnly<T extends TaskLike>(tasks: T[], links: Map<string, number>, accepted: number[]): Numbered<T>[] {
+  const started = new Set(links.values())
+  return [...new Set(accepted)].filter(n => !started.has(n - 1) && tasks[n - 1]).sort((a, b) => a - b).map(n => ({ ...tasks[n - 1]!, n }))
 }

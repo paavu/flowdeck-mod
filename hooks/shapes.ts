@@ -78,6 +78,7 @@ export function asFlow(v: unknown): Flow | null {
     isFinished: bool(v.isFinished, false),
     isLinked: bool(v.isLinked, false),
     tasks: (Array.isArray(v.tasks) ? v.tasks : []).flatMap(asTask),
+    ...(Array.isArray(v.accepted) ? { accepted: v.accepted.filter((n): n is number => Number.isInteger(n) && n > 0) } : {}),
   }
 }
 
@@ -128,6 +129,7 @@ const isEntry = (e: unknown): e is ArchiveEntry =>
   (e.status === 'finished' || e.status === 'open') &&
   Array.isArray(e.tasks) &&
   (e.agents === undefined || Array.isArray(e.agents)) &&
+  (e.accepted === undefined || (Array.isArray(e.accepted) && e.accepted.every(n => Number.isInteger(n) && n > 0))) &&
   ENTRY_NUMS.every(k => num(e[k]) !== undefined)
 
 export const asArchive = (v: unknown): ArchiveEntry[] => (Array.isArray(v) ? v.flatMap(e => (isEntry(e) ? [e] : parseArchive([e]))) : [])

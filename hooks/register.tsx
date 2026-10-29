@@ -4,7 +4,7 @@ import type { Elements, EngineInterface, Register, RenderChildren } from 'claude
 import type { AgentRun, ArchiveEntry, ArchiveVolume, Flow, Panel, Phase, PlannedTask, PlanStage, Reading, Samples, TaskPlan, UsageWindow } from '../types'
 import { derive, finishItems, hasItemOps, ITEM_H, itemAlt, itemLine, itemsOf, itemSvg, stepItems } from './agent-items'
 import type { StepInput } from './agent-items'
-import { agentState, HOUSEKEEPING, isSettled, markOf, progressOf, splitHead, stateText } from './agent-state'
+import { agentState, HOUSEKEEPING, isIncomplete, isSettled, markOf, progressOf, splitHead, stateText } from './agent-state'
 import { contextRows, contextSvg, toReading } from './context'
 import { EXTRA_FILE, isWorthKeeping, keyOf, planEntry, snapshot, VOLUME_MAX } from './archive'
 import { dataDir, getFile, loadLatest, parseJson, readVolume, saveToProject, saveToStore, writeData } from './archive-store'
@@ -13,7 +13,7 @@ import { ARCHIVE_PAGE, archiveSection, UNREADABLE } from './archive-view'
 import type { FlowDrawing, FlowView, Planned } from './archive-view'
 import { importPlan, isFinished, isStoredStep, normalize, percent, PLAN_ID, placeBar, planId, str, where } from './plan'
 import { planBandSvg, planBandText, planRows, planSvg, STATE_COLOR, stateLabel } from './plan-view'
-import { cleanAfter, linkRuns, norm, taskOf, taskTag, unstarted, workerTier } from './tasks'
+import { acceptedOf, acceptedOnly, cleanAfter, linkRuns, norm, taskOf, taskTag, unstarted, workerTier } from './tasks'
 import type { TaskLike } from './tasks'
 import { asAgents, asArchive, asFlow, asMeta, asNow, asPanel, asReading, asUsage, asVolumes, PANEL_DEFAULT } from './shapes'
 import { live, record, resetKey, resets, toWindows, usageRows, usageSvg } from './usage'
@@ -84,7 +84,8 @@ const DONE = '#5fbf8f'
 type ProgressInput = {
   title?: string
   total?: number
-  done?: number
+  /** The accepted count, or the numbers (from 1) of the tasks accepted. */
+  done?: number | number[]
   phase?: Phase
   finished?: boolean
   restart?: boolean
@@ -127,6 +128,9 @@ const STRINGS = {
     review: 'Review',
     busy: 'running',
     ready: 'ready',
+    acceptedRow: 'Accepted',
+    noRun: 'no worker run',
+    acceptedTag: 'accepted',
   },
   ru: {
     pane: 'flowdeck',
@@ -156,6 +160,9 @@ const STRINGS = {
     review: 'Ревью',
     busy: 'в работе',
     ready: 'можно начать',
+    acceptedRow: 'Принята',
+    noRun: 'без запуска исполнителя',
+    acceptedTag: 'принята',
   },
 } as const
 
@@ -237,13 +244,19 @@ const merge = (prev: Flow | null, input: ProgressInput): Flow => {
   const tasks = cleanAfter([...planned, ...fresh])
   const asked = Math.max(0, Math.round(input.total ?? (fresh.length && !input.tasks ? base.total + fresh.length : input.tasks ? tasks.length : base.total)))
   const total = base.isLinked ? Math.max(asked, tasks.length) : asked
-  const done = Math.min(total || Infinity, Math.max(0, Math.round(input.done ?? base.done)))
+  // Task numbers name which tasks were accepted, on top of those accepted before (a count before it means the first ones);
+  // a bare count still works and leaves the named list as it is.
+  const named = Array.isArray(input.done) ? input.done.filter(n => Number.isInteger(n) && n >= 1 && n <= tasks.length) : null
+  const accepted = named ? [...new Set([...acceptedOf({ ...base, tasks }), ...named])].sort((a, b) => a - b) : base.accepted
+  const count = named ? accepted?.length ?? 0 : typeof input.done === 'number' && Number.isFinite(input.done) ? input.done : base.done
+  const done = Math.min(total || Infinity, Math.max(0, Math.round(count)))
   const phase = input.phase && PHASES.includes(input.phase) ? input.phase : base.phase
   return {
     ...base,
     title: input.title?.trim() || base.title,
     total,
     done,
+    ...(accepted ? { accepted } : {}),
     phase: input.finished ? 'close' : phase,
     isFinished: input.finished === true,
     isLinked: true,
@@ -458,7 +471,7 @@ const fmtTime = (ms: number): string => {
 
 const elapsed = (a: AgentRun, at: number): number => (a.endedAt ?? Math.max(at, a.startedAt)) - a.startedAt
 
-const plannedOf = (f: Flow | null, list: AgentRun[]): Planned[] => (!f || f.isFinished ? [] : unstarted(f.tasks ?? [], list))
+const plannedOf = (f: Flow | null, list: AgentRun[]): Planned[] => (!f || f.isFinished ? [] : unstarted(f.tasks ?? [], list, acceptedOf(f)))
 
 const totals = (list: AgentRun[], at: number) => {
   const cost = list.reduce((s, a) => s + a.costUsd, 0)
@@ -658,9 +671,12 @@ const agentHeight = (titleOutside = false): number => AGENT_H - (titleOutside ? 
 // What a task waits for, as its meta line says it: `after 2, 3`.
 const afterText = (after: number[] | undefined): string => (after?.length ? `${tr().after} ${after.join(', ')}` : '')
 
+// The state words of a row: an Incomplete run of an accepted task says both, the acceptance never hides the open steps.
+const headOf = (a: AgentRun, isAccepted = false): string => (isAccepted && isIncomplete(a) ? `${stateText(a)} · ${tr().acceptedTag}` : stateText(a))
+
 // `after` is the run's task's waits; it follows the effort on the meta line and is the first thing dropped when the
 // line is short: it never takes room from the stats.
-const agentSvg = (W: number, a: AgentRun, at: number, opts: { titleOutside?: boolean; after?: number[] } = {}): string => {
+const agentSvg = (W: number, a: AgentRun, at: number, opts: { titleOutside?: boolean; after?: number[]; isAccepted?: boolean } = {}): string => {
   const out = opts.titleOutside === true
   const dy = out ? TITLE_LINE : 0
   const s = tr()
@@ -686,7 +702,7 @@ const agentSvg = (W: number, a: AgentRun, at: number, opts: { titleOutside?: boo
   const stepsW = barW
   // The state leads the line in its colour; the reported steps follow it.
   const state = agentState(a)
-  const head = stateText(a)
+  const head = headOf(a, opts.isAccepted)
   const [lead, rest] = splitHead(fitText(steps ? `${head} · ${steps}` : head, 11, stepsW), head)
   // Without reported steps the bar falls back to the context, drawn grey.
   const fillW = Math.round(barW * (progress ?? ctx / 100))
@@ -728,6 +744,24 @@ const plannedSvg = (W: number, p: Planned): string => {
 <text x="42" y="34" font-family="${FONT}" font-size="11"><tspan fill="${color}">${xml(tier)}</tspan><tspan class="m">  ${xml(metaText)}</tspan>${ready ? `<tspan class="m">  ·  </tspan><tspan fill="${STATE_COLOR.running}" font-weight="600">${xml(ready)}</tspan>` : ''}</text>
 ${statusMark(W - 8, 16, 'planned', color)}
 <line class="ln" x1="0" y1="45.5" x2="${W}" y2="45.5"/>`,
+  )
+}
+
+// An accepted task no worker run belongs to: its number and title, its tier, `Accepted · no worker run` in green and the
+// tick; no step bar and no archive icon.
+const ACCEPTED_H = 46
+const acceptedSvg = (W: number, p: Planned): string => {
+  const tier = p.tier in TIER_COLOR ? p.tier : 'other'
+  const textW = W - 42 - 22
+  const word = `${tr().acceptedRow} · ${tr().noRun}`
+  return svg(
+    W,
+    ACCEPTED_H,
+    `${crab(0, 6, tier, true)}
+<text class="t" x="42" y="18" font-family="${FONT}" font-size="13" font-weight="600">${xml(fitText(`${p.n}. ${p.title}`, 13, textW))}</text>
+<text x="42" y="34" font-family="${FONT}" font-size="11"><tspan fill="${colorOf(tier)}">${xml(tier)}</tspan><tspan fill="${STATE_COLOR.done}">  ${xml(fitText(word, 11, Math.max(0, textW - textWidth(`${tier}  `, 11))))}</tspan></text>
+${statusMark(W - 8, 16, 'done', colorOf(tier))}
+<line class="ln" x1="0" y1="${ACCEPTED_H - 0.5}" x2="${W}" y2="${ACCEPTED_H - 0.5}"/>`,
   )
 }
 
@@ -784,6 +818,8 @@ async function mirrorTasks($: EngineInterface, items: TodoItem[]): Promise<void>
   await updateFlow($, prev => {
     if (!prev || !prev.isLinked || prev.isFinished) return prev
     const tasks = [...prev.tasks]
+    // A flow that names its accepted tasks names the completed items too.
+    const accepted = prev.accepted ? [...prev.accepted] : undefined
     let total = prev.total
     let done = prev.done
     for (const item of items) {
@@ -791,13 +827,17 @@ async function mirrorTasks($: EngineInterface, items: TodoItem[]): Promise<void>
       if (at < 0) {
         tasks.push({ title: item.title, tier: 'medium', after: [], mirrored: true, counted: item.completed })
         total++
-        if (item.completed) done++
+        if (item.completed) {
+          done++
+          accepted?.push(tasks.length)
+        }
       } else if (tasks[at]!.mirrored && item.completed && !tasks[at]!.counted) {
         tasks[at] = { ...tasks[at]!, counted: true }
         done++
+        accepted?.push(at + 1)
       }
     }
-    return { ...prev, tasks, total, done: Math.min(total, done) }
+    return { ...prev, tasks, total, done: Math.min(total, done), ...(accepted ? { accepted } : {}) }
   })
 }
 
@@ -1272,7 +1312,7 @@ export const register: Register = (on, options) => {
       name: 'progress',
       description:
         'Report /flowdeck progress to the progress bar above the prompt and the agents panel. ' +
-        'Call it after presenting the plan (title, total, tasks, phase "delegate"), each time a task is accepted (done), ' +
+        'Call it after presenting the plan (title, total, tasks, phase "delegate"), each time a task is accepted (done: [its number]), ' +
         'when switching phase or re-planning (tasks), phase "close" when the current work is done, and finished: true only when the user ends the flow. ' +
         'For a new /flowdeck <task> while a flow is linked, send the new plan with restart: true: the open flow is finished first and the new one starts. Fields left out keep their previous value.',
       inputSchema: {
@@ -1280,7 +1320,11 @@ export const register: Register = (on, options) => {
         properties: {
           title: { type: 'string', description: 'Short name of the overall task, a few words.' },
           total: { type: 'integer', minimum: 0, description: 'Number of planned worker tasks.' },
-          done: { type: 'integer', minimum: 0, description: 'Number of tasks accepted after review.' },
+          done: {
+            description:
+              'The tasks accepted after review: their numbers (from 1), e.g. [1, 3], added to those accepted before. Name them, so the panel knows which tasks are done; a task accepted without a worker run (you did it, or one run covered it) shows as Accepted. A plain count still works and means the first N tasks.',
+            anyOf: [{ type: 'array', items: { type: 'integer', minimum: 1 } }, { type: 'integer', minimum: 0 }],
+          },
           phase: { type: 'string', enum: [...PHASES] },
           finished: { type: 'boolean', description: 'True once the flow is closed.' },
           restart: {
@@ -1837,14 +1881,22 @@ export const register: Register = (on, options) => {
         const tag = taskTag(d)
         return `${t.n}. ${tag.n === t.n ? tag.rest : d}`
       }
+      // Accepted tasks: a run of one that stays Incomplete says so; one no run belongs to is an Accepted row of its own,
+      // at the end of the Finished list.
+      const accepted = v.accepted ?? []
+      const isAccepted = (a: AgentRun): boolean => {
+        const t = taskFor(a)
+        return !!t && accepted.includes(t.n)
+      }
+      const acceptedRows: Planned[] = acceptedOnly(tasks, links, accepted).map(t => ({ title: t.title, tier: t.tier ?? '', after: t.after ?? [], n: t.n }))
       const running = v.list.filter(a => a.status === 'running').reverse()
       // Archived rows leave the Finished list; the totals and the planned tasks still count them.
       const finished = v.list.filter(a => a.status !== 'running' && !a.archived).reverse()
       const archivedCount = v.list.filter(a => a.status !== 'running' && a.archived).length
-      const isEmpty = v.list.length === 0 && v.planned.length === 0
+      const isEmpty = v.list.length === 0 && v.planned.length === 0 && acceptedRows.length === 0
       // The archive's flat list: every row newest first, with no Running heading and no Finished fold.
       const flat = v.flat ? v.list.slice().reverse() : []
-      const doneLabel = v.flat ? '' : `${v.isDoneCollapsed ? '▸' : '▾'} ${s.finished} · ${finished.length}`
+      const doneLabel = v.flat ? '' : `${v.isDoneCollapsed ? '▸' : '▾'} ${s.finished} · ${finished.length + acceptedRows.length}`
       const toggleDone = v.flat ? null : archivedCount > 0 ? (
         <Button key={v.doneKey} plain onPress={v.onDone}>
           {doneLabel}
@@ -1853,7 +1905,7 @@ export const register: Register = (on, options) => {
       ) : (
         <Button key={v.doneKey} label={doneLabel} plain onPress={v.onDone} />
       )
-      const hasDone = finished.length > 0 || archivedCount > 0
+      const hasDone = finished.length > 0 || archivedCount > 0 || acceptedRows.length > 0
       const archiveButton = (a: AgentRun) =>
         v.archive?.can(a) ? <Button key={`archive-item-${a.id}`} label={ARCHIVE_ICON} plain dimColor onPress={() => v.archive?.press(a)} /> : null
       // A row that throws draws one dim line in its place; the other rows still draw.
@@ -1892,7 +1944,7 @@ export const register: Register = (on, options) => {
                   {items.length > 0 && <Box flexShrink={0}>{foldButton(a, kp, fp)}</Box>}
                 </Box>
               </Box>
-              <Svg source={agentSvg(W, a, at, { titleOutside: true, after: taskFor(a)?.after })} alt={alt} width={W} height={agentHeight(true)} />
+              <Svg source={agentSvg(W, a, at, { titleOutside: true, after: taskFor(a)?.after, isAccepted: isAccepted(a) })} alt={alt} width={W} height={agentHeight(true)} />
               {isUnfolded(a, fp) &&
                 items.map((it, i) => (
                   <Svg key={`${kp}agent-item-${a.id}-${i}`} source={svg(W, ITEM_H, itemSvg(W, it, at, fitText))} alt={itemAlt(it, at)} width={W} height={ITEM_H} />
@@ -1900,6 +1952,9 @@ export const register: Register = (on, options) => {
             </Box>
           )
         }
+        const acceptedRow = (pl: Planned) => (
+          <Svg key={`${kp}accepted-${pl.n}`} source={acceptedSvg(W, pl)} alt={`${pl.n}. ${pl.title}: ${s.acceptedRow} · ${s.noRun}`} width={W} height={ACCEPTED_H} />
+        )
         return {
           header: [
             <Svg source={headerSvg(W, v.title, v.t)} alt={v.title ? `${v.title}: ${viewSummary}` : viewSummary} width={W} height={headerHeight(v.title)} />,
@@ -1908,12 +1963,13 @@ export const register: Register = (on, options) => {
           body: () => [
             isEmpty && <Text dimColor>{s.empty}</Text>,
             ...(v.flat
-              ? [flat.map(a => guard(a, () => agentRow(a, a.status === 'running' ? s.isRunning : s.isFinished)))]
+              ? [flat.map(a => guard(a, () => agentRow(a, a.status === 'running' ? s.isRunning : s.isFinished))), acceptedRows.map(acceptedRow)]
               : [
                   running.length > 0 && section(`${kp}h-run`, `${s.running} · ${running.length}`),
                   running.map(a => guard(a, () => agentRow(a, s.isRunning))),
                   hasDone && toggleDone,
                   !v.isDoneCollapsed && finished.map(a => guard(a, () => agentRow(a, s.isFinished))),
+                  !v.isDoneCollapsed && acceptedRows.map(acceptedRow),
                 ]),
             v.planned.length > 0 && section(`${kp}h-plan`, `${s.planned} · ${v.planned.length}`),
             v.planned.map(pl => (
@@ -1940,7 +1996,7 @@ export const register: Register = (on, options) => {
         const modelLine = waits && waitLine.length + 3 + stats.length <= cols ? waitLine : bareLine
         // The state leads the line in its colour, cut only at the row's width.
         const state = agentState(a)
-        const head = stateText(a)
+        const head = headOf(a, isAccepted(a))
         const room = Math.max(state.name.length + 1, cols - 2 - barW - 1)
         const [lead, rest] = splitHead(clip(steps ? `${head} · ${steps}` : head, room), head)
         const items = itemsOf(a.items)
@@ -1982,6 +2038,22 @@ export const register: Register = (on, options) => {
           </Box>
         )
       }
+      const acceptedLine = (pl: Planned) => {
+        const tier = pl.tier in TIER_COLOR ? pl.tier : 'other'
+        return (
+          <Box key={`${kp}accepted-${pl.n}`} flexDirection="column" marginBottom={1}>
+            <Text wrap="truncate-end">
+              <Text color="green">✓</Text> {pl.n}. {pl.title}
+            </Text>
+            <Text wrap="truncate-end">
+              {'  '}
+              <Text color={colorOf(tier)}>{tier}</Text>
+              {' · '}
+              <Text color={STATE_COLOR.done}>{`${s.acceptedRow} · ${s.noRun}`}</Text>
+            </Text>
+          </Box>
+        )
+      }
       return {
         header: [
           (v.title || !v.flat) && (
@@ -1999,7 +2071,7 @@ export const register: Register = (on, options) => {
         body: () => [
           isEmpty && <Text dimColor>{s.empty}</Text>,
           ...(v.flat
-            ? [flat.map(a => guard(a, () => row(a)))]
+            ? [flat.map(a => guard(a, () => row(a))), acceptedRows.map(acceptedLine)]
             : [
                 running.length > 0 && (
                   <Text dimColor>
@@ -2009,6 +2081,7 @@ export const register: Register = (on, options) => {
                 running.map(a => guard(a, () => row(a))),
                 hasDone && toggleDone,
                 !v.isDoneCollapsed && finished.map(a => guard(a, () => row(a))),
+                !v.isDoneCollapsed && acceptedRows.map(acceptedLine),
               ]),
           v.planned.length > 0 && (
             <Text dimColor>
@@ -2281,6 +2354,7 @@ export const register: Register = (on, options) => {
           title,
           list,
           tasks: f?.tasks ?? [],
+          accepted: f ? acceptedOf(f) : [],
           planned,
           at,
           t,
