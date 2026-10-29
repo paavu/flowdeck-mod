@@ -180,6 +180,8 @@ declare module 'claude-code' {
       volumes: ArchiveVolume[]
       flowMeta: { startedAt: number; project: string } | null
       plans: TaskPlan[]
+      /** Why the band above the prompt last failed in this load (the panel's `band error` line), '' when it has not. */
+      bandError: string
     }
   }
 }

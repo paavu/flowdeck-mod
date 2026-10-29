@@ -2,6 +2,11 @@
 
 Versions are `M.m.xxxx`; every build bumps the 4-digit build number. Details and rulings: `docs/ledger.md`, `docs/design.md`.
 
+## 1.0.0023 (2026-10-29)
+- A band that cannot be drawn says why: one dim transcript line per reason (`flowdeck: the band above the prompt could not be drawn: <reason>`, also in the debug log) and a `band error: <reason>` line under the panel's top buttons until the next reload. It still gives way to what other mods draw there.
+- When what is drawn below the band fails, the flow row is drawn without it instead of disappearing.
+- README: a mod listed before flowdeck that answers the band itself (replay-theater, after any turn that edited files) hides flowdeck's band; list flowdeck before it. Presses on buttons drawn before `/reload-plugins` are refused by the engine.
+
 ## 1.0.0022 (2026-10-29)
 - `progress` `done` takes the accepted task numbers (`done: [1, 3]`); the flow stores which tasks were accepted. An accepted task without a worker run is an `Accepted · no worker run` row; an accepted task whose run is Incomplete reads `Incomplete · accepted`. A plain count still means the first N tasks.
 - Workers must close their step list (every step `done` or `failed`, skipped ones with a note) before their final report; the orchestrator returns an Incomplete run instead of accepting it.

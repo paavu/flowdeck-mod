@@ -29,6 +29,8 @@ const archive = atom({ plugin: 'flowdeck', key: 'archive' } as const, [] as Arch
 const volumes = atom({ plugin: 'flowdeck', key: 'volumes' } as const, [] as ArchiveVolume[])
 const flowMeta = atom({ plugin: 'flowdeck', key: 'flowMeta' } as const, null as { startedAt: number; project: string } | null)
 const plans = atom({ plugin: 'flowdeck', key: 'plans' } as const, [] as TaskPlan[])
+// Why the band above the prompt last failed in this load, '' when it has not; the panel shows it, the band never reads it.
+const bandError = atom({ plugin: 'flowdeck', key: 'bandError' } as const, '')
 
 // A reload keeps the held values an older flowdeck wrote, in its older shape: every read goes through its normalizer
 // (shapes.ts), and every update hands its change the normalized value. A change that returns that value unchanged hands
@@ -1196,6 +1198,25 @@ async function showAgent($: EngineInterface, agentId: string, endedTool?: string
   shown.set(agentId, { tool, isAsked }) // an agent the panel does not list is skipped the same way
 }
 
+// The reasons the band failed with in this load: each is logged once, since a band that keeps failing redraws often (a
+// refused tree is known only after the hook returned, so a draw cannot tell it worked).
+const bandFaults = new Set<string>()
+
+// A band that fails gives way to what is drawn below it; the reason goes to the transcript as a dim line the model does not
+// read (the debug log has it too) and to the panel's `band error` line, so a band that is missing says why. A drawing may
+// not write held values, so the panel's line is written by a timer of its own.
+function noteBandFault($: EngineInterface, why: string): void {
+  const text = why.replace(/\s+/g, ' ').trim().slice(0, 300) || 'unknown error'
+  if (bandFaults.has(text) || bandFaults.size >= 20) return
+  bandFaults.add(text)
+  try {
+    $.ui.log(`flowdeck: the band above the prompt could not be drawn: ${text}`)
+    $.clock.after(1, () => void update($, bandError, () => text).catch(() => {}))
+  } catch {
+    // Saying so never stands in the band's way.
+  }
+}
+
 // The buttons on top of the panel. They read only the panel's own toggles, so the panel can draw them whatever else fails.
 function topToggleRow($: EngineInterface, ui: Pick<Elements['desktop'], 'Box' | 'Button'>, p: Panel): RenderChildren {
   const { Box, Button } = ui
@@ -1308,6 +1329,9 @@ export const register: Register = (on, options) => {
       await update($, plans, () => mine)
     }
     void refreshContext($).catch(() => {})
+    // A (re)load starts with no band error: one that still happens is said again.
+    bandFaults.clear()
+    if (await read($, bandError).catch(() => '')) await update($, bandError, () => '').catch(() => '')
     await $.tool.register({
       name: 'progress',
       description:
@@ -1842,6 +1866,9 @@ export const register: Register = (on, options) => {
       }
     }
     const topToggles = topToggleRow($, { Box, Button }, p)
+    // Why the band above the prompt failed in this load, under the buttons (the Band button is among them).
+    const fault: unknown = await read($, bandError).catch(() => '')
+    const bandLine = typeof fault === 'string' && fault ? <Text dimColor>{`band error: ${fault}`}</Text> : null
     // An agent that reported its steps folds them out under its row; open only in this session.
     // `fp` prefixes an archive group's fold state (`<entryId>:<agentId>`), so folding a row there never folds the live one.
     const isUnfolded = (a: AgentRun, fp = '') => (p.openAgents ?? []).includes(fp + a.id)
@@ -2409,6 +2436,7 @@ export const register: Register = (on, options) => {
         <Box flexDirection="column" gap={1}>
           {flowPart.top}
           {topToggles}
+          {bandLine}
           {contextSection}
           {usageSection}
           {plansSection}
@@ -2420,6 +2448,7 @@ export const register: Register = (on, options) => {
     return (
       <Box flexDirection="column">
         {topToggles}
+        {bandLine}
         {contextSection}
         {usageSection}
         {plansSection}
@@ -2447,7 +2476,8 @@ export const register: Register = (on, options) => {
     const open = [...(await readPlans($))].reverse().filter(pl => pl.state === 'running' || pl.state === 'needs_input' || pl.state === 'error').slice(0, 2)
     if (f === null && open.length === 0) return next(e)
 
-    const theirs = await next(e) // what other mods and Claude Code draw here stays, below this row
+    // What other mods and Claude Code draw here stays, below this row; when that fails, the row is drawn without it.
+    const theirs = await next(e).catch((): RenderChildren => null)
     const ui = $.ui.resolve(e)
     const { Box, Text, Button } = ui
     const planNow = open.length ? await $.clock.now() : 0
@@ -2537,5 +2567,9 @@ export const register: Register = (on, options) => {
       {theirs}
       </Box>
     )
-  }).catch(($, e, next) => next(e)) // a band that fails gives way to what is drawn below it, never an error in the prompt area
+  }).catch(($, e, next) => {
+    // A throw, a timeout or a tree the surface refused: never an error in the prompt area, but said once (noteBandFault).
+    noteBandFault($, next.error?.message || next.error?.kind || '')
+    return next(e)
+  })
 }

@@ -48,6 +48,8 @@ Accepted tasks: the flow records which tasks the orchestrator accepted (`done: [
 - ✕ hides the band only; the flow stays in the panel. The `Band` button brings it back, and so does a new flow.
 - `Finish` (on the band, between `×N` and ✕) and `Finish flow` (in the panel, next to Collapse) end the open flow as `finished: true` does: it is saved to the archive and shows as Done.
 - A new `/flowdeck <task>` while a flow is linked sends `progress` with `restart: true`: the open flow is saved as finished and the new one starts.
+- A band that cannot be drawn (a throw, a timeout, a tree the surface refuses) gives way to what other mods draw there and says why, once per reason: a dim transcript line `flowdeck: the band above the prompt could not be drawn: <reason>` (the model does not read it; `claude --debug` logs it too) and a dim `band error: <reason>` line under the panel's top buttons, cleared by `/reload-plugins` or a new session. When what is drawn below the band fails, the flow row is drawn without it.
+- A mod listed before flowdeck in `enabledPlugins` that draws the band without passing it on hides flowdeck's band completely: flowdeck's hook never runs, so nothing is logged and the `Band` button cannot bring it back. replay-theater does this after every turn in which files were edited (its `▶ Replay: N edits (press r)` line takes the band's place) until the session's process restarts; `/reload-plugins` does not clear it. List flowdeck before such mods (see Install).
 
 ## State colours
 | State | Colour |
@@ -103,7 +105,7 @@ A marketplace added from a folder is read in place: Claude Code loads flowdeck s
 
 Optionally set the panel language (`auto`, `en`, `ru`; default `auto`): `claude plugin configure flowdeck@flowdeck-mod`, or `/plugin configure flowdeck@flowdeck-mod` in a session.
 
-Then fix the load order in `~/.claude/settings.json`: mods nest in the order of `enabledPlugins`, the first outermost. `install` appends `"flowdeck@flowdeck-mod": true` at the end; move that line above other mods that draw above the prompt (next-steps and the like), or they squeeze the band. Then start a new session or run `/reload-plugins`, and open the panel with `/flowdeck-agents`.
+Then fix the load order in `~/.claude/settings.json`: mods nest in the order of `enabledPlugins`, the first outermost. `install` appends `"flowdeck@flowdeck-mod": true` at the end; move that line above other mods that draw above the prompt (next-steps and the like), or they squeeze the band, and above replay-theater, which otherwise takes the band's place after any turn that edited files. Then start a new session or run `/reload-plugins`, and open the panel with `/flowdeck-agents`.
 
 Installing straight from the git URL (`claude plugin marketplace add gitea@git.paavu.com:paavu/flowdeck-mod.git`) should work the same way once the marketplace file is on the remote, but it was not tried: the local clone is the tested path.
 
@@ -140,7 +142,7 @@ claude plugin validate ~/flowdeck-mod
 - A flow is known by its start time in the project folder: two flows started in the same millisecond there count as one.
 - `history-index.json` grows by about 70 bytes per flow (its side file's name, its start and end once in a volume); it is never rotated.
 - While `history.json` cannot be read, or its index stops rotation and it reaches 3,900,000 bytes, new flows are kept only in their side files and the mod store (itself limited to 4 MiB in all).
-- A button can ignore a click while workers run: the desktop app keeps a button's old handle until the next redraw and refuses a press on it; the panel redraws every 5 seconds while agents run, so elapsed times also advance in 5-second steps.
+- A button can ignore a click while workers run: the desktop app keeps a button's old handle until the next redraw and refuses a press on it; the panel redraws every 5 seconds while agents run, so elapsed times also advance in 5-second steps. After `/reload-plugins` the engine refuses every press on a button drawn before the reload until the desktop app draws the panel again; such a press never reaches the mod (the desktop app's log says `ui_press not handled`).
 - A flow saved again while another session's save of the same folder runs can be overwritten in `history.json` by its earlier finished snapshot, or stay hidden as held by a volume; the newer snapshot stays in its side file, and the panel shows the earlier one.
 
 Built from savvy-flow/savvy-progress, context-bar and plan-progress; see NOTICE.md.
