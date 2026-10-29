@@ -1,5 +1,6 @@
 import type { Sample, Samples, UsageWindow } from '../types'
 export type { Sample, Samples, UsageWindow }
+import { hhmm } from './time'
 
 // Rate-limit usage for the flowdeck panel: the session and weekly windows, and a forecast of whether the pace burns them before the reset.
 
@@ -77,9 +78,9 @@ export function forecast(w: UsageWindow, samples: Samples, now: number): Forecas
   }
 }
 
-const clock = (at: number, tz?: string) => new Date(at).toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', timeZone: tz })
+const clock = hhmm
 
-// "2:40 PM" when the reset is today, "Thursday 11:30 AM" on a later day.
+// "14:40" when the reset is today, "Thursday 11:30" on a later day.
 export function fmtReset(at: number, now: number, tz?: string): string {
   if (at - now > 6.5 * 24 * HOUR) return `${new Date(at).toLocaleDateString('en-US', { month: 'short', day: 'numeric', timeZone: tz })}, ${clock(at, tz)}`
   const day = (t: number) => new Date(t).toLocaleDateString('en-US', { year: 'numeric', month: 'numeric', day: 'numeric', timeZone: tz })
@@ -116,26 +117,50 @@ export function verdictLines(w: UsageWindow, f: Forecast, now: number, tz?: stri
 export const isOver = (w: UsageWindow, f: Forecast): boolean => w.percent >= 90 || willBurn(f)
 
 const fit = (s: string, n: number) => (s.length > n ? s.slice(0, Math.max(0, n - 1)) + '…' : s)
-const resets = (w: UsageWindow, now: number, tz?: string) => (w.resetsAt === null ? '' : `Resets ${fmtReset(w.resetsAt, now, tz) === clock(w.resetsAt, tz) ? 'at ' : ''}${fmtReset(w.resetsAt, now, tz)}`)
+// The time left until a reset, counted down in whole minutes: `2d 13h 20m`, `13h 20m`, `20m`; `now` at or past it.
+export function untilText(ms: number): string {
+  if (!(ms > 0)) return 'now'
+  const m = Math.ceil(ms / MIN)
+  const d = Math.floor(m / (24 * 60))
+  const h = Math.floor((m % (24 * 60)) / 60)
+  if (d) return `${d}d ${h}h ${m % 60}m`
+  return h ? `${h}h ${m % 60}m` : `${m % 60}m`
+}
+
+// The reset line: the exact time (`Resets at 14:40`, `Resets Thursday 11:30`) or, with `remaining`, the time left (`Resets in 2h 0m`).
+export function resets(w: UsageWindow, now: number, tz?: string, remaining = false): string {
+  if (w.resetsAt === null) return ''
+  if (remaining) return w.resetsAt <= now ? 'Resets now' : `Resets in ${untilText(w.resetsAt - now)}`
+  const at = fmtReset(w.resetsAt, now, tz)
+  return `Resets ${at === clock(w.resetsAt, tz) ? 'at ' : ''}${at}`
+}
+
+// The key of a window's reset switch.
+export const resetKey = (kind: string): string => `usage-reset-${kind === 'seven_day' ? 'week' : kind === 'five_hour' ? 'session' : kind.replace(/[^A-Za-z0-9_-]/g, '_')}`
+
 const pct = (n: number) => `${+n.toFixed(1)}%`
 
-export type UsageRow = { line: string; kind: 'head' | 'bar' | 'note'; window: number; over: boolean }
+export type UsageRow = { line: string; kind: 'head' | 'bar' | 'note'; window: number; over: boolean; hasReset?: boolean }
+// The room a head row leaves at its end for the reset switch.
+export const SWITCH_COLS = 4
 
 // The terminal rows: per window the label and reset, a bar with the percent, and the verdict lines.
-export function usageRows(windows: UsageWindow[], samples: Samples, now: number, columns: number, tz?: string): UsageRow[] {
+// A head row with a reset time leaves `SWITCH_COLS` for its switch.
+export function usageRows(windows: UsageWindow[], samples: Samples, now: number, columns: number, tz?: string, opts: { remaining?: boolean } = {}): UsageRow[] {
   const rows: UsageRow[] = []
   windows.forEach((win, window) => {
     const w = live(win, now)
     const f = forecast(w, samples, now)
     const over = isOver(w, f)
-    const label = `${w.label}  ${resets(w, now, tz)}`.trimEnd()
+    const reset = resets(w, now, tz, opts.remaining)
+    const label = `${w.label}  ${reset}`.trimEnd()
     const left = Math.max(0, 100 - w.percent)
     const used = `${pct(left)} left`
     const bar = Math.max(6, columns - used.length - 1)
     const filled = Math.min(bar, Math.round((left / 100) * bar))
     const tick = w.resetsAt === null ? -1 : Math.min(bar - 1, Math.max(0, Math.round(((100 - f.expected) / 100) * bar)))
     const cells = Array.from({ length: bar }, (_, i) => (i === tick ? '│' : i < filled ? '█' : '░')).join('')
-    rows.push({ line: fit(label, columns), kind: 'head', window, over })
+    rows.push({ line: fit(label, reset ? columns - SWITCH_COLS : columns), kind: 'head', window, over, hasReset: !!reset })
     rows.push({ line: `${cells} ${used}`, kind: 'bar', window, over })
     for (const note of verdictLines(w, f, now, tz)) rows.push({ line: fit(note, columns), kind: 'note', window, over })
   })
@@ -143,8 +168,11 @@ export function usageRows(windows: UsageWindow[], samples: Samples, now: number,
 }
 
 // The desktop drawing, as the inside of the panel's svg: per window a label and reset line, the bar with projections and the even-pace mark, the percent, and the verdict.
-export function usageSvg(width: number, windows: UsageWindow[], samples: Samples, now: number, tz?: string): { height: number; body: string } {
-  const ROW = 82
+// `header: false` leaves out the label and reset line (the panel draws them natively above, beside the reset switch) and the room they took.
+export function usageSvg(width: number, windows: UsageWindow[], samples: Samples, now: number, tz?: string, opts: { header?: boolean } = {}): { height: number; body: string } {
+  const header = opts.header !== false
+  const HEAD = header ? 18 : 0
+  const ROW = 64 + HEAD
   const used = 74
   const barW = Math.max(40, width - used)
   let top = 0
@@ -156,7 +184,7 @@ export function usageSvg(width: number, windows: UsageWindow[], samples: Samples
       const color = over ? COLOR.over : COLOR[w.kind]
       const x = (p: number) => (Math.min(100, Math.max(0, p)) / 100) * barW // percent of the bar's width
       const left = Math.max(0, 100 - w.percent)
-      const y = top + 26
+      const y = top + 8 + HEAD
       // The part that will be used up by the reset at that pace: from what would remain back to what is left now.
       const ext = (p: Projection | null, dy: number, h: number, opacity: number) =>
         p && left > 0 ? `<rect x="${x(100 - p.atReset).toFixed(1)}" y="${y + dy}" width="${Math.max(0, x(left) - x(100 - p.atReset)).toFixed(1)}" height="${h}" fill="${color}" opacity="${opacity}"/>` : ''
@@ -165,9 +193,12 @@ export function usageSvg(width: number, windows: UsageWindow[], samples: Samples
       const notes = verdictLines(w, f, now, tz)
         .map((note, i) => `<text class="s" x="0" y="${y + 30 + i * 14}" font-family="${FONT}" font-size="11">${esc(fit(note, Math.floor(width / 5.5)))}</text>`)
         .join('\n')
-      const out = `<text class="t" x="0" y="${top + 14}" font-family="${FONT}" font-size="13" font-weight="600">${esc(w.label)}</text>
+      const head = header
+        ? `<text class="t" x="0" y="${top + 14}" font-family="${FONT}" font-size="13" font-weight="600">${esc(w.label)}</text>
 <text class="s" x="${barW}" y="${top + 14}" text-anchor="end" font-family="${FONT}" font-size="11">${esc(resets(w, now, tz))}</text>
-<rect x="0" y="${y}" width="${barW}" height="10" rx="5" fill="${color}" opacity="0.18"/>
+`
+        : ''
+      const out = `${head}<rect x="0" y="${y}" width="${barW}" height="10" rx="5" fill="${color}" opacity="0.18"/>
 <rect data-bar="${w.kind}" data-state="${over ? 'over' : 'ok'}" x="0" y="${y}" width="${x(left).toFixed(1)}" height="10" rx="5" fill="${color}"/>
 ${ext(f.recent, 0, 10, 0.45)}${ext(f.average, 10, 3, 0.6)}${mark}
 <text class="s" x="${width}" y="${y + 9}" text-anchor="end" font-family="${FONT}" font-size="12" font-variant-numeric="tabular-nums">${pct(left)} left</text>

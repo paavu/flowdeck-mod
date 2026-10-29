@@ -121,6 +121,8 @@ export type Panel = {
   isDoneCollapsed: boolean
   isContextShown: boolean
   isUsageShown: boolean
+  /** The usage reset lines say the time left (true) or the exact 24-hour time (false); one global choice, stored under the engine-store key `usageRemaining`. */
+  isUsageRemaining: boolean
   isPlansShown: boolean
   isBandHidden: boolean
   /** Stored under the engine-store key `historyShown`, its name from before the rename. */

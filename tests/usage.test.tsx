@@ -1,6 +1,8 @@
 import { describe, expect, test } from 'claude-code/testing'
 
-import { forecast, record, toWindows, usageRows, usageSvg, fmtReset, live } from '../hooks/usage'
+import { forecast, record, toWindows, usageRows, usageSvg, fmtReset, live, resets, untilText, resetKey } from '../hooks/usage'
+import { hhmm } from '../hooks/time'
+import { entryDate, groupLine } from '../hooks/archive'
 
 const MIN = 60_000
 const HOUR = 60 * MIN
@@ -32,8 +34,8 @@ describe('usage windows', () => {
   })
 
   test('fmtReset says the time today and the weekday for later days', () => {
-    expect(fmtReset(RESET_5H, NOW, 'UTC')).toBe('2:40 PM')
-    expect(fmtReset(RESET_7D, NOW, 'UTC')).toBe('Thursday 11:30 AM')
+    expect(fmtReset(RESET_5H, NOW, 'UTC')).toBe('14:40')
+    expect(fmtReset(RESET_7D, NOW, 'UTC')).toBe('Thursday 11:30')
   })
 })
 
@@ -118,11 +120,11 @@ describe('drawings', () => {
     const rows = usageRows(ws, {}, NOW, 60, 'UTC').map(r => r.line)
     const text = rows.join('\n')
     expect(text).toContain('Current session')
-    expect(text).toContain('Resets at 2:40 PM')
+    expect(text).toContain('Resets at 14:40')
     expect(text).toContain('24% left')
     expect(text).toContain('This week')
-    expect(text).toContain('Resets Thursday 11:30 AM')
-    expect(text).toContain('average: 100% at 1:36 PM')
+    expect(text).toContain('Resets Thursday 11:30')
+    expect(text).toContain('average: 100% at 13:36')
     expect(text).toContain('early')
     expect(rows.every(r => r.length <= 60)).toBe(true)
   })
@@ -180,7 +182,7 @@ describe('review fixes', () => {
     const day1 = Date.UTC(2026, 9, 23, 11, 30) // one day into the week
     const week = toWindows(limits(10, 40))[1]! // 40% in a day: 100% after 2.5 days, 4d 12h before the reset
     const text = usageRows([week], {}, day1, 100, 'UTC').map(r => r.line).join('\n')
-    expect(text).toContain('100% at Saturday 11:30 PM')
+    expect(text).toContain('100% at Saturday 23:30')
     expect(text).toContain('4d 12h early')
   })
 
@@ -188,7 +190,7 @@ describe('review fixes', () => {
     const ws = toWindows(limits(76, 33))
     const rows = usageRows(ws, {}, NOW, 40, 'UTC')
     const joined = rows.map(r => r.line).join('\n')
-    expect(joined).toContain('average: 100% at 1:36 PM')
+    expect(joined).toContain('average: 100% at 13:36')
     expect(rows.every(r => r.line.length <= 40)).toBe(true)
   })
 
@@ -200,7 +202,7 @@ describe('review fixes', () => {
   })
 
   test('a reset a week away names the date, not just the weekday', () => {
-    expect(fmtReset(NOW + 7 * 24 * HOUR - 30 * MIN, NOW, 'UTC')).toMatch(/Nov 2/)
+    expect(fmtReset(NOW + 7 * 24 * HOUR - 30 * MIN, NOW, 'UTC')).toBe('Nov 2, 12:10')
   })
 
   test('the even-pace mark at zero is not drawn off the bar', () => {
@@ -246,5 +248,113 @@ describe('bars show what is left', () => {
     const { body } = usageSvg(400, toWindows(limits(30, 10)), {}, NOW, 'UTC') // 60% of the window passed: 40% left
     const x = Number(/data-mark="five_hour" x="(-?[\d.]+)"/.exec(body)![1])
     expect(Math.abs(x + 1 - (400 - 74) * 0.4)).toBeLessThan(0.3)
+  })
+})
+
+describe('24-hour times', () => {
+  test('hhmm pads the hour and uses the given time zone', () => {
+    expect(hhmm(Date.UTC(2026, 9, 26, 9, 5), 'UTC')).toBe('09:05')
+    expect(hhmm(Date.UTC(2026, 9, 26, 0, 30), 'UTC')).toBe('00:30')
+    expect(hhmm(Date.UTC(2026, 9, 26, 23, 59), 'UTC')).toBe('23:59')
+    expect(hhmm(Date.UTC(2026, 9, 26, 5, 0), 'Asia/Kolkata')).toBe('10:30')
+    expect(hhmm(Date.UTC(2026, 9, 26, 14, 40))).toMatch(/^\d\d:\d\d$/)
+  })
+
+  test('fmtReset is 24-hour today, on another day and a week away', () => {
+    expect(fmtReset(RESET_5H, NOW, 'UTC')).toBe('14:40')
+    expect(fmtReset(Date.UTC(2026, 9, 26, 21, 5), NOW, 'UTC')).toBe('21:05')
+    expect(fmtReset(Date.UTC(2026, 9, 27, 9, 5), NOW, 'UTC')).toBe('Tuesday 09:05')
+    expect(fmtReset(NOW + 7 * 24 * HOUR - 30 * MIN, NOW, 'UTC')).toBe('Nov 2, 12:10')
+  })
+
+  test('no AM or PM anywhere in the usage text, the svg, the verdicts or the archive dates', () => {
+    const texts: string[] = []
+    for (const [five, seven] of [[76, 33], [30, 10], [100, 10], [10, 40]] as const) {
+      const ws = toWindows(limits(five, seven))
+      for (const now of [NOW, Date.UTC(2026, 9, 23, 11, 30), RESET_5H - 4 * HOUR]) {
+        texts.push(usageRows(ws, {}, now, 120, 'UTC').map(r => r.line).join('\n'))
+        texts.push(usageRows(ws, {}, now, 120, 'UTC', { remaining: true }).map(r => r.line).join('\n'))
+        texts.push(usageSvg(400, ws, {}, now, 'UTC').body)
+      }
+    }
+    const entry = { id: 'x', project: '/p', title: 't', startedAt: Date.UTC(2026, 9, 25, 23), endedAt: Date.UTC(2026, 9, 26, 22, 5), status: 'finished', done: 1, total: 1, tasks: [], cost: 0, tokens: 0, time: 0 } as any
+    texts.push(entryDate(entry, 'UTC'), groupLine(entry, 90, 'UTC'))
+    for (const t of texts) expect(/\b(AM|PM)\b/.test(t)).toBe(false)
+    expect(texts.join('\n')).toContain('22:05')
+  })
+})
+
+describe('remaining time to the reset', () => {
+  test('untilText counts down in days, hours and minutes', () => {
+    expect(untilText((2 * 24 * 60 + 13 * 60 + 20) * MIN)).toBe('2d 13h 20m')
+    expect(untilText((13 * 60 + 20) * MIN)).toBe('13h 20m')
+    expect(untilText(20 * MIN)).toBe('20m')
+    expect(untilText(24 * HOUR)).toBe('1d 0h 0m')
+    expect(untilText(1000)).toBe('1m') // a part of a minute still to go counts as a minute
+    expect(untilText(20 * MIN - 1000)).toBe('20m')
+    expect(untilText(0)).toBe('now')
+    expect(untilText(-5 * MIN)).toBe('now')
+  })
+
+  test('the reset line says either the exact time or the time left', () => {
+    const [five, seven] = toWindows(limits(76, 33))
+    expect(resets(five!, NOW, 'UTC')).toBe('Resets at 14:40')
+    expect(resets(seven!, NOW, 'UTC')).toBe('Resets Thursday 11:30')
+    expect(resets(five!, NOW, 'UTC', true)).toBe('Resets in 2h 0m')
+    expect(resets(seven!, NOW, 'UTC', true)).toBe('Resets in 2d 22h 50m')
+    expect(resets(five!, RESET_5H, 'UTC', true)).toBe('Resets now')
+    expect(resets(five!, RESET_5H + MIN, 'UTC', true)).toBe('Resets now')
+    expect(resets({ ...five!, resetsAt: null }, NOW, 'UTC', true)).toBe('')
+  })
+
+  test('the terminal rows switch to the time left', () => {
+    const text = usageRows(toWindows(limits(76, 33)), {}, NOW, 80, 'UTC', { remaining: true }).map(r => r.line).join('\n')
+    expect(text).toContain('Resets in 2h 0m')
+    expect(text).toContain('Resets in 2d 22h 50m')
+    expect(text).not.toContain('Resets at')
+  })
+
+  test('the button keys name the window and are safe', () => {
+    expect(resetKey('five_hour')).toBe('usage-reset-session')
+    expect(resetKey('seven_day')).toBe('usage-reset-week')
+    for (const k of [resetKey('five_hour'), resetKey('seven_day')]) expect(k).toMatch(/^[A-Za-z0-9_-]+$/)
+  })
+})
+
+describe('the drawing without its header', () => {
+  test('has no label or reset text and is shorter, the rest is the same', () => {
+    const ws = toWindows(limits(76, 33))
+    const full = usageSvg(400, ws, {}, NOW, 'UTC')
+    const bare = usageSvg(400, ws, {}, NOW, 'UTC', { header: false })
+    expect(bare.height).toBeLessThan(full.height)
+    expect(bare.body).not.toContain('Current session')
+    expect(bare.body).not.toContain('Resets')
+    expect(bare.body).not.toContain('class="t"')
+    expect((bare.body.match(/data-bar=/g) ?? []).length).toBe(2)
+    expect((bare.body.match(/data-mark=/g) ?? []).length).toBe(2)
+    expect(bare.body).toContain('24% left')
+    expect(bare.body).toContain('average: 100% at 13:36')
+    const width = (b: string) => /data-bar="five_hour"[^>]*width="([\d.]+)"/.exec(b)![1]
+    expect(width(bare.body)).toBe(width(full.body))
+    const markY = /data-mark="five_hour" x="[\d.]+" y="(-?[\d.]+)"/.exec(bare.body)![1]
+    expect(Number(markY)).toBeGreaterThanOrEqual(0)
+  })
+
+  test('no NaN at any width or column count', () => {
+    const ws = toWindows(limits(76, 33))
+    for (const w of [240, 360, 900]) {
+      for (const header of [true, false]) {
+        const d = usageSvg(w, ws, {}, NOW, 'UTC', { header })
+        expect(d.body).not.toContain('NaN')
+        expect(Number.isFinite(d.height)).toBe(true)
+      }
+    }
+    for (let c = 24; c <= 80; c++) {
+      for (const remaining of [false, true]) {
+        const rows = usageRows(ws, {}, NOW, c, 'UTC', { remaining })
+        expect(rows.some(r => r.line.includes('NaN'))).toBe(false)
+        expect(rows.every(r => r.line.length <= c)).toBe(true)
+      }
+    }
   })
 })

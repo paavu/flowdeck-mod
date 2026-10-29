@@ -193,32 +193,32 @@ describe('the group date', () => {
   const e = (startedAt: number, endedAt: number, status: 'finished' | 'open' = 'finished') => ({ ...snap([]), startedAt, endedAt, status }) as ArchiveEntry
 
   test('same day: the end date and time', () => {
-    expect(entryDate(e(at(2026, 10, 26, 9, 0), at(2026, 10, 26, 10, 42)), 'UTC')).toBe('Oct 26, 2026 · 10:42 AM')
-    expect(entryDate(e(at(2026, 10, 26, 9, 0), at(2026, 10, 26, 22, 5)), 'UTC')).toBe('Oct 26, 2026 · 10:05 PM')
-    expect(entryDate(e(at(2026, 10, 26, 0, 1), at(2026, 10, 26, 0, 30)), 'UTC')).toBe('Oct 26, 2026 · 12:30 AM')
+    expect(entryDate(e(at(2026, 10, 26, 9, 0), at(2026, 10, 26, 10, 42)), 'UTC')).toBe('Oct 26, 2026 · 10:42')
+    expect(entryDate(e(at(2026, 10, 26, 9, 0), at(2026, 10, 26, 22, 5)), 'UTC')).toBe('Oct 26, 2026 · 22:05')
+    expect(entryDate(e(at(2026, 10, 26, 0, 1), at(2026, 10, 26, 0, 30)), 'UTC')).toBe('Oct 26, 2026 · 00:30')
   })
 
   test('a flow that started on an earlier day shows the range', () => {
-    expect(entryDate(e(at(2026, 10, 25, 23, 0), at(2026, 10, 26, 10, 42)), 'UTC')).toBe('Oct 25 → Oct 26, 2026 · 10:42 AM')
+    expect(entryDate(e(at(2026, 10, 25, 23, 0), at(2026, 10, 26, 10, 42)), 'UTC')).toBe('Oct 25 → Oct 26, 2026 · 10:42')
   })
 
   test('across the year boundary both dates carry their year', () => {
-    expect(entryDate(e(at(2025, 12, 31, 23, 0), at(2026, 1, 1, 0, 30)), 'UTC')).toBe('Dec 31, 2025 → Jan 1, 2026 · 12:30 AM')
+    expect(entryDate(e(at(2025, 12, 31, 23, 0), at(2026, 1, 1, 0, 30)), 'UTC')).toBe('Dec 31, 2025 → Jan 1, 2026 · 00:30')
   })
 
   test('the day is the time zone’s day', () => {
     // 23:00 UTC on Oct 25 is already Oct 26 in Kolkata, the same day as the end
-    expect(entryDate(e(at(2026, 10, 25, 23, 0), at(2026, 10, 26, 5, 0)), 'Asia/Kolkata')).toBe('Oct 26, 2026 · 10:30 AM')
-    expect(entryDate(e(at(2026, 10, 25, 23, 0), at(2026, 10, 26, 5, 0)), 'UTC')).toBe('Oct 25 → Oct 26, 2026 · 5:00 AM')
+    expect(entryDate(e(at(2026, 10, 25, 23, 0), at(2026, 10, 26, 5, 0)), 'Asia/Kolkata')).toBe('Oct 26, 2026 · 10:30')
+    expect(entryDate(e(at(2026, 10, 25, 23, 0), at(2026, 10, 26, 5, 0)), 'UTC')).toBe('Oct 25 → Oct 26, 2026 · 05:00')
   })
 
   test('formatEntry: title, the short line with date, done/total and status, the task lines', () => {
     const f = formatEntry(e(at(2026, 10, 26, 9, 0), at(2026, 10, 26, 10, 42)), 'UTC')
     expect(f.head).toBe('Ship it')
-    expect(f.line).toBe('Oct 26, 2026 · 10:42 AM · 2/3 · finished')
+    expect(f.line).toBe('Oct 26, 2026 · 10:42 · 2/3 · finished')
     expect(f.lines).toEqual(['✓ write tests (careful)', '✓ wire it (medium)', '○ polish (light)'])
     const open = formatEntry(e(at(2026, 10, 25, 9, 0), at(2026, 10, 26, 10, 42), 'open'), 'UTC')
-    expect(open.line).toBe('Oct 25 → Oct 26, 2026 · 10:42 AM · 2/3 · ended with the session')
+    expect(open.line).toBe('Oct 25 → Oct 26, 2026 · 10:42 · 2/3 · ended with the session')
     expect(formatEntry({ ...e(1, 2), title: '  ' }, 'UTC').head).toBe('Untitled flow')
   })
 
@@ -228,19 +228,19 @@ describe('the group date', () => {
 
   test('groupLine: the end date and time and the item count, on one line', () => {
     const x = { ...e(at(2026, 10, 26, 9, 0), at(2026, 10, 26, 10, 42)), agents: Array.from({ length: 17 }, (_, i) => run({ id: `a${i}` })) } as ArchiveEntry
-    expect(groupLine(x, 90, 'UTC')).toBe('Oct 26, 2026 · 10:42 AM · 17 items')
-    expect(groupLine({ ...x, agents: [run()] }, 90, 'UTC')).toBe('Oct 26, 2026 · 10:42 AM · 1 item')
-    expect(groupLine({ ...x, startedAt: at(2026, 10, 25, 23, 0) }, 90, 'UTC')).toBe('Oct 25 → Oct 26, 2026 · 10:42 AM · 17 items')
-    expect(groupLine({ ...x, partial: true }, 90, 'UTC')).toBe('Oct 26, 2026 · 10:42 AM · 17 items · running')
+    expect(groupLine(x, 90, 'UTC')).toBe('Oct 26, 2026 · 10:42 · 17 items')
+    expect(groupLine({ ...x, agents: [run()] }, 90, 'UTC')).toBe('Oct 26, 2026 · 10:42 · 1 item')
+    expect(groupLine({ ...x, startedAt: at(2026, 10, 25, 23, 0) }, 90, 'UTC')).toBe('Oct 25 → Oct 26, 2026 · 10:42 · 17 items')
+    expect(groupLine({ ...x, partial: true }, 90, 'UTC')).toBe('Oct 26, 2026 · 10:42 · 17 items · running')
     // an entry saved without agents counts its tasks
-    expect(groupLine({ ...x, agents: undefined }, 90, 'UTC')).toBe('Oct 26, 2026 · 10:42 AM · 3 items')
-    expect(groupLine({ ...x, tasks: [x.tasks[0]!], agents: undefined }, 90, 'UTC')).toBe('Oct 26, 2026 · 10:42 AM · 1 item')
+    expect(groupLine({ ...x, agents: undefined }, 90, 'UTC')).toBe('Oct 26, 2026 · 10:42 · 3 items')
+    expect(groupLine({ ...x, tasks: [x.tasks[0]!], agents: undefined }, 90, 'UTC')).toBe('Oct 26, 2026 · 10:42 · 1 item')
     for (const status of ['finished', 'open'] as const) expect(groupLine({ ...x, status }, 90, 'UTC')).not.toMatch(/finished|ended|17\/17|Ship it/)
   })
 
   test('groupLine narrows: the time of day goes first, then the word items; the count stays', () => {
     const x = { ...e(at(2026, 10, 26, 9, 0), at(2026, 10, 26, 10, 42)), agents: Array.from({ length: 17 }, (_, i) => run({ id: `a${i}` })) } as ArchiveEntry
-    expect(groupLine(x, 38, 'UTC')).toBe('Oct 26, 2026 · 10:42 AM · 17 items')
+    expect(groupLine(x, 38, 'UTC')).toBe('Oct 26, 2026 · 10:42 · 17 items')
     expect(groupLine(x, 30, 'UTC')).toBe('Oct 26, 2026 · 17 items')
     expect(groupLine(x, 22, 'UTC')).toBe('Oct 26, 2026 · 17')
     expect(groupLine({ ...x, partial: true }, 30, 'UTC')).toBe('Oct 26, 2026 · 17 · running')
@@ -329,7 +329,7 @@ const groupB = (): ArchiveEntry =>
     tokens: 3_000,
     time: 90_000,
   }) as ArchiveEntry
-const DATE = /[A-Z][a-z]{2} \d{1,2}.*, \d{4} · \d{1,2}:\d{2} [AP]M/
+const DATE = /[A-Z][a-z]{2} \d{1,2}.*, \d{4} · \d{2}:\d{2}/
 
 describe('archive groups in the panel', () => {
   test('two groups show their date and item count and the three tiles; the newest is open, the other folded', async ($, on) => {
@@ -487,14 +487,14 @@ describe('archive groups in the panel', () => {
       const fold = buttons.find((b: any) => String(b.props.key) === `archive-${keyOf(g.id)}`)
       expect(fold.text).toBe(`▾ ${date(cols)}`)
       expect(fold.text).toMatch(/· 17( items)?$/)
-      expect(/AM|PM/.test(fold.text)).toBe(time)
+      expect(/\d\d:\d\d/.test(fold.text)).toBe(time)
       expect(fold.text.includes('items')).toBe(word)
       expect(JSON.stringify(fold)).toContain('truncate-end')
       expect(texts.some((x: any) => /TTTT|17\/17|ended/.test(String(x.text)))).toBe(false)
     }
     expect(date(90)).toContain('→')
-    expect(date(90)).toMatch(/AM|PM/)
-    expect(date(40)).not.toMatch(/AM|PM/)
+    expect(date(90)).toMatch(/\d\d:\d\d/)
+    expect(date(40)).not.toMatch(/\d\d:\d\d/)
   })
 
   test('with one group it is open', async ($, on) => {

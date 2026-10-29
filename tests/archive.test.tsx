@@ -169,21 +169,21 @@ describe('formatEntry', () => {
   test('a finished flow', () => {
     const f = formatEntry(snap({ flow: flow({ done: 3 }) }), 'UTC')
     expect(f.head).toBe('Ship it')
-    expect(f.line).toBe('Oct 25, 2026 · 10:30 AM · 3/3 · finished')
+    expect(f.line).toBe('Oct 25, 2026 · 10:30 · 3/3 · finished')
     expect(f.lines).toEqual(['✓ Write tests (light)', '✓ Build module (medium)', '✓ Review (heavy)'])
   })
 
   test('an open flow marks the first done tasks and says it ended with the session', () => {
     const f = formatEntry(snap({ status: 'open' }), 'UTC')
     expect(f.head).toBe('Ship it')
-    expect(f.line).toBe('Oct 25, 2026 · 10:30 AM · 2/3 · ended with the session')
+    expect(f.line).toBe('Oct 25, 2026 · 10:30 · 2/3 · ended with the session')
     expect(f.lines).toEqual(['✓ Write tests (light)', '✓ Build module (medium)', '○ Review (heavy)'])
   })
 
   test('an entry from an earlier year always shows its year', () => {
     const old = Date.UTC(2025, 11, 31, 23, 0)
     const e = snap({ startedAt: old - 30 * MIN, endedAt: old })
-    expect(formatEntry(e, 'UTC').line).toBe('Dec 31, 2025 · 11:00 PM · 2/3 · finished')
+    expect(formatEntry(e, 'UTC').line).toBe('Dec 31, 2025 · 23:00 · 2/3 · finished')
   })
 
   test('an empty title still reads', () => {

@@ -9,6 +9,8 @@ export const PANEL_DEFAULT: Panel = {
   isDoneCollapsed: false,
   isContextShown: true,
   isUsageShown: true,
+  // The reset lines count down to the reset unless the user switched to the exact time (the store key `usageRemaining` wins at session start).
+  isUsageRemaining: true,
   isPlansShown: true,
   isBandHidden: false,
   // Shown unless the user hid it (the store key `historyShown` wins at session start).
@@ -39,6 +41,7 @@ export function asPanel(v: unknown): Panel {
     isDoneCollapsed: bool(o.isDoneCollapsed, d.isDoneCollapsed),
     isContextShown: bool(o.isContextShown, d.isContextShown),
     isUsageShown: bool(o.isUsageShown, d.isUsageShown),
+    isUsageRemaining: bool(o.isUsageRemaining, d.isUsageRemaining),
     isPlansShown: bool(o.isPlansShown, d.isPlansShown),
     isBandHidden: bool(o.isBandHidden, d.isBandHidden),
     isArchiveShown: bool(o.isArchiveShown, d.isArchiveShown),

@@ -53,6 +53,7 @@ Build, run the mod tests, disable savvy-flow, savvy-progress and context-bar, en
 
 ## Additions after the first version
 - Usage: the five-hour and weekly limits with reset times, a draining bar, an even-pace mark and a burn forecast (recent ~30 min pace and window average); store key `usageShown`.
+- 24-hour times and the reset switch, 1.0.0018: every time of day goes through `hhmm` in hooks/time.ts (24-hour `HH:MM`, no AM/PM); each Usage window's label, reset line and a `◷` Button (`usage-reset-session`/`usage-reset-week`) sit in a native row above the drawing (`usageSvg(..., { header: false })`), and the one switch between the time left (default) and the exact time is global, engine-store key `usageRemaining`.
 - Archive (formerly History): the last 50 flows across projects, newest first, saved on finish, on replacement and as open at session end; store key `history`, toggle `historyShown`, off by default.
 - Plans (ported from plan-progress): the plan model in `hooks/plan.ts` (stages or `kind: "todo"`, short ops, at most 3 plans); the main-session tool `mcp__flowdeck__plan`; the Plans panel section with `Clear finished`; up to 2 open plan rows in the band. Saved per session under store key `plans`, last 20 sessions. A `prompt.compose` section `flowdeck:plan-rule` tells the model when and how to plan; no gate, no sounds, no Stop block, no nudges.
 - Agent state colours and tool word: each agent row names its state (`Running · <tool>` blue-violet, `Needs approval` amber, `Done` green, `Error` red), the same colours as the plan states.

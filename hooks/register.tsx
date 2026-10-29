@@ -14,7 +14,7 @@ import type { FlowDrawing, FlowView, Planned } from './archive-view'
 import { importPlan, isFinished, isStoredStep, normalize, percent, PLAN_ID, placeBar, planId, str, where } from './plan'
 import { planBandSvg, planBandText, planRows, planSvg, STATE_COLOR, stateLabel } from './plan-view'
 import { asAgents, asArchive, asFlow, asMeta, asNow, asPanel, asReading, asUsage, asVolumes, PANEL_DEFAULT } from './shapes'
-import { record, toWindows, usageRows, usageSvg } from './usage'
+import { live, record, resetKey, resets, toWindows, usageRows, usageSvg } from './usage'
 
 const flow = atom({ plugin: 'flowdeck', key: 'flow' } as const, null)
 const agents = atom({ plugin: 'flowdeck', key: 'agents' } as const, [])
@@ -637,6 +637,8 @@ const headerHeight = (title: string): number => (title ? 72 : 44)
 
 // The archive icon: one single-width glyph, never an emoji.
 const ARCHIVE_ICON = '⤓'
+// The usage reset switch: a clock face, single width and without an emoji form (U+23F1 draws as an emoji in some fonts).
+const RESET_ICON = '◷'
 
 // The task's own progress when the worker reports steps; a finished run is full.
 const progressOf = (a: AgentRun): number | null => {
@@ -1235,6 +1237,8 @@ export const register: Register = (on, options) => {
     if (typeof stored === 'boolean') await updatePanel($, prev => ({ ...prev, isContextShown: stored }))
     const storedUsage = await $.store.get('usageShown').catch(() => undefined)
     if (typeof storedUsage === 'boolean') await updatePanel($, prev => ({ ...prev, isUsageShown: storedUsage }))
+    const storedRemaining = await $.store.get('usageRemaining').catch(() => undefined)
+    if (typeof storedRemaining === 'boolean') await updatePanel($, prev => ({ ...prev, isUsageRemaining: storedRemaining }))
     const storedPlansShown = await $.store.get('plansShown').catch(() => undefined)
     if (typeof storedPlansShown === 'boolean') await updatePanel($, prev => ({ ...prev, isPlansShown: storedPlansShown }))
     const storedArchiveShown = await $.store.get('historyShown').catch(() => undefined)
@@ -2041,21 +2045,73 @@ export const register: Register = (on, options) => {
       if (!p.isUsageShown) return null
       const us = await readUsage($)
       const clockNow = await $.clock.now()
+      const remaining = p.isUsageRemaining
+      // One switch per window, both flipping the one choice between the time left and the exact time.
+      const resetSwitch = (kind: string) => (
+        <Button
+          key={resetKey(kind)}
+          label={RESET_ICON}
+          plain
+          dimColor
+          onPress={async () => {
+            const next = !remaining
+            await updatePanel($, prev => ({ ...prev, isUsageRemaining: next }))
+            await $.store.set('usageRemaining', next).catch(() => {})
+          }}
+        />
+      )
       if (Svg) {
-        const du = us.windows.length ? usageSvg(W, us.windows, us.samples, clockNow) : null
-        return du ? (
-          <Svg source={svg(W, du.height, du.body)} alt={us.windows.map(w => `${w.label} ${Math.max(0, 100 - w.percent)}% left`).join(', ')} width={W} height={du.height} />
+        // Per window a native row (label, reset line and its switch: a Button cannot sit inside a drawing), then the drawing without its header.
+        return us.windows.length ? (
+          <Box flexDirection="column">
+            {us.windows.map(win => {
+              const reset = resets(live(win, clockNow), clockNow, undefined, remaining)
+              const du = usageSvg(W, [win], us.samples, clockNow, undefined, { header: false })
+              return (
+                <Box key={`usage-${win.kind}`} flexDirection="column">
+                  <Box flexDirection="row" alignItems="center" gap={1}>
+                    <Box flexShrink={1} minWidth={0} overflow="hidden">
+                      <Text bold wrap="truncate-end">
+                        {win.label}
+                      </Text>
+                    </Box>
+                    <Box flexGrow={1} />
+                    {reset && (
+                      <Box flexShrink={0}>
+                        <Text dimColor>{reset}</Text>
+                      </Box>
+                    )}
+                    {reset && <Box flexShrink={0}>{resetSwitch(win.kind)}</Box>}
+                  </Box>
+                  <Svg source={svg(W, du.height, du.body)} alt={`${win.label} ${Math.max(0, 100 - win.percent)}% left`} width={W} height={du.height} />
+                </Box>
+              )
+            })}
+          </Box>
         ) : (
           <Text dimColor>no usage data yet</Text>
         )
       }
       return us.windows.length ? (
         <Box flexDirection="column">
-          {usageRows(us.windows, us.samples, clockNow, cols).map((r, i) => (
-            <Text key={`use-${i}`} dimColor={r.kind !== 'bar'} color={r.kind === 'bar' ? (r.over ? 'red' : us.windows[r.window]?.kind === 'seven_day' ? 'blue' : 'yellow') : undefined} wrap="truncate-end">
-              {r.line}
-            </Text>
-          ))}
+          {usageRows(us.windows, us.samples, clockNow, cols, undefined, { remaining }).map((r, i) => {
+            const kind = us.windows[r.window]?.kind ?? ''
+            const line = (
+              <Text key={`use-${i}`} dimColor={r.kind !== 'bar'} color={r.kind === 'bar' ? (r.over ? 'red' : kind === 'seven_day' ? 'blue' : 'yellow') : undefined} wrap="truncate-end">
+                {r.line}
+              </Text>
+            )
+            return r.kind === 'head' && r.hasReset ? (
+              <Box key={`use-${i}`} flexDirection="row" gap={1}>
+                <Box flexShrink={1} minWidth={0} overflow="hidden">
+                  {line}
+                </Box>
+                <Box flexShrink={0}>{resetSwitch(kind)}</Box>
+              </Box>
+            ) : (
+              line
+            )
+          })}
         </Box>
       ) : (
         <Text dimColor>no usage data yet</Text>

@@ -119,15 +119,15 @@ describe('plan entries, pure', () => {
 
   test('groupLine for a plan: the date then N steps (1 step), narrowing like a flow’s', () => {
     const e = planEntry(donePlan({ startedAt: Date.UTC(2026, 9, 26, 9, 0), endedAt: Date.UTC(2026, 9, 26, 10, 42) }), PROJECT, NOW)
-    expect(groupLine(e, 40, 'UTC')).toBe('Oct 26, 2026 · 10:42 AM · 3 steps')
+    expect(groupLine(e, 40, 'UTC')).toBe('Oct 26, 2026 · 10:42 · 3 steps')
     expect(groupLine(e, 24, 'UTC')).toBe('Oct 26, 2026 · 3 steps')
     expect(groupLine(e, 20, 'UTC')).toBe('Oct 26, 2026 · 3')
     expect(groupLine(e, 5, 'UTC')).toBe('Oct 26, 2026 · 3')
     const one = planEntry(donePlan({ stages: [{ name: 'S', steps: [{ title: 'a', status: 'done', substeps: [] }] }], startedAt: Date.UTC(2026, 9, 26, 9, 0), endedAt: Date.UTC(2026, 9, 26, 10, 42) }), PROJECT, NOW)
-    expect(groupLine(one, 40, 'UTC')).toBe('Oct 26, 2026 · 10:42 AM · 1 step')
+    expect(groupLine(one, 40, 'UTC')).toBe('Oct 26, 2026 · 10:42 · 1 step')
     expect(groupLine(one, 24, 'UTC')).toBe('Oct 26, 2026 · 1 step')
     // a flow entry is as before
-    expect(groupLine(flowEntry(1, { endedAt: Date.UTC(2026, 9, 26, 10, 42), startedAt: Date.UTC(2026, 9, 26, 9, 0) }), 40, 'UTC')).toBe('Oct 26, 2026 · 10:42 AM · 1 item')
+    expect(groupLine(flowEntry(1, { endedAt: Date.UTC(2026, 9, 26, 10, 42), startedAt: Date.UTC(2026, 9, 26, 9, 0) }), 40, 'UTC')).toBe('Oct 26, 2026 · 10:42 · 1 item')
   })
 
   test('addEntry puts a plan where it belongs by its end; a flow still goes first; a second save replaces the first', () => {
@@ -246,7 +246,7 @@ describe('finished plans in the Archive', () => {
     expect(e.plan!.state).toBe('done')
     expect(e.plan!.stages.flatMap(s => s.steps.map(st => st.status))).toEqual(['done', 'done', 'done'])
     const t = await terminal($)
-    expect(t.group(e.id).text).toMatch(/^▾ [A-Z][a-z]{2} \d{1,2}, \d{4} · \d{1,2}:\d{2} [AP]M · 3 steps$/)
+    expect(t.group(e.id).text).toMatch(/^▾ [A-Z][a-z]{2} \d{1,2}, \d{4} · \d{2}:\d{2} · 3 steps$/)
     expect(t.group(e.id).text).not.toMatch(/Beta/)
     // the Plans section and the Archive group each draw it
     expect(t.texts.filter(x => HEAD.test(x))).toHaveLength(2)
@@ -396,7 +396,7 @@ describe('finished plans in the Archive', () => {
     await plan($, { id: 'solo', title: 'Solo', stages: [{ name: 'S', steps: [{ title: 'a' }] }] })
     await plan($, { id: 'solo', done: ['a'] })
     const id = planEntries(store)[0]!.id
-    expect((await terminal($, 40)).group(id).text).toMatch(/^▾ .* · \d{1,2}:\d{2} [AP]M · 1 step$/)
+    expect((await terminal($, 40)).group(id).text).toMatch(/^▾ .* · \d{2}:\d{2} · 1 step$/)
     expect((await terminal($, 24)).group(id).text).toMatch(/^▾ [A-Z][a-z]{2} \d{1,2}, \d{4} · 1 step$/)
   })
 

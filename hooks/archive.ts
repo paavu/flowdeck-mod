@@ -3,6 +3,7 @@
 import type { AgentRun, AgentStatus, ArchiveAgent, ArchiveEntry, ArchiveTask, ArchiveVolume, Flow, PlanStage, PlanState, PlanStep, StepStatus, TaskPlan } from '../types'
 import { itemsOf } from './agent-items'
 import { isFinished, isStoredStep } from './plan'
+import { hhmm } from './time'
 
 const MAX_TASKS = 100
 export const MAX_TEXT = 200
@@ -386,11 +387,11 @@ export function parseArchive(raw: unknown): ArchiveEntry[] {
 // A time's day and clock in the given time zone (the local one when none is given).
 const partsOf = (at: number, tz?: string) => {
   const p: Record<string, string> = {}
-  for (const x of new Intl.DateTimeFormat('en-US', { timeZone: tz, year: 'numeric', month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit', hour12: true }).formatToParts(new Date(at))) p[x.type] = x.value
-  return { day: `${p.month} ${p.day}`, year: p.year ?? '', time: `${p.hour}:${p.minute} ${p.dayPeriod}` }
+  for (const x of new Intl.DateTimeFormat('en-US', { timeZone: tz, year: 'numeric', month: 'short', day: 'numeric' }).formatToParts(new Date(at))) p[x.type] = x.value
+  return { day: `${p.month} ${p.day}`, year: p.year ?? '', time: hhmm(at, tz) }
 }
 
-// When the flow ended, `Oct 26, 2026 · 10:42 AM`; one that started on an earlier day shows the range, `Oct 25 → Oct 26, 2026 · 10:42 AM`.
+// When the flow ended, `Oct 26, 2026 · 10:42`; one that started on an earlier day shows the range, `Oct 25 → Oct 26, 2026 · 10:42`.
 // `compact` leaves out the time of day.
 export function entryDate(entry: ArchiveEntry, tz?: string, compact = false): string {
   const end = partsOf(entry.endedAt, tz)
@@ -403,7 +404,7 @@ export function entryDate(entry: ArchiveEntry, tz?: string, compact = false): st
 const statusOf = (entry: ArchiveEntry): string =>
   entry.partial ? 'archived while the flow runs' : entry.status === 'finished' ? 'finished' : 'ended with the session'
 
-// The group's fold line fitted to `cols`: `Oct 26, 2026 · 10:42 AM · 17 items`, then without the time of day,
+// The group's fold line fitted to `cols`: `Oct 26, 2026 · 10:42 · 17 items`, then without the time of day,
 // then with the bare count; an entry archived while its flow ran ends in ` · running`. The count is the rows the
 // group shows: its runs, or the tasks of an entry saved without runs; a plan's counts its steps, `· 3 steps`.
 export function groupLine(entry: ArchiveEntry, cols: number, tz?: string): string {
