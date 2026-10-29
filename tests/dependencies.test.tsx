@@ -142,7 +142,7 @@ describe('task numbers and waits on the rows', () => {
   test('the wait is dropped first on a short line: the stats stay as they would be without it', async ($, on) => {
     const { clock } = engine(on)
     await start($)
-    await progress($, { title: 'Ship', phase: 'delegate', tasks: [{ title: 'Read code', tier: 'medium' }, { title: 'Wire the history module', tier: 'medium', after: [1] }] })
+    await progress($, { title: 'Ship', phase: 'delegate', tasks: [{ title: 'Read code', tier: 'light' }, { title: 'Wire the history module', tier: 'medium', after: [1] }] })
     await spawn($, 'w2', 'Wire the history module')
     await spawn($, 'w9', 'Some other job')
     await turnStep($, 'w2')

@@ -12,7 +12,7 @@ An orchestrated delivery flow for Claude Code with a live side panel. The sessio
 ## Tools (for the model)
 | Tool | Used by | Purpose |
 |---|---|---|
-| `mcp__flowdeck__progress` | orchestrator in a flow | Flow title, planned worker tasks (each with `after`: the numbers, from 1, of the tasks it waits for), accepted count, phase (`plan`, `design`, `delegate`, `review`, `close`), `finished`, `restart`. Waits on unknown tasks, on the task itself or closing a cycle are ignored. |
+| `mcp__flowdeck__progress` | orchestrator in a flow | Flow title, planned worker tasks (each with `after`: the numbers, from 1, of the tasks it waits for), accepted count, phase (`plan`, `design`, `delegate`, `review`, `close`), `finished`, `restart`. Each task is delegated with the Agent description `#<number> <title>`. Waits on unknown tasks, on the task itself or closing a cycle are ignored. |
 | `mcp__flowdeck__step` | workers | A worker's own steps on its agent row: the plan sent once as a `steps` list, then moved with `next`, `done`, `active`, `failed`. The older `total`, `done`, `note` counts still work. |
 | `mcp__flowdeck__plan` | main session | A task plan for any work: stages of steps, or `kind: "todo"` for a flat list. Created once, then moved with short ops (`next`, `done`, `active`, `failed`, `state`, `note`); calls from subagents are ignored. |
 
@@ -31,7 +31,7 @@ Top buttons, in order: **Context · Usage · Plans · Band · Archive**. Each to
 | Context | The context window as a stacked bar with tokens per category and where auto-compaction runs. Collapsed, it keeps the head line and the bar. |
 | Usage | The five-hour session and the week: the reset, by default as the time left (`Resets in 2d 13h 20m`, `Resets in 20m`); the small `◷` beside it switches both windows to the exact time (`Resets at 14:40`, `Resets Thursday 11:30`) and back, remembered for all projects. A bar that drains as the limit is used (full = 100% left), percent left, an even-pace mark, and a forecast to the reset (recent pace over ~30 min and the window average), e.g. `recent: 100% at 13:36, 1h 3m early` or `on pace`. All times of day in the panel (Usage and the Archive dates) are 24-hour `HH:MM`. Needs a subscription with rate-limit readings. |
 | Plans | Plans made with the `plan` tool, each as a track with its state and percent. A plan is saved to the Archive the moment it is done, as its own group; `Clear finished` only clears the done plans from this list (the Archive keeps them; a plan whose archive save failed stays in the list). |
-| Agents | Running, finished and planned agents, with model, task progress, context, estimated cost and time. A row that belongs to a planned task leads with its number (`3. History module`) and its model line names what that task waits for after the effort (`Opus 5.5 · medium · after 1, 2`; dropped first when the line is short, never at the cost of the stats). A planned row shows `ready` (blue-violet) once everything it waits for is done, and at once for a task that waits for nothing: those can be started now, in parallel. |
+| Agents | Running, finished and planned agents, with model, task progress, context, estimated cost and time. A run is linked to its planned task by the mod itself, in this order: its Agent description is the task's title (case and punctuation aside); it begins with the task number (`#3 …`, `[3] …`, `task 3 …`); its description is close to one task's title (one holds the other whole, or at least 60% of the shorter one's words are shared; a tie goes to the worker's own tier, a tie that stays links nothing; only tasks with no run yet); or, as a last guess for a flowdeck worker, exactly one task of the worker's tier had no run when it started. A task gets at most one run by the last two rules; a return round reuses the title or number. A run that matches nothing keeps its own row without a number. A linked row leads with its task number (`3. History module`, the `#3` not repeated) and its model line names what that task waits for after the effort (`Opus 5.5 · medium · after 1, 2`; dropped first when the line is short, never at the cost of the stats). A planned row shows `ready` (blue-violet) once everything it waits for is done, and at once for a task that waits for nothing: those can be started now, in parallel. |
 
 The panel always draws: the top buttons, Context, Usage and the Archive draw on their own whatever the flow is doing (so the Archive can be reviewed with no flow running); Plans and the flow's block (header, agent rows, planned tasks) take a place only once there are plans, a flow or a run; a part that cannot be drawn shows one dim `<part> could not be drawn` line, and values an older flowdeck left in the session after a reload are read with their missing fields filled in.
 | Archive | Shown by default (formerly History); hiding it is remembered. Past flows and finished plans of this project, newest first by when they ended, each flow as a group drawn like the running flow. Everything in the Archive is finished, so a group has no title or status: its fold button is one line, when it ended and how many rows it holds (`▾ Oct 26, 2026 · 10:42 · 17 items`, or `Oct 25 → Oct 26, 2026 · 10:42 · …` when it started on an earlier day; a flow saved without runs counts its tasks), with ` · running` added for an entry archived while its flow runs; a narrow panel drops the time of day, then the word `items`. The cost, tokens and time tiles come right under it. The newest group shown is open and the others are folded; pressing a group's fold button opens or folds it, and that choice holds for the session until another volume or `Back to latest` is chosen, which shows the default again. Opened, it shows the flow's agents as they ended in one flat list, newest first, with no `Finished · N` fold (a run still going when the flow was saved is in the same list and reads `Running at finish`), with their chevrons and steps (a chevron folds that group's row only, never the live one); tasks never started are not shown. Flows saved before agents were kept show their task list instead. A finished plan is a group of its own, `▾ Oct 26, 2026 · 10:42 · 3 steps` (`1 step`), narrowing the same way; opened, it shows the plan as the Plans section draws it (title, `Done`, percent), with no tiles. The newest 10 groups show; `Show older (N)` reveals 10 more each press. One archive file shows at a time, the latest part (`history.json`) by default, under a `Showing Oct 20 – Oct 26, 2026 · N flows` line. When archive volumes exist, `▸ Older volumes (k files)` lists them newest first (date range, then `N flows · ≈$cost · tokens · time`); choosing one shows only its flows, the same way, with `Back to latest` at the top. Browsing never writes anything. |
@@ -77,17 +77,57 @@ The archive and plans are kept per project in `<project>/.claude/flowdeck/` (the
 - Mod store keys still in use: `contextShown`, `usageShown`, `usageRemaining`, `plansShown`, `historyShown` (the section toggles and the Usage reset switch; `historyShown` is the Archive toggle, its name kept from before the rename).
 - `FLOWDECK_ARCHIVE_VOLUME_MAX` (or its old name `FLOWDECK_HISTORY_SEGMENT_MAX`; the new one wins when both are set) can only lower the 2,500,000-byte limit of one archive file.
 
-## Requirements
-- A Claude Code version with mods.
-- `flowdeck-fable` runs on the Fable model; without access to it, change `model:` in `agents/flowdeck-fable.md`.
-- Load order: mods nest in the order of `enabledPlugins`, first outermost. Put flowdeck before next-steps, or the band is squeezed.
+## Install on a new machine
+Everything needed is in this repo: it is its own marketplace (`.claude-plugin/marketplace.json`, name `flowdeck-mod`, plugin `flowdeck` at `./`).
 
-## Install (fresh machine)
+### Prerequisites
+- Claude Code with mods and the `claude plugin` commands (`claude plugin --help` lists `marketplace`, `install`, `test`, `validate`). Built and tested with 2.1.312 (`claude --version`).
+- git, and SSH access to `git.paavu.com` for the SSH clone (the HTTPS form asks for a Gitea login: the repo is private).
+- `flowdeck-fable` runs on the Fable model; without access to it, change `model:` in `agents/flowdeck-fable.md`.
+
+### Conflicts
+flowdeck replaces savvy-flow, savvy-progress, context-bar, plan-progress and flightdeck. They share its tool names (`progress`, `step`, `plan`), pane ids and commands: disable or uninstall them first (`claude plugin disable <name>@<marketplace>`, or `/plugin` in a session).
+
+### Install (from a local clone; recommended)
 ```
-claude plugin marketplace add gitea@paavu.com:paavu/claude-mods.git   # the paavu-mods marketplace
-claude plugin install flowdeck@paavu-mods
+git clone gitea@git.paavu.com:paavu/flowdeck-mod.git ~/flowdeck-mod
+#   or: git clone https://git.paavu.com/paavu/flowdeck-mod.git ~/flowdeck-mod
+claude plugin validate ~/flowdeck-mod                  # ✔ Validation passed
+claude plugin marketplace add ~/flowdeck-mod           # adds marketplace "flowdeck-mod" (user settings)
+claude plugin install flowdeck@flowdeck-mod            # installs and enables it (scope: user)
+claude plugin list                                     # flowdeck@flowdeck-mod, Version: <plugin.json version>, Read from: ~/flowdeck-mod
 ```
-flowdeck replaces savvy-flow, savvy-progress, context-bar, plan-progress and flightdeck: disable or uninstall them first.
+A marketplace added from a folder is read in place: Claude Code loads flowdeck straight from the clone, nothing is copied.
+
+Optionally set the panel language (`auto`, `en`, `ru`; default `auto`): `claude plugin configure flowdeck@flowdeck-mod`, or `/plugin configure flowdeck@flowdeck-mod` in a session.
+
+Then fix the load order in `~/.claude/settings.json`: mods nest in the order of `enabledPlugins`, the first outermost. `install` appends `"flowdeck@flowdeck-mod": true` at the end; move that line above other mods that draw above the prompt (next-steps and the like), or they squeeze the band. Then start a new session or run `/reload-plugins`, and open the panel with `/flowdeck-agents`.
+
+Installing straight from the git URL (`claude plugin marketplace add gitea@git.paavu.com:paavu/flowdeck-mod.git`) should work the same way once the marketplace file is on the remote, but it was not tried: the local clone is the tested path.
+
+### Update
+```
+git -C ~/flowdeck-mod pull
+claude plugin marketplace update flowdeck-mod          # re-reads the catalog
+claude plugin list                                     # shows the new version
+```
+then `/reload-plugins` in open sessions (or start new ones). With a folder marketplace, `claude plugin update flowdeck@flowdeck-mod` only says the plugin is read from its folder: the pull is the update. The running version is the `version` in `.claude-plugin/plugin.json`, as `claude plugin list` shows it; `CHANGELOG.md` lists what each version changed.
+
+### Run the tests
+```
+claude plugin test ~/flowdeck-mod                      # the whole suite: every test passes
+claude plugin validate ~/flowdeck-mod
+```
+(`claude plugin test` takes the plugin's folder.)
+
+### Roll back, uninstall
+- Roll back: `git -C ~/flowdeck-mod checkout v1.0.0021` (a release tag; from 1.0.0021 on each release is tagged `v<version>`; any commit from `git log` works too), then `/reload-plugins`. Back to the newest: `git -C ~/flowdeck-mod checkout main && git -C ~/flowdeck-mod pull`.
+- Uninstall: `claude plugin uninstall flowdeck@flowdeck-mod`, then `claude plugin marketplace remove flowdeck-mod`. The clone and the saved data stay where they are; move them to the Trash yourself if you want them gone.
+
+### What it keeps, and the defaults
+- Per project: `<project>/.claude/flowdeck/` (archive and plans, see Saved data), with its own `.gitignore` (`*`), so nothing there is committed.
+- Global mod store keys: `contextShown`, `usageShown`, `usageRemaining`, `plansShown`, `historyShown` (and `history`/`plans` only as a fallback when a project folder cannot be written).
+- Defaults: all times are 24-hour `HH:MM`; the usage reset shows the time left (`Resets in 2d 13h 20m`) until `◷` switches it to the exact time, and that choice holds for all projects (`usageRemaining`); Context and Usage shown, Archive shown.
 
 ## Known limits
 - Terminal text is English only.

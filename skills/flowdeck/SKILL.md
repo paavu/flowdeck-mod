@@ -36,7 +36,7 @@ If the tool `mcp__flowdeck__progress` is available, keep it current; skip silent
 
 The flow's worker tasks stay on `progress`. For work outside a flow, or a checklist of your own orchestrator steps, use `mcp__flowdeck__plan`: create it once with `id`, `title` and `stages` (or `kind: "todo"`), then move it with short ops (`{id, next:true}`, `{id, done:[...], active:"..."}`, `{id, failed:"...", note}`, `{id, state:"needs_input", note}`, `{id, state:"done"}`).
 
-When delegating, pass the task's `title` verbatim as the Agent tool's `description` (a return round reuses it too): the agents panel matches runs to planned tasks by it.
+When delegating, begin the Agent tool's `description` with the task number, then the task's `title` verbatim: `#3 History module` (a return round reuses it too). The agents panel links each worker to its planned task by that number first; without one it falls back to the title (exact, then the closest title, then the only open task of the worker's tier), so the link holds even when the wording differs.
 
 ## 1. Understand and plan (orchestrator only)
 

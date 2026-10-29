@@ -527,7 +527,7 @@ describe('archive groups in the panel', () => {
       expect(text).not.toContain('NaN')
       expect(text).not.toContain('undefined')
       expect(text).not.toMatch(/Finished/)
-      expect(text.split('task ').length - 1).toBeGreaterThanOrEqual(60)
+      expect(text.split('d'.repeat(10)).length - 1).toBeGreaterThanOrEqual(60) // `task 1 …` may lead with its task's number instead
     }
   })
 

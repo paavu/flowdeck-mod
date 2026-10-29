@@ -1,0 +1,6 @@
+{
+  "name": "flowdeck-mod",
+  "owner": { "name": "paavu-mods" },
+  "description": "flowdeck: orchestrated delivery flow with a live agents panel",
+  "plugins": [{ "name": "flowdeck", "source": "./", "description": "Orchestrated delivery flow with a live side panel" }]
+}

@@ -13,7 +13,7 @@ import { ARCHIVE_PAGE, archiveSection, UNREADABLE } from './archive-view'
 import type { FlowDrawing, FlowView, Planned } from './archive-view'
 import { importPlan, isFinished, isStoredStep, normalize, percent, PLAN_ID, placeBar, planId, str, where } from './plan'
 import { planBandSvg, planBandText, planRows, planSvg, STATE_COLOR, stateLabel } from './plan-view'
-import { cleanAfter, linkRuns, norm, taskOf, unstarted } from './tasks'
+import { cleanAfter, linkRuns, norm, taskOf, taskTag, unstarted, workerTier } from './tasks'
 import type { TaskLike } from './tasks'
 import { asAgents, asArchive, asFlow, asMeta, asNow, asPanel, asReading, asUsage, asVolumes, PANEL_DEFAULT } from './shapes'
 import { live, record, resetKey, resets, toWindows, usageRows, usageSvg } from './usage'
@@ -429,12 +429,11 @@ const costOf = (model: string, u: Usage): number => {
 const windowOf = (model: string): number => (/haiku/i.test(model) ? 200_000 : 1_000_000)
 
 // A worker's type is `flowdeck-careful`, or `flowdeck:flowdeck-careful` when the agents ship in the plugin.
-const isWorker = (type: string): boolean => /^(?:[^:]*:)?flowdeck-/.test(type)
+const isWorker = (type: string): boolean => workerTier(type) !== null
 
 const tierOf = (type: string): string => {
-  const bare = type.replace(/^[^:]*:/, '')
-  const t = bare.replace(/^flowdeck-/, '').toLowerCase()
-  return t in TIER_COLOR && bare.startsWith('flowdeck-') ? t : 'other'
+  const t = workerTier(type)
+  return t && t in TIER_COLOR ? t : 'other'
 }
 
 const modelName = (id: string): string => {
@@ -1305,11 +1304,11 @@ export const register: Register = (on, options) => {
           tasks: {
             type: 'array',
             description:
-              'The planned worker tasks in order, numbered from 1. Each title must equal the Agent tool `description` the task will be delegated with, so the panel can match runs to tasks. Give `after` to every task that depends on others; the panel marks a planned task `ready` once all it waits for is done, and every ready task should be launched at once, in parallel.',
+              'The planned worker tasks in order, numbered from 1. Delegate each with the Agent tool `description` `#<number> <title>` (e.g. `#3 History module`; a return round reuses it): the panel links the worker to its task by that number, else by the title. Give `after` to every task that depends on others; the panel marks a planned task `ready` once all it waits for is done, and every ready task should be launched at once, in parallel.',
             items: {
               type: 'object',
               properties: {
-                title: { type: 'string', description: 'A few words; reused verbatim as the Agent description.' },
+                title: { type: 'string', description: 'A few words; the Agent description is `#<number> <title>`.' },
                 tier: { type: 'string', enum: ['fable', 'heavy', 'careful', 'medium', 'light'] },
                 after: {
                   type: 'array',
@@ -1830,9 +1829,13 @@ export const register: Register = (on, options) => {
       const tasks: TaskLike[] = v.tasks ?? []
       const links = linkRuns(tasks, v.list)
       const taskFor = (a: AgentRun) => taskOf(tasks, links, a)
+      // A `#3 …` the description started with is not repeated after the number it gave.
       const nameOf = (a: AgentRun): string => {
         const t = taskFor(a)
-        return t ? `${t.n}. ${a.description || a.type}` : a.description || a.type
+        const d = a.description || a.type
+        if (!t) return d
+        const tag = taskTag(d)
+        return `${t.n}. ${tag.n === t.n ? tag.rest : d}`
       }
       const running = v.list.filter(a => a.status === 'running').reverse()
       // Archived rows leave the Finished list; the totals and the planned tasks still count them.
