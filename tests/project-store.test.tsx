@@ -1,6 +1,7 @@
 import { describe, expect, test } from 'claude-code/testing'
 
 import { keyOf } from '../hooks/archive'
+import { fileOf, indexPath, markerPath, records, seed, sessionPaths, sessions, titles } from './archive-files'
 import { fakeFs } from './fake-fs'
 import type { Fail } from './fake-fs'
 import { showTab } from './tabs'
@@ -8,9 +9,19 @@ import { showTab } from './tabs'
 const NOW = Date.UTC(2026, 9, 26, 12, 40)
 const HOUR = 3_600_000
 const DIR = '/work/app/.claude/flowdeck'
-const HISTORY = `${DIR}/history.json`
+const INDEX = indexPath(DIR)
 const PLANS = `${DIR}/plans.json`
 const IGNORE = `${DIR}/.gitignore`
+// A session's own file in `archive/`.
+const sessionFile = (e: { id: string; startedAt: number }, dir = DIR) => `${dir}/archive/${fileOf(e)}`
+// The flow that `flow` finishes at that clock: its id is its start and the project.
+const flowAt = (at: number, project = '/work/app') => ({ id: `${at}-${project}`, startedAt: at })
+// Files as a save leaves them: each session in its file, the index listing them.
+const seeded = (list: any[]): Record<string, string> => {
+  const files: Record<string, string> = {}
+  seed(files, DIR, list)
+  return files
+}
 
 type Opts = {
   store?: Record<string, unknown>
@@ -76,8 +87,8 @@ const archiveButtons = async ($: any): Promise<string[]> => {
   // the groups' fold keys: `archive-<keyOf(entry id)>`
   return all.map((b: any) => String(b.props.key)).filter((k: string) => /^archive-k[a-z0-9]+$/.test(k))
 }
-const titles = (text: string | undefined): string[] => (JSON.parse(text ?? '[]') as any[]).map(e => e.title)
-const WARNING = 'history.json could not be read; showing recovered entries (the file is untouched)'
+const DAMAGED = 'archive-index.json was damaged and is rebuilt from archive/; the damaged one is kept in .trash/damaged/'
+const UNREADABLE = 'archive-index.json could not be read; showing the sessions found in archive/ (the index is untouched)'
 
 const entry = (i: number, project = '/work/app', title = `Flow ${i}`) => ({
   id: `e${i}`,
@@ -95,19 +106,26 @@ const entry = (i: number, project = '/work/app', title = `Flow ${i}`) => ({
 })
 
 describe('the archive in the project folder', () => {
-  test('finishing a flow writes the entry to the project file and a self-ignoring .gitignore once', async ($, on) => {
+  test('finishing a flow writes its session file, then the index, and a self-ignoring .gitignore once', async ($, on) => {
     const { store, files, writes, clock } = engine(on)
     await start($)
     await flow($)
-    expect(titles(files[HISTORY])).toEqual(['Ship it'])
-    expect(JSON.parse(files[HISTORY])[0].project).toBe('/work/app')
+    expect(titles(sessions(files, DIR))).toEqual(['Ship it'])
+    expect(sessions(files, DIR)[0].project).toBe('/work/app')
+    expect(sessionPaths(files, DIR)).toEqual([sessionFile(flowAt(NOW))])
+    expect(titles(records(files, INDEX))).toEqual(['Ship it'])
+    // the session's own file first, the index after it
+    expect(writes).toEqual([IGNORE, sessionFile(flowAt(NOW)), INDEX])
     expect(files[IGNORE]).toBe('*\n')
     clock.now = NOW + 60_000
     await flow($, 'Second')
-    expect(titles(files[HISTORY])).toEqual(['Second', 'Ship it'])
+    expect(titles(sessions(files, DIR))).toEqual(['Second', 'Ship it'])
+    expect(titles(records(files, INDEX))).toEqual(['Second', 'Ship it'])
     expect(writes.filter(w => w === IGNORE)).toHaveLength(1)
     expect(writes.every(w => w.startsWith(`${DIR}/`))).toBe(true)
     expect('/work/app/.gitignore' in files).toBe(false)
+    // no old archive files: nothing to import, no marker
+    expect(markerPath(DIR) in files).toBe(false)
     expect(store.history).toBeUndefined()
   })
 
@@ -117,10 +135,12 @@ describe('the archive in the project folder', () => {
     await flow($)
     expect(files[IGNORE]).toBe('custom\n')
     expect(writes).not.toContain(IGNORE)
-    expect(writes).toContain(HISTORY)
+    expect(writes).toEqual([sessionFile(flowAt(NOW)), INDEX])
   })
 
   test('two projects keep separate files and separate panel lists', async ($, on) => {
+    const A = '/a/.claude/flowdeck'
+    const B = '/b/.claude/flowdeck'
     const { files, clock } = engine(on, { store: { historyShown: true } })
     await start($, '/a')
     await flow($, 'Alpha')
@@ -129,99 +149,108 @@ describe('the archive in the project folder', () => {
     await settle()
     expect(await archiveButtons($)).toEqual([])
     await flow($, 'Beta')
-    expect(titles(files['/a/.claude/flowdeck/history.json'])).toEqual(['Alpha'])
-    expect(titles(files['/b/.claude/flowdeck/history.json'])).toEqual(['Beta'])
-    const b = await archiveButtons($)
-    expect(b).toHaveLength(1)
-    expect(b[0]).toBe(`archive-${keyOf(JSON.parse(files['/b/.claude/flowdeck/history.json']!)[0].id)}`)
+    expect(titles(sessions(files, A))).toEqual(['Alpha'])
+    expect(titles(sessions(files, B))).toEqual(['Beta'])
+    expect(titles(records(files, indexPath(A)))).toEqual(['Alpha'])
+    expect(titles(records(files, indexPath(B)))).toEqual(['Beta'])
+    expect(sessionPaths(files, B)).toEqual([sessionFile(flowAt(NOW + 60_000, '/b'), B)])
+    expect(await archiveButtons($)).toEqual([`archive-${keyOf(sessions(files, B)[0].id)}`])
     await start($, '/a')
     await settle()
-    const a = await archiveButtons($)
-    expect(a).toHaveLength(1)
-    expect(a[0]).toBe(`archive-${keyOf(JSON.parse(files['/a/.claude/flowdeck/history.json']!)[0].id)}`)
+    expect(await archiveButtons($)).toEqual([`archive-${keyOf(sessions(files, A)[0].id)}`])
   })
 
-  test('a restart reads the file and the panel shows it', async ($, on) => {
-    engine(on, { store: { historyShown: true }, files: { [HISTORY]: JSON.stringify([entry(2), entry(1)]) } })
+  test('a restart reads the index, shows its sessions latest end first and reads only the open group’s file; it writes nothing', async ($, on) => {
+    const { writes, fs } = engine(on, { store: { historyShown: true }, files: seeded([entry(2), entry(1)]) })
     await start($)
     await settle()
-    const list = await archiveButtons($)
-    expect(list).toHaveLength(2)
-    expect(list[0]).toBe(`archive-${keyOf('e2')}`)
+    expect(await archiveButtons($)).toEqual([`archive-${keyOf('e1')}`, `archive-${keyOf('e2')}`])
+    expect(fs.reads).toContain(sessionFile(entry(1)))
+    expect(fs.reads).not.toContain(sessionFile(entry(2)))
+    expect(writes).toEqual([])
   })
 
-  test('a file of 60 entries keeps them all on the next save', async ($, on) => {
+  test('an index of 60 sessions keeps them all on the next save, which writes only the new session’s file', async ($, on) => {
     const many = Array.from({ length: 60 }, (_, i) => entry(i + 1))
-    const { files } = engine(on, { files: { [HISTORY]: JSON.stringify(many) } })
+    const { files, writes } = engine(on, { files: seeded(many) })
     await start($)
     await flow($)
-    const saved = titles(files[HISTORY])
+    const saved = titles(records(files, INDEX))
     expect(saved).toHaveLength(61)
     expect(saved[0]).toBe('Ship it')
     expect(saved[60]).toBe('Flow 60')
+    expect(sessionPaths(files, DIR)).toHaveLength(61)
+    expect(writes.filter(w => w.startsWith(`${DIR}/archive/`))).toEqual([sessionFile(flowAt(NOW))])
   })
 
-  test('a corrupt file is kept as it is and the panel says so; this project’s store entries still show, and the next flow goes to a side file and the store', async ($, on) => {
-    const { files, store } = engine(on, { store: { historyShown: true, history: [entry(9, '/work/app', 'Mine'), entry(8, '/old/site', 'Other')] }, files: { [HISTORY]: 'nope' } })
-    await start($)
-    await settle()
-    let p = await pane($)
-    expect(await p.find({ type: 'Text', text: WARNING })).toBeDefined()
-    await p.unmount()
-    const shown = await archiveButtons($)
-    expect(shown).toHaveLength(1)
-    expect(shown[0]).toBe(`archive-${keyOf('e9')}`)
-    await flow($)
-    expect(files[HISTORY]).toBe('nope')
-    expect(titles(files[`${DIR}/history-extra-${NOW}.json`])).toEqual(['Ship it'])
-    expect((store.history as any[]).map(e => e.title)).toEqual(['Ship it', 'Mine', 'Other'])
-    p = await pane($)
-    expect(await p.find({ type: 'Text', text: WARNING })).toBeDefined()
-    await p.unmount()
-    expect((await archiveButtons($)).map(b => (b === `archive-${keyOf('e9')}` ? 'Mine' : 'Ship it'))).toEqual(['Ship it', 'Mine'])
-  })
-
-  test('a file that is there but cannot be read (oversized) is never overwritten', async ($, on) => {
-    const big = JSON.stringify([entry(1)])
-    const { files } = engine(on, { store: { historyShown: true }, files: { [HISTORY]: big }, tooBig: [HISTORY, PLANS] })
+  test('a damaged index is kept in .trash/damaged/ and rebuilt from archive/, and the panel says so; this project’s store entries show, another’s do not', async ($, on) => {
+    const kept = entry(1, '/work/app', 'Kept')
+    const old = [entry(9, '/work/app', 'Mine'), entry(8, '/old/site', 'Other')]
+    const before = JSON.stringify(old)
+    const { files, store } = engine(on, { store: { historyShown: true, history: old }, files: { [INDEX]: 'nope', [sessionFile(kept)]: JSON.stringify(kept) } })
     await start($)
     await settle()
     const p = await pane($)
-    expect(await p.find({ type: 'Text', text: /no archive yet/ })).toBeDefined()
-    expect(await p.find({ type: 'Text', text: WARNING })).toBeDefined()
+    expect(await p.find({ type: 'Text', text: DAMAGED })).toBeDefined()
     await p.unmount()
-    expect(String((await flow($)).result)).toContain('ok')
-    expect(files[HISTORY]).toBe(big)
-    expect(titles(files[`${DIR}/history-extra-${NOW}.json`])).toEqual(['Ship it'])
+    expect(files[`${DIR}/.trash/damaged/archive-index-${NOW}.json`]).toBe('nope')
+    expect(titles(records(files, INDEX))).toEqual(['Kept', 'Mine'])
+    expect(await archiveButtons($)).toEqual([`archive-${keyOf('e1')}`, `archive-${keyOf('e9')}`])
+    await flow($)
+    expect(titles(records(files, INDEX))).toEqual(['Ship it', 'Kept', 'Mine'])
+    expect(titles(sessions(files, DIR))).toEqual(['Ship it', 'Kept', 'Mine'])
+    expect(JSON.stringify(store.history)).toBe(before)
   })
 
-  test('a missing file imports only this project’s entries from the old store, which stays untouched', async ($, on) => {
+  test('an index that is there but cannot be read (oversized) is never written; the flow still gets its file and shows', async ($, on) => {
+    const big = JSON.stringify({ version: 1, sessions: [] })
+    const { files, fs, store } = engine(on, { store: { historyShown: true }, files: { [INDEX]: big }, tooBig: [INDEX] })
+    await start($)
+    await settle()
+    let p = await pane($)
+    expect(await p.find({ type: 'Text', text: /no archive yet/ })).toBeDefined()
+    expect(await p.find({ type: 'Text', text: UNREADABLE })).toBeDefined()
+    await p.unmount()
+    expect(String((await flow($)).result)).toContain('ok')
+    expect(files[INDEX]).toBe(big)
+    expect(fs.tried.map(t => t.path)).not.toContain(INDEX)
+    expect(titles(sessions(files, DIR))).toEqual(['Ship it'])
+    expect(store.history).toBeUndefined()
+    expect(await archiveButtons($)).toEqual([`archive-${keyOf(flowAt(NOW).id)}`])
+    p = await pane($)
+    expect(await p.find({ type: 'Text', text: UNREADABLE })).toBeDefined()
+    await p.unmount()
+  })
+
+  test('a missing index takes only this project’s entries from the old store into session files at load; the store stays untouched', async ($, on) => {
     const old = [entry(1, '/work/app', 'Mine'), entry(2, '/old/site', 'Other'), entry(3, '/work/app', 'Mine too')]
     const before = JSON.stringify(old)
     const { files, store, clock } = engine(on, { store: { historyShown: true, history: old } })
     await start($)
     await settle()
-    const shown = await archiveButtons($)
-    expect(shown).toHaveLength(2)
-    expect(shown.includes(`archive-${keyOf('e2')}`)).toBe(false)
+    expect(await archiveButtons($)).toEqual([`archive-${keyOf('e1')}`, `archive-${keyOf('e3')}`])
+    expect(titles(sessions(files, DIR))).toEqual(['Mine', 'Mine too'])
+    expect(titles(records(files, INDEX))).toEqual(['Mine', 'Mine too'])
     await flow($)
-    expect(titles(files[HISTORY])).toEqual(['Ship it', 'Mine', 'Mine too'])
+    expect(titles(records(files, INDEX))).toEqual(['Ship it', 'Mine', 'Mine too'])
     clock.now = NOW + 60_000
     await flow($, 'Second')
-    expect(titles(files[HISTORY])).toEqual(['Second', 'Ship it', 'Mine', 'Mine too'])
+    expect(titles(records(files, INDEX))).toEqual(['Second', 'Ship it', 'Mine', 'Mine too'])
+    expect(titles(sessions(files, DIR))).toEqual(['Second', 'Ship it', 'Mine', 'Mine too'])
     expect(JSON.stringify(store.history)).toBe(before)
   })
 
-  test('store entries of this project that the file lacks are merged back into it; the store is left as it is', async ($, on) => {
+  test('store entries of this project that the index lacks are put into it once; the store is left as it is', async ($, on) => {
     const old = [entry(1, '/work/app', 'Mine'), entry(2, '/old/site', 'Other')]
     const before = JSON.stringify(old)
-    const { files, store, clock } = engine(on, { store: { history: old }, files: { [HISTORY]: '[]' } })
+    const { files, store, clock, writes } = engine(on, { store: { history: old }, files: seeded([]) })
     await start($)
     await flow($)
-    expect(titles(files[HISTORY])).toEqual(['Ship it', 'Mine'])
+    expect(titles(records(files, INDEX))).toEqual(['Ship it', 'Mine'])
     clock.now = NOW + 60_000
     await flow($, 'Again')
-    expect(titles(files[HISTORY])).toEqual(['Again', 'Ship it', 'Mine'])
+    expect(titles(records(files, INDEX))).toEqual(['Again', 'Ship it', 'Mine'])
+    expect(writes.filter(w => w === sessionFile(old[0]!))).toHaveLength(1)
     expect(JSON.stringify(store.history)).toBe(before)
   })
 
@@ -230,11 +259,25 @@ describe('the archive in the project folder', () => {
     await start($)
     expect(String((await flow($)).result)).toContain('ok')
     expect((store.history as any[]).map(e => e.title)).toEqual(['Ship it'])
-    expect(HISTORY in files).toBe(false)
-    const shown = await archiveButtons($)
-    expect(shown).toHaveLength(1)
+    expect(sessionPaths(files, DIR)).toEqual([])
+    expect(INDEX in files).toBe(false)
+    expect(await archiveButtons($)).toEqual([`archive-${keyOf(flowAt(NOW).id)}`])
     expect(await planTool($, { id: 'work', title: 'x', stages: STAGES })).toBe('work: 0/2, running, active "write tests"')
     expect((store.plans as any).s).toHaveLength(1)
+  })
+
+  test('a flow neither the folder nor the store can take still shows for this session, and the panel says so', async ($, on) => {
+    const { store, files, fail } = engine(on, { store: { historyShown: true }, fail: { write: true } })
+    await start($)
+    fail.store = true
+    expect(String((await flow($)).result)).toContain('ok')
+    fail.store = false
+    expect(store.history).toBeUndefined()
+    expect(sessionPaths(files, DIR)).toEqual([])
+    expect(await archiveButtons($)).toEqual([`archive-${keyOf(flowAt(NOW).id)}`])
+    const p = await pane($)
+    expect(await p.find({ type: 'Text', text: 'could not save "Ship it" anywhere; it shows for this session only' })).toBeDefined()
+    await p.unmount()
   })
 
   test('an empty working folder uses the shared store', async ($, on) => {
@@ -246,28 +289,28 @@ describe('the archive in the project folder', () => {
     expect((store.plans as any).s).toHaveLength(1)
     expect(writes).toEqual([])
   })
-  test('a flow that went to the store because the write failed comes back into the file with the next save; the store keeps it', async ($, on) => {
+  test('a flow that went to the store because the write failed gets its session file at the next load; the store keeps it', async ($, on) => {
     const { files, store, fail, clock } = engine(on, { store: { historyShown: true } })
     fail.write = true
     await start($)
     await flow($)
-    expect(HISTORY in files).toBe(false)
+    expect(sessionPaths(files, DIR)).toEqual([])
     expect((store.history as any[]).map(e => e.title)).toEqual(['Ship it'])
     const kept = JSON.stringify(store.history)
     fail.write = false
     clock.now = NOW + 60_000
     await start($)
     await settle()
+    expect(sessionPaths(files, DIR)).toEqual([sessionFile(flowAt(NOW))])
+    expect(titles(records(files, INDEX))).toEqual(['Ship it'])
     expect(await archiveButtons($)).toHaveLength(1)
     await flow($, 'Second')
-    expect(titles(files[HISTORY])).toEqual(['Second', 'Ship it'])
+    expect(titles(sessions(files, DIR))).toEqual(['Second', 'Ship it'])
+    expect(titles(records(files, INDEX))).toEqual(['Second', 'Ship it'])
     expect(JSON.stringify(store.history)).toBe(kept)
     await start($)
     await settle()
-    const p = await pane($)
-    const groups = (await p.findAll({ type: 'Button' })).map((b: any) => String(b.props.key)).filter((k: string) => /^archive-k[a-z0-9]+$/.test(k))
-    await p.unmount()
-    expect(groups).toEqual([`archive-${keyOf(`${NOW + 60_000}-/work/app`)}`, `archive-${keyOf(`${NOW}-/work/app`)}`])
+    expect(await archiveButtons($)).toEqual([`archive-${keyOf(flowAt(NOW + 60_000).id)}`, `archive-${keyOf(flowAt(NOW).id)}`])
   })
 })
 

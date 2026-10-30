@@ -265,7 +265,8 @@ describe('archive section in the panel', () => {
   })
 
   test('a stored shown choice starts shown, newest first, on the desktop too', async ($, on) => {
-    engine(on, { store: { historyShown: true, history: [entry(2), entry(1)] } })
+    // e2 ended later: the order comes from the end (equal ends would sort by id)
+    engine(on, { store: { historyShown: true, history: [entry(2, { endedAt: NOW - HOUR / 2 }), entry(1)] } })
     await start($)
     await settle()
     for (const surface of ['terminal', 'desktop'] as const) {

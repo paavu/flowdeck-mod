@@ -1,7 +1,9 @@
 import { describe, expect, test } from 'claude-code/testing'
 
-import { addEntry, groupLine, isWorthKeeping, keyOf, parseArchive, planEntry, rotate, snapshot } from '../hooks/archive'
+import { addEntry, groupLine as lineOf, isWorthKeeping, keyOf, parseArchive, parseSession, planEntry, snapshot } from '../hooks/archive'
+import { recordOf, sessionName } from '../hooks/archive-index'
 import type { AgentRun, ArchiveEntry, Flow, TaskPlan } from '../types'
+import { fileOf, indexPath, records, sessions } from './archive-files'
 import { fakeFs } from './fake-fs'
 import { acrossTabs, showTab } from './tabs'
 import type { Tab } from './tabs'
@@ -120,6 +122,8 @@ describe('plan entries, pure', () => {
   })
 
   test('groupLine for a plan: the date then its step count in brackets, narrowing like a flow’s', () => {
+    // the fold line is drawn from the session's index record, which carries the item count
+    const groupLine = (x: ArchiveEntry, cols: number, tz?: string) => lineOf(recordOf(x, fileOf(x), 0), cols, tz)
     const e = planEntry(donePlan({ startedAt: Date.UTC(2026, 9, 26, 9, 0), endedAt: Date.UTC(2026, 9, 26, 10, 42) }), PROJECT, NOW)
     expect(groupLine(e, 40, 'UTC')).toBe('Oct 26, 2026 · 10:42 (3)')
     expect(groupLine(e, 24, 'UTC')).toBe('Oct 26, 2026 · 10:42 (3)')
@@ -132,7 +136,7 @@ describe('plan entries, pure', () => {
     expect(groupLine(flowEntry(1, { endedAt: Date.UTC(2026, 9, 26, 10, 42), startedAt: Date.UTC(2026, 9, 26, 9, 0) }), 40, 'UTC')).toBe('Oct 26, 2026 · 10:42 (1)')
   })
 
-  test('addEntry puts a plan where it belongs by its end; a flow still goes first; a second save replaces the first', () => {
+  test('addEntry puts a plan where it belongs by its end, a flow too; a second save replaces the first', () => {
     const newer = flowEntry(0, { id: 'newer', endedAt: NOW + HOUR })
     const older = flowEntry(1)
     const e = planEntry(donePlan(), PROJECT, NOW)
@@ -142,14 +146,20 @@ describe('plan entries, pure', () => {
     const again = planEntry(donePlan({ endedAt: NOW + 2 * HOUR }), PROJECT, NOW)
     expect(addEntry(list, again).map(x => x.id)).toEqual([e.id, 'newer', 'e1'])
     expect(addEntry(list, again).filter(x => x.id === e.id)[0]!.endedAt).toBe(NOW + 2 * HOUR)
-    expect(addEntry(list, flowEntry(5, { id: 'flow' })).map(x => x.id)[0]).toBe('flow')
+    // one order for every entry: a flow saved now that ended before them all goes last, one that ended last goes first
+    expect(addEntry(list, flowEntry(5, { id: 'flow' })).map(x => x.id)).toEqual(['newer', e.id, 'e1', 'flow'])
+    expect(addEntry(list, flowEntry(5, { id: 'flow', endedAt: NOW + 3 * HOUR })).map(x => x.id)[0]).toBe('flow')
   })
 
-  test('rotation moves plan entries into volumes like any entry, intact', () => {
+  test('a plan entry is a session file of its own like any entry, intact, and its index record counts its steps', () => {
     const plans = Array.from({ length: 12 }, (_, i) => planEntry(donePlan({ id: `p${i}`, startedAt: NOW - (i + 1) * DAY, endedAt: NOW - (i + 1) * DAY + HOUR }), PROJECT, NOW))
-    const { kept, volumes } = rotate(plans, 3000)
-    expect(volumes.length).toBeGreaterThan(0)
-    expect([...kept, ...[...volumes].reverse().flat()]).toEqual(plans)
+    expect(new Set(plans.map(p => sessionName(p))).size).toBe(12)
+    for (const p of plans) {
+      const text = JSON.stringify(p)
+      expect(sessionName(p)).toBe(`${keyOf(p.id)}-${p.startedAt}.json`)
+      expect(parseSession(JSON.parse(text))).toEqual(p)
+      expect(recordOf(p, sessionName(p), text.length)).toMatchObject({ id: p.id, kind: 'plan', title: 'Beta cleanup', itemCount: 3, taskCount: 3, cost: 0, tokens: 0, time: HOUR })
+    }
   })
 })
 
@@ -473,14 +483,14 @@ describe('an Archive group draws no planned block', () => {
 // --- on disk: the plan save takes the flows' path
 
 const DIR = `${PROJECT}/.claude/flowdeck`
+// The archive file before 1.0.0025: read once by the migration, never written.
 const HISTORY = `${DIR}/history.json`
-const LIMIT = 2000
 
 function diskEngine(on: any, files: Record<string, string> = {}) {
   const fs = fakeFs(on, { files })
   const clock = { now: NOW }
   const store: Record<string, unknown> = {}
-  on('env.get', (_$: any, e: any) => ({ value: e.name === 'FLOWDECK_HISTORY_SEGMENT_MAX' ? String(LIMIT) : undefined }))
+  on('env.get', () => ({ value: undefined }))
   on('settings.read', () => ({ value: {} }))
   on('clock.every', () => ({ value: undefined }))
   on('clock.now', () => ({ value: clock.now }))
@@ -501,37 +511,43 @@ function diskEngine(on: any, files: Record<string, string> = {}) {
   return { fs, clock, store }
 }
 
-const idsIn = (text: string | undefined): string[] => (text === undefined ? [] : (JSON.parse(text) as any[]).map(e => e.id))
-
 describe('plan entries on disk', () => {
-  test('the plan save writes its side file first, then history.json; the store is not used', async ($, on) => {
+  test('the plan save writes its session file first, then archive-index.json; the store is not used', async ($, on) => {
     const { fs, store } = diskEngine(on)
     await start($)
     await create($)
     await finish($)
-    const order = fs.writes.filter(w => /history/.test(w))
-    expect(order[0]).toBe(`${DIR}/history-extra-${NOW}.json`)
-    expect(order).toContain(HISTORY)
-    const [e] = parseArchive(JSON.parse(fs.files[HISTORY]!))
+    const id = `plan-beta-${NOW}-${PROJECT}`
+    const file = fileOf({ id, startedAt: NOW })
+    const order = fs.writes.filter(w => /\/archive/.test(w))
+    expect(order).toEqual([`${DIR}/archive/${file}`, indexPath(DIR)])
+    const e = parseSession(JSON.parse(fs.files[`${DIR}/archive/${file}`]!))
     expect(e!.plan!.title).toBe('Beta cleanup')
+    expect(records(fs.files, indexPath(DIR))).toEqual([expect.objectContaining({ id, file, kind: 'plan', itemCount: 3 })])
+    expect(fs.writes).not.toContain(HISTORY)
     expect(store.history).toBeUndefined()
   })
 
-  test('plan entries survive a volume rotation: every id is kept once, each plan intact', async ($, on) => {
+  test('plan entries in the old archive are imported into session files: every id once, each plan intact', async ($, on) => {
     const plans = Array.from({ length: 3 }, (_, i) => planEntry(donePlan({ id: `old${i}`, startedAt: NOW - (i + 2) * DAY, endedAt: NOW - (i + 2) * DAY + HOUR }), PROJECT, NOW))
-    const seeded: ArchiveEntry[] = [...plans]
-    for (let i = 10; JSON.stringify([...seeded, flowEntry(i)]).length < LIMIT; i++) seeded.push(flowEntry(i))
-    const { fs } = diskEngine(on, { [HISTORY]: JSON.stringify(seeded) })
+    const seeded: ArchiveEntry[] = [...plans, ...Array.from({ length: 10 }, (_, i) => flowEntry(i + 10))]
+    const legacy = JSON.stringify(seeded)
+    const { fs } = diskEngine(on, { [HISTORY]: legacy })
     await start($)
     await create($)
     await finish($)
-    const volumes = Object.keys(fs.files).filter(p => /\/history-\d+\.json$/.test(p))
-    expect(volumes.length).toBeGreaterThan(0)
-    const all = [HISTORY, ...volumes].flatMap(p => parseArchive(JSON.parse(fs.files[p]!)))
+    const all = sessions(fs.files, DIR)
     const ids = all.map(e => e.id)
     expect(new Set(ids).size).toBe(ids.length)
-    expect(ids.sort()).toEqual([...seeded.map(e => e.id), `plan-beta-${NOW}-${PROJECT}`].sort())
+    expect([...ids].sort()).toEqual([...seeded.map(e => e.id), `plan-beta-${NOW}-${PROJECT}`].sort())
     for (const p of plans) expect(all.find(e => e.id === p.id)).toEqual(p)
-    expect(idsIn(fs.files[HISTORY])[0]).toBe(`plan-beta-${NOW}-${PROJECT}`)
+    // the index lists them all, the new plan (the latest end) first
+    const recs = records(fs.files, indexPath(DIR))!
+    expect(recs.map(r => r.id).sort()).toEqual([...ids].sort())
+    expect(recs[0]!.id).toBe(`plan-beta-${NOW}-${PROJECT}`)
+    expect(recs.filter(r => r.kind === 'plan')).toHaveLength(4)
+    // the old file is left as it was
+    expect(fs.files[HISTORY]).toBe(legacy)
+    expect(fs.writes).not.toContain(HISTORY)
   })
 })

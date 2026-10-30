@@ -40,6 +40,8 @@ export type Flow = {
   tasks: PlannedTask[]
   /** The task numbers (from 1) accepted after review, when `progress` named them; without it the first `done` tasks count as accepted. */
   accepted?: number[]
+  /** When each accepted task was accepted, by task number; absent for tasks accepted before 1.0.0025. */
+  acceptedAt?: Record<string, number>
 }
 
 export type AgentStatus = 'running' | 'done' | 'failed'
@@ -95,6 +97,8 @@ export type ArchiveEntry = {
   tasks: ArchiveTask[]
   /** The task numbers (from 1) accepted after review, when the flow named them; without it the first `done` tasks count. */
   accepted?: number[]
+  /** When each accepted task was accepted, by task number; without it the entry's `endedAt` stands in. */
+  acceptedAt?: Record<string, number>
   cost: number // USD
   tokens: number
   time: number // ms
@@ -106,19 +110,44 @@ export type ArchiveEntry = {
   plan?: TaskPlan
 }
 
-/** One archive volume (a `history-<n>.json` file) in the volume index `history-index.json`: its entries summed up. */
-export type ArchiveVolume = {
-  file: string // `history-<n>.json`
-  count: number
-  from: number // earliest startedAt
-  to: number // latest endedAt
+/**
+ * One saved session as `archive-index.json` (or `.trash/trash-index.json`) lists it: what the collapsed row draws, so the
+ * list never reads a session file. The session itself is the file `file`, in `archive/` (or in `.trash/`).
+ */
+export type ArchiveRecord = {
+  id: string
+  file: string
+  kind: 'flow' | 'plan'
+  title: string
+  startedAt: number
+  /** The session's own end (a trashed one keeps it): the lists are ordered by it. */
+  endedAt: number
+  status: 'finished' | 'open'
+  partial?: boolean
+  /** The rows its group holds: its runs, or the tasks of a flow saved without runs, or a plan's steps. */
+  itemCount: number
+  taskCount: number
   cost: number // USD
   tokens: number
   time: number // ms
-  size: number // serialized UTF-8 bytes
-  /** Each flow it holds as [startedAt, endedAt]; absent in an index written before 1.0.0007. */
-  flows?: [number, number][]
+  size: number // the file's UTF-8 bytes
+  /** The file was not in its folder when the index was last checked; the record is kept. */
+  missing?: boolean
+  /** When it went to the trash (archive-index) or when this trash copy was made (trash-index). */
+  trashedAt?: number
+  /** When it came back from the trash. */
+  restoredAt?: number
+  /** Trash-index only: the file's name in `archive/`. */
+  originalFile?: string
+  /** In memory only: a session only the shared store holds (no project folder, or the folder refused it). */
+  source?: 'store'
 }
+
+/** The Archive and Trash tabs' lists, newest first by the session's end, and what the last read or save could not do. */
+export type ArchiveLists = { records: ArchiveRecord[]; trash: ArchiveRecord[]; warnings: string[] }
+
+/** One session's file read for an open group; at most 10 are held. */
+export type ArchiveDetail = { list: 'archive' | 'trash'; id: string; state: 'loading' | 'ok' | 'error'; entry?: ArchiveEntry }
 
 export type Panel = {
   isCompact: boolean
@@ -130,30 +159,24 @@ export type Panel = {
   isBandHidden: boolean
   /** Stored under the engine-store key `historyShown`, its name from before the rename. */
   isArchiveShown: boolean
-  /** Archive groups the user opened (the first group shown is open by default); this session only. */
+  /** Archive groups the user opened (the first group shown is open by default), by session id, a Trash group's as `trash:<id>`; this session only. */
   openEntries: string[]
   /** Agent rows unfolded to show their items; this session only. */
   openAgents: string[]
-  /** Archive groups the user folded, the default-open first one included; this session only. */
+  /** Archive and Trash groups the user folded, the default-open first one included; this session only. */
   closedEntries: string[]
-  /** How many archive groups are shown; this session only. */
+  /** How many Archive rows are drawn (`Show more` adds a page); this session only. */
   archiveLimit: number
-  /** The list of archive volumes is open; this session only. */
-  archiveListOpen: boolean
-  /** The volume file shown, null for the latest part (history.json); this session only. */
-  archiveVolume: string | null
-  /** The volume file that could not be loaded, '' when none; this session only. */
-  archiveError: string
-  /** Why the latest view shows only recovered entries ('' when history.json was read); this session only. */
-  archiveWarning?: string
+  /** How many Trash rows are drawn; this session only. */
+  trashLimit: number
+  /** The one move-to-trash or restore confirmation open, null when none; this session only. */
+  confirm: { list: 'archive' | 'trash'; id: string } | null
   autoOpenedFor: string
   /** The list the panel's flowdeck group shows under its tabs; this session only. */
   tab: PanelTab
-  /** How many entries the latest part (history.json) holds while a volume is shown, for the Archive tab's count; this session only. */
-  archiveLatestCount: number
 }
 
-export type PanelTab = 'active' | 'finished' | 'plans' | 'archive'
+export type PanelTab = 'active' | 'finished' | 'plans' | 'archive' | 'trash'
 
 // The task plan, a model beside Flow for any task: stages of steps (ported from plan-progress 0.8.2).
 export type StepStatus = 'pending' | 'active' | 'done' | 'error' | 'skipped'
@@ -181,8 +204,10 @@ declare module 'claude-code' {
       reading: Reading | null
       usage: { windows: UsageWindow[]; samples: Samples }
       now: number
-      archive: ArchiveEntry[]
-      volumes: ArchiveVolume[]
+      /** The Archive and Trash lists, from their indexes. */
+      archiveLists: ArchiveLists
+      /** The session files read for open groups, at most 10. */
+      archiveDetails: ArchiveDetail[]
       flowMeta: { startedAt: number; project: string } | null
       plans: TaskPlan[]
       /** Why the band above the prompt last failed in this load (the panel's `band error` line), '' when it has not. */

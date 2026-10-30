@@ -120,7 +120,7 @@ describe('accepted tasks in the panel', () => {
     await start($)
     await progress($, { title: 'Ship', phase: 'delegate', tasks: PLAN })
     expect(await progress($, { done: 1 })).toBe('ok: Tasks 1/4')
-    expect((await terminal($)).text).toMatch(/✓ 1\. Read code/)
+    expect((await terminal($)).text).toMatch(/✓ {3}1\. Read code/)
     expect(await progress($, { done: [4] })).toBe('ok: Tasks 2/4')
     const t = await terminal($)
     expect(t.text).toMatch(/1\. Read code/)
@@ -196,9 +196,9 @@ describe('accepted tasks in the panel', () => {
     await p.unmount()
     const txt = (await terminal($, ['archive'])).text
     const [first, second] = txt.split(/▾ /).slice(1)
-    expect(first).toMatch(/✓ 3\. Polish/)
+    expect(first).toMatch(/✓ {3}3\. Polish/)
     expect(first).not.toMatch(/1\. Read code/)
-    expect(second).toMatch(/✓ 1\. Read code/)
+    expect(second).toMatch(/✓ {3}1\. Read code/)
     expect(second).not.toMatch(/3\. Polish/)
   })
 

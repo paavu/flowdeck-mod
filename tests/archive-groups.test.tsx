@@ -1,7 +1,12 @@
 import { describe, expect, test } from 'claude-code/testing'
 
-import { addEntry, entryDate, formatEntry, groupLine, keyOf, MAX_AGENTS, MAX_ARCHIVE_BYTES, parseArchive, snapshot, splitBySize } from '../hooks/archive'
+import { addEntry, entryDate, formatEntry, groupLine, keyOf, MAX_AGENTS, MAX_ARCHIVE_BYTES, parseArchive, snapshot } from '../hooks/archive'
+import { recordOf } from '../hooks/archive-index'
+import { dataDir, saveSession } from '../hooks/archive-store'
+import type { Io } from '../hooks/archive-store'
 import { STATE_COLOR } from '../hooks/plan-view'
+import { doneText } from '../hooks/time'
+import { fileOf, indexPath, records, sessionPaths, sessions } from './archive-files'
 import { showTab } from './tabs'
 import type { Tab } from './tabs'
 import type { AgentRun, Flow, ArchiveEntry } from '../types'
@@ -164,21 +169,35 @@ describe('the archive is never cut', () => {
     expect(h[0]!.startedAt).toBe(NOW + 119)
   })
 
-  test('splitBySize keeps the newest under 2,500,000 bytes and returns the rest as overflow', () => {
+  test('each session is its own file: an archive far past 2,500,000 bytes is saved whole, no file near the limit', async () => {
+    // the project folder's files in memory, as the engine's fs keeps them
+    const files: Record<string, string> = {}
+    const names = (dir: string) => Object.keys(files).filter(p => p.startsWith(`${dir}/`) && !p.slice(dir.length + 1).includes('/'))
+    const missing = () => {
+      throw new Error('ENOENT')
+    }
+    const io: Io = {
+      read: p => (p in files ? files[p] : missing()),
+      write: (p, text) => void (files[p] = text),
+      stat: p => (p in files ? { kind: 'file', size: utf8(files[p]!) } : missing()),
+      list: dir => (names(dir).length ? names(dir).map(p => ({ name: p.slice(dir.length + 1), kind: 'file' })) : missing()),
+      exists: p => p in files,
+      storeGet: async () => undefined,
+      storeSet: async () => undefined,
+    }
     const base = big(0)
-    const list = Array.from({ length: 400 }, (_, i) => ({ ...base, id: `big-${399 - i}`, startedAt: NOW + (399 - i) * MIN })) // newest first
-    const { kept, overflow } = splitBySize(list, MAX_ARCHIVE_BYTES)
+    const list = Array.from({ length: 40 }, (_, i) => ({ ...base, id: `big-${i}`, startedAt: NOW + i * MIN, endedAt: NOW + i * MIN + 1 }))
     expect(MAX_ARCHIVE_BYTES).toBe(2_500_000)
-    expect(utf8(JSON.stringify(kept))).toBeLessThan(2_500_000)
-    expect(kept.length).toBeGreaterThan(0)
-    expect(overflow.length).toBeGreaterThan(0)
-    expect(kept[0]!.id).toBe(list[0]!.id)
-    expect([...kept, ...overflow].map(e => e.id)).toEqual(list.map(e => e.id))
-    // one more would pass the limit
-    expect(utf8(JSON.stringify([...kept, overflow[0]]))).toBeGreaterThanOrEqual(2_500_000)
-    const small = splitBySize(list.slice(0, 2), MAX_ARCHIVE_BYTES)
-    expect(small.kept.length).toBe(2)
-    expect(small.overflow).toEqual([])
+    expect(utf8(JSON.stringify(list))).toBeGreaterThan(2_500_000)
+    for (const e of list) expect((await saveSession(io, '/work/app', e, e.endedAt)).isSaved).toBe(true)
+    const DIR = dataDir('/work/app')
+    expect(sessionPaths(files, DIR)).toEqual(list.map(e => `${DIR}/archive/${fileOf(e)}`).sort())
+    for (const p of sessionPaths(files, DIR)) expect(utf8(files[p]!)).toBeLessThan(MAX_ARCHIVE_BYTES / 10)
+    expect(utf8(files[indexPath(DIR)]!)).toBeLessThan(MAX_ARCHIVE_BYTES / 100)
+    // every session kept as saved, the index listing each once, newest first
+    expect(sessions(files, DIR).map(e => e.id)).toEqual([...list].reverse().map(e => e.id))
+    expect(records(files, indexPath(DIR))!.map(r => r.id)).toEqual([...list].reverse().map(e => e.id))
+    expect(sessions(files, DIR)[39]).toEqual(list[0])
   })
 
   test('addEntry on an archive past the limit still keeps everything', () => {
@@ -228,28 +247,31 @@ describe('the group date', () => {
     expect(entryDate(e(at(2026, 10, 26, 9, 0), at(2026, 10, 26, 10, 42)), 'UTC', true)).toBe('Oct 26, 2026')
   })
 
+  // The fold line is drawn from the session's index record, which carries the item count.
+  const lineOf = (x: ArchiveEntry, cols: number, tz?: string) => groupLine(recordOf(x, fileOf(x), 0), cols, tz)
+
   test('groupLine: the session name (end date and time) and its item count in brackets, on one line', () => {
     const x = { ...e(at(2026, 10, 26, 9, 0), at(2026, 10, 26, 10, 42)), agents: Array.from({ length: 17 }, (_, i) => run({ id: `a${i}` })) } as ArchiveEntry
-    expect(groupLine(x, 90, 'UTC')).toBe('Oct 26, 2026 · 10:42 (17)')
-    expect(groupLine({ ...x, agents: [run()] }, 90, 'UTC')).toBe('Oct 26, 2026 · 10:42 (1)')
-    expect(groupLine({ ...x, startedAt: at(2026, 10, 25, 23, 0) }, 90, 'UTC')).toBe('Oct 25 → Oct 26, 2026 · 10:42 (17)')
-    expect(groupLine({ ...x, partial: true }, 90, 'UTC')).toBe('Oct 26, 2026 · 10:42 (17) · running')
+    expect(lineOf(x, 90, 'UTC')).toBe('Oct 26, 2026 · 10:42 (17)')
+    expect(lineOf({ ...x, agents: [run()] }, 90, 'UTC')).toBe('Oct 26, 2026 · 10:42 (1)')
+    expect(lineOf({ ...x, startedAt: at(2026, 10, 25, 23, 0) }, 90, 'UTC')).toBe('Oct 25 → Oct 26, 2026 · 10:42 (17)')
+    expect(lineOf({ ...x, partial: true }, 90, 'UTC')).toBe('Oct 26, 2026 · 10:42 (17) · running')
     // an entry saved without agents counts its tasks
-    expect(groupLine({ ...x, agents: undefined }, 90, 'UTC')).toBe('Oct 26, 2026 · 10:42 (3)')
-    expect(groupLine({ ...x, tasks: [x.tasks[0]!], agents: undefined }, 90, 'UTC')).toBe('Oct 26, 2026 · 10:42 (1)')
-    for (const status of ['finished', 'open'] as const) expect(groupLine({ ...x, status }, 90, 'UTC')).not.toMatch(/items|finished|ended|17\/17|Ship it/)
+    expect(lineOf({ ...x, agents: undefined }, 90, 'UTC')).toBe('Oct 26, 2026 · 10:42 (3)')
+    expect(lineOf({ ...x, tasks: [x.tasks[0]!], agents: undefined }, 90, 'UTC')).toBe('Oct 26, 2026 · 10:42 (1)')
+    for (const status of ['finished', 'open'] as const) expect(lineOf({ ...x, status }, 90, 'UTC')).not.toMatch(/items|finished|ended|17\/17|Ship it/)
   })
 
   test('groupLine narrows: the time of day goes first, then the running mark; the count stays', () => {
     const x = { ...e(at(2026, 10, 26, 9, 0), at(2026, 10, 26, 10, 42)), agents: Array.from({ length: 17 }, (_, i) => run({ id: `a${i}` })) } as ArchiveEntry
-    expect(groupLine(x, 25, 'UTC')).toBe('Oct 26, 2026 · 10:42 (17)')
-    expect(groupLine(x, 24, 'UTC')).toBe('Oct 26, 2026 (17)')
-    expect(groupLine({ ...x, partial: true }, 35, 'UTC')).toBe('Oct 26, 2026 · 10:42 (17) · running')
-    expect(groupLine({ ...x, partial: true }, 30, 'UTC')).toBe('Oct 26, 2026 (17) · running')
-    expect(groupLine({ ...x, partial: true }, 20, 'UTC')).toBe('Oct 26, 2026 (17)')
-    for (const w of [90, 25, 17]) expect(groupLine(x, w, 'UTC').length).toBeLessThanOrEqual(w)
+    expect(lineOf(x, 25, 'UTC')).toBe('Oct 26, 2026 · 10:42 (17)')
+    expect(lineOf(x, 24, 'UTC')).toBe('Oct 26, 2026 (17)')
+    expect(lineOf({ ...x, partial: true }, 35, 'UTC')).toBe('Oct 26, 2026 · 10:42 (17) · running')
+    expect(lineOf({ ...x, partial: true }, 30, 'UTC')).toBe('Oct 26, 2026 (17) · running')
+    expect(lineOf({ ...x, partial: true }, 20, 'UTC')).toBe('Oct 26, 2026 (17)')
+    for (const w of [90, 25, 17]) expect(lineOf(x, w, 'UTC').length).toBeLessThanOrEqual(w)
     // too narrow for anything: the shortest form, truncated by the view
-    expect(groupLine(x, 5, 'UTC')).toBe('Oct 26, 2026 (17)')
+    expect(lineOf(x, 5, 'UTC')).toBe('Oct 26, 2026 (17)')
   })
 })
 
@@ -309,9 +331,10 @@ const terminal = async ($: any, tab: Tab = 'archive') => {
 const desktop = async ($: any) => {
   const p = await pane($, 'desktop')
   const svgs = await p.findAll({ type: 'Svg' })
+  const texts = await p.findAll({ type: 'Text' })
   const buttons = await own(p)
   await p.unmount()
-  return { svgs, buttons, keys: buttons.map((b: any) => String(b.props.key)), alts: svgs.map((s: any) => String(s.props.alt ?? '')) }
+  return { svgs, texts, buttons, keys: buttons.map((b: any) => String(b.props.key)), alts: svgs.map((s: any) => String(s.props.alt ?? '')) }
 }
 
 // Two saved flows with their agents: the newer one has a done run, a failed run with items and an unstarted task.
@@ -340,7 +363,7 @@ const groupB = (): ArchiveEntry =>
 const DATE = /[A-Z][a-z]{2} \d{1,2}.*, \d{4} · \d{2}:\d{2}/
 
 describe('archive groups in the panel', () => {
-  test('two groups show their date and item count and the three tiles; the newest is open, the other folded', async ($, on) => {
+  test('two groups show their date and item count and a dim summary line; the newest is open, the other folded', async ($, on) => {
     engine(on, { store: { historyShown: true, history: [groupA(), groupB()] } })
     await start($)
     await settle()
@@ -353,7 +376,7 @@ describe('archive groups in the panel', () => {
     expect(t.text).toMatch(DATE)
     // no title, done/total or status words anywhere in the Archive
     expect(t.text).not.toMatch(/Flow [AB]|1\/3|1\/1|finished|ended with the session/)
-    // the open group starts with its tiles right under the fold
+    // the open group starts with its summary right under the fold
     const lines = t.text.split('\n')
     const at = lines.findIndex((l: string) => l.startsWith('▾ '))
     expect(lines[at + 1]).toContain('≈$1.50 · 12k tokens · 30:00')
@@ -366,22 +389,21 @@ describe('archive groups in the panel', () => {
 
     const d = await desktop($)
     expect(d.svgs.some((s: any) => /Flow [AB]/.test(String(s.props.alt)) || /Flow [AB]/.test(String(s.props.source)))).toBe(false)
-    const headers = d.svgs.filter((s: any) => Number(s.props.height) === 44 && /≈\$(1\.50|0\.75)/.test(String(s.props.source)))
-    expect(headers.length).toBe(2)
+    // no header drawing for a group: its summary is a dim line of text, as in the terminal
+    expect(d.svgs.some((s: any) => /≈\$(1\.50|0\.75)/.test(String(s.props.source)) || /≈\$(1\.50|0\.75)/.test(String(s.props.alt)))).toBe(false)
+    const summaries = d.texts.filter((x: any) => /≈\$/.test(String(x.text)))
+    expect(summaries.map((x: any) => String(x.text))).toEqual(['  ≈$1.50 · 12k tokens · 30:00', '  ≈$0.75 · 3k tokens · 1:30'])
+    for (const x of summaries) expect(x.props.dimColor).toBe(true)
     expect(d.buttons.find((b: any) => String(b.props.key) === `archive-${keyOf('gA')}`).text).toMatch(/^▾ .* \(2\)$/)
     // (a row's own alt may say its run finished; the group itself never does)
     expect(d.alts.filter((a: string) => /Flow [AB]|1\/3|ended with the session/.test(a))).toEqual([])
     expect(d.buttons.filter((b: any) => [`archive-${keyOf('gA')}`, `archive-${keyOf('gB')}`].includes(String(b.props.key))).some((b: any) => /finished/.test(b.text))).toBe(false)
-    expect(String(headers[0].props.source)).toContain('≈$1.50')
-    expect(String(headers[0].props.source)).toContain('12k')
-    expect(String(headers[0].props.source)).toContain('30:00')
-    expect(String(headers[1].props.source)).toContain('1:30')
     expect(d.svgs.filter((s: any) => Number(s.props.height) === 48).length).toBe(2)
     expect(d.alts.some((a: string) => /^only task:/.test(a))).toBe(false)
     expect(d.keys).toContain(`archive-${keyOf('gA')}`)
   })
 
-  test('the open group shows its rows flat, newest first, with their final states and stats; no planned task and no Finished toggle', async ($, on) => {
+  test('the open group shows its rows flat, latest completion first, with their final states and stats; no planned task and no Finished toggle', async ($, on) => {
     engine(on, { store: { historyShown: true, history: [groupA(), groupB()] } })
     await start($)
     await settle()
@@ -389,7 +411,8 @@ describe('archive groups in the panel', () => {
       const t = await terminal($)
       expect(t.text).toMatch(/write tests/)
       expect(t.text).toMatch(/wire it/)
-      expect(t.text.indexOf('wire it')).toBeLessThan(t.text.indexOf('write tests'))
+      // write tests started first but completed last (2:05 after the start, wire it at 2:03): it is on top
+      expect(t.text.indexOf('write tests')).toBeLessThan(t.text.indexOf('wire it'))
       expect(t.text).toMatch(/Done/)
       expect(t.text).toMatch(/Error/)
       expect(t.text).toMatch(/ctx 10% · 100k ≈\$0\.50 5:00/)
@@ -405,7 +428,7 @@ describe('archive groups in the panel', () => {
       expect(String(failed?.props.source)).toContain(STATE_COLOR.error)
       expect(String(done?.props.source)).toContain('5:00')
       const rows = d.alts.filter((a: string) => /^(write tests|wire it):/.test(a))
-      expect(rows.map((a: string) => a.split(':')[0])).toEqual(['wire it', 'write tests'])
+      expect(rows.map((a: string) => a.split(':')[0])).toEqual(['write tests', 'wire it'])
       expect(d.alts.some((a: string) => /^3\. polish: planned/.test(a))).toBe(false)
       expect(d.svgs.some((s: any) => /Finished/.test(String(s.props.source)) || /Finished/.test(String(s.props.alt)))).toBe(false)
       expect(JSON.stringify(d.buttons)).not.toMatch(/Finished/)
@@ -433,18 +456,32 @@ describe('archive groups in the panel', () => {
     const p = await pane($, 'desktop')
     const root = await p.drawn()
     await p.unmount()
+    // line 1: the indent, the fold chevron's place (the chevron when the row has items) right before the name, the name,
+    // a spacer and when the row finished at the far end
     for (const [id, name, want] of [
-      ['a2', 'wire it', ['title', 'spacer', 'chevron']],
-      ['a1', 'write tests', ['title', 'spacer']],
+      ['a2', 'wire it', ['indent', 'chevron', 'title', 'spacer', 'time']],
+      ['a1', 'write tests', ['indent', 'no chevron', 'title', 'spacer', 'time']],
     ] as const) {
       const r = walk(root).find(n => keyOfNode(n) === `${kp}${id}`)
       expect(r?.props?.flexDirection).toBe('column')
       const [first, drawing] = kidsOf(r)
       expect(first?.props?.flexDirection).toBe('row')
-      const line = walk(first).filter(n => n?.props?.flexDirection === 'row' && kidsOf(n).some(c => says(c, name))).pop()
-      const parts = kidsOf(line).map(c =>
-        has(c, `${kp}agent-fold-${id}`) ? 'chevron' : says(c, name) ? 'title' : c?.props?.flexGrow === 1 && kidsOf(c).length === 0 ? 'spacer' : '?',
-      )
+      const time = doneText(groupA().agents!.find(a => a.id === id)!.endedAt!, NOW)
+      const part = (c: any) =>
+        c?.props?.source !== undefined
+          ? 'indent'
+          : has(c, `${kp}agent-fold-${id}`)
+            ? 'chevron'
+            : says(c, name)
+              ? 'title'
+              : c?.props?.flexGrow === 1 && kidsOf(c).length === 0
+                ? 'spacer'
+                : says(c, time)
+                  ? 'time'
+                  : kidsOf(c).length === 0
+                    ? 'no chevron'
+                    : '?'
+      const parts = kidsOf(first).flatMap(c => (c?.props?.flexDirection === 'row' ? kidsOf(c) : [c])).map(part)
       expect(parts).toEqual([...want])
       expect(walk(r).some(n => keyOfNode(n).startsWith('archive-item-'))).toBe(false)
       expect(Number(drawing?.props?.height)).toBe(48)
@@ -486,7 +523,8 @@ describe('archive groups in the panel', () => {
     engine(on, { store: { historyShown: true, history: [g] } })
     await start($)
     await settle()
-    const date = (cols: number) => groupLine(g, cols - 2)
+    // the chevron and its space take 2 columns, the ✕ at the far end 4 more
+    const date = (cols: number) => groupLine(recordOf(g, fileOf(g), 0), cols - 6)
     for (const [cols, time] of [[90, true], [30, false], [24, false]] as const) {
       const p = await pane($, 'terminal', cols)
       const texts = await p.findAll({ type: 'Text' })
@@ -641,25 +679,27 @@ describe('archive groups in the panel', () => {
     expect(label(`archive-${keyOf('gC')}-agent-fold-a2`)).toBe('▸')
   })
 
-  test('twelve groups show the newest ten and Show older reveals the rest', async ($, on) => {
-    const many = Array.from({ length: 12 }, (_, i) => ({ ...groupB(), id: `g${i}`, title: `Group ${i}` }))
+  test('52 groups show the newest 50 and Show more reveals the rest', async ($, on) => {
+    // g0 ended last, g51 first
+    const many = Array.from({ length: 52 }, (_, i) => ({ ...groupB(), id: `g${i}`, title: `Group ${i}`, endedAt: groupB().endedAt - i * MIN }))
     engine(on, { store: { historyShown: true, history: many } })
     await start($)
     await settle()
     for (const surface of ['terminal', 'desktop'] as const) {
       const p = await pane($, surface)
-      expect((await p.findAll({ type: 'Button' })).filter((b: any) => /^archive-k[a-z0-9]+$/.test(String(b.props.key))).length).toBe(10)
+      const shown = (await p.findAll({ type: 'Button' })).filter((b: any) => /^archive-k[a-z0-9]+$/.test(String(b.props.key)))
+      expect(shown.map((b: any) => String(b.props.key))).toEqual(many.slice(0, 50).map(e => `archive-${keyOf(e.id)}`))
       const more = await p.find({ type: 'Button', key: 'archive-more' })
-      expect(String(more?.props.label)).toBe('Show older (2)')
+      expect(String(more?.props.label)).toBe('Show more (2)')
       await p.unmount()
     }
     await press($, 'terminal', 'archive-more')
     const t = await terminal($)
     const groups = t.buttons.filter((b: any) => /^archive-k[a-z0-9]+$/.test(String(b.props.key)))
-    expect(groups.length).toBe(12)
+    expect(groups.length).toBe(52)
     expect(t.keys).not.toContain('archive-more')
     // the newest is still the only group open by default
-    expect(groups.map((b: any) => (JSON.stringify(b).includes('▾ ') ? 'open' : 'folded'))).toEqual(['open', ...Array(11).fill('folded')])
+    expect(groups.map((b: any) => (JSON.stringify(b).includes('▾ ') ? 'open' : 'folded'))).toEqual(['open', ...Array(51).fill('folded')])
     expect(t.text.split('only task').length - 1).toBe(1)
   })
 

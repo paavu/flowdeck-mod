@@ -1,14 +1,17 @@
 import { describe, expect, test } from 'claude-code/testing'
 
+import { doneText } from '../hooks/time'
+import { fileOf, indexPath, records, sessionPaths, sessions } from './archive-files'
 import { fakeFs } from './fake-fs'
 import { showTab } from './tabs'
 import type { Tab } from './tabs'
 
 const NOW = Date.UTC(2026, 9, 26, 12, 40)
 const DIR = '/work/app/.claude/flowdeck'
-const HISTORY = `${DIR}/history.json`
-const SIDE = `${DIR}/history-extra-${NOW}.json`
 const ID = `${NOW}-/work/app`
+// The live flow's own session file in `archive/` (the flow starts at NOW).
+const SESSION = `${DIR}/archive/${fileOf({ id: ID, startedAt: NOW })}`
+const INDEX = indexPath(DIR)
 
 function engine(on: any, opts: { store?: Record<string, unknown> } = {}) {
   const store = opts.store ?? { historyShown: false } // these tests start with the Archive hidden, as they press it open
@@ -102,7 +105,7 @@ const press = async ($: any, key: string, surface: 'terminal' | 'desktop' = 'ter
   await settle()
   await p.unmount()
 }
-const entries = (files: Record<string, string>): any[] => JSON.parse(files[HISTORY] ?? '[]')
+const entries = (files: Record<string, string>): any[] => sessions(files, DIR)
 const ids = (e: any): string[] => (e?.agents ?? []).map((a: any) => a.id).sort()
 
 describe('archiving finished items of the live flow', () => {
@@ -146,14 +149,14 @@ describe('archiving finished items of the live flow', () => {
     expect(desktopRows(await desktop($))).toEqual(['task 4', 'task 3', 'task 2'])
     expect(ids(entries(files)[0])).toEqual(['w1'])
     const writes = fs.writes.length
-    const before = files[HISTORY]
+    const before = JSON.stringify(files)
     clock.now = NOW + 180_000
     p = await pane($)
     await p.press({ key: 'archive-item-w1' }).catch(() => {})
     await settle()
     await p.unmount()
     expect(fs.writes.length).toBe(writes)
-    expect(files[HISTORY]).toBe(before)
+    expect(JSON.stringify(files)).toBe(before)
     expect(desktopRows(await desktop($))).toEqual(['task 4', 'task 3', 'task 2'])
   })
 
@@ -241,7 +244,7 @@ describe('archiving finished items of the live flow', () => {
 })
 
 describe('the partial archive entry', () => {
-  test('is saved with only the archived agents, partial and open, in history.json and the side file', async ($, on) => {
+  test('is saved with only the archived agents, partial and open, in its session file and the index', async ($, on) => {
     const { files, clock } = engine(on)
     await start($)
     await plan($)
@@ -262,10 +265,14 @@ describe('the partial archive entry', () => {
     expect(e.tokens).toBe(200_000)
     expect(e.agents[0]).toMatchObject({ type: 'flowdeck-light', model: 'claude-opus-5-5', status: 'done', tokens: 100_000 })
     expect('archived' in e.agents[0]).toBe(false)
-    const side = JSON.parse(files[SIDE]!)
-    expect(side.length).toBe(1)
-    expect(side[0].partial).toBe(true)
-    expect(ids(side[0])).toEqual(['w1', 'w2'])
+    expect(sessionPaths(files, DIR)).toEqual([SESSION])
+    const own = JSON.parse(files[SESSION]!)
+    expect(Array.isArray(own)).toBe(false)
+    expect(own.partial).toBe(true)
+    expect(ids(own)).toEqual(['w1', 'w2'])
+    const recs = records(files, INDEX)!
+    expect(recs.length).toBe(1)
+    expect(recs[0]).toMatchObject({ id: ID, file: fileOf({ id: ID, startedAt: NOW }), status: 'open', partial: true, itemCount: 2 })
   })
 
   test('the Archive section shows it at the top as archived while the flow runs', async ($, on) => {
@@ -305,8 +312,9 @@ describe('the partial archive entry', () => {
     expect(list[0].partial).toBe(true)
     expect(ids(list[0])).toEqual(['w1', 'w2', 'w3', 'w4'])
     expect(list[0].endedAt).toBe(NOW + 200_000)
-    expect(ids(JSON.parse(files[SIDE]!)[0])).toEqual(['w1', 'w2', 'w3', 'w4'])
-    expect(Object.keys(files).filter(f => f.includes('history-extra-')).length).toBe(1)
+    expect(ids(JSON.parse(files[SESSION]!))).toEqual(['w1', 'w2', 'w3', 'w4'])
+    expect(sessionPaths(files, DIR)).toEqual([SESSION])
+    expect(records(files, INDEX)!.map(r => [r.id, r.itemCount, r.endedAt])).toEqual([[ID, 4, NOW + 200_000]])
   })
 
   test('finishing the flow replaces it with the full entry: all agents, no partial, one entry', async ($, on) => {
@@ -328,9 +336,10 @@ describe('the partial archive entry', () => {
     expect(ids(e)).toEqual(['w1', 'w2', 'w3', 'w4', 'w5'])
     expect(e.agents.find((a: any) => a.id === 'w1')).toMatchObject({ status: 'done', tokens: 100_000, description: 'task 1' })
     expect(Math.round(e.cost * 100)).toBe(160)
-    const side = JSON.parse(files[SIDE]!)
-    expect('partial' in side[0]).toBe(false)
-    expect(ids(side[0])).toEqual(['w1', 'w2', 'w3', 'w4', 'w5'])
+    const own = JSON.parse(files[SESSION]!)
+    expect('partial' in own).toBe(false)
+    expect(ids(own)).toEqual(['w1', 'w2', 'w3', 'w4', 'w5'])
+    expect(records(files, INDEX)!.map(r => [r.id, r.status, 'partial' in r])).toEqual([[ID, 'finished', false]])
   })
 
   test('the final entry wins even when the clock has not moved since the partial one', async ($, on) => {
@@ -344,7 +353,8 @@ describe('the partial archive entry', () => {
     expect(list.length).toBe(1)
     expect('partial' in list[0]).toBe(false)
     expect(ids(list[0])).toEqual(['w1', 'w2'])
-    expect('partial' in JSON.parse(files[SIDE]!)[0]).toBe(false)
+    expect('partial' in JSON.parse(files[SESSION]!)).toBe(false)
+    expect('partial' in records(files, INDEX)![0]).toBe(false)
   })
 
   test('a restart replaces it the same way', async ($, on) => {
@@ -406,7 +416,8 @@ describe('safety of an archive press', () => {
     await settle()
     await p.unmount()
     expect(desktopRows(await desktop($))).toEqual(['task 3', 'task 2', 'task 1'])
-    expect(files[HISTORY]).toBeUndefined()
+    expect(sessionPaths(files, DIR)).toEqual([])
+    expect(records(files, INDEX)).toBeUndefined()
     expect(store.history).toBeUndefined()
     const t = await terminal($)
     expect(t.text).not.toContain('archived')
@@ -420,7 +431,7 @@ describe('safety of an archive press', () => {
     await finishedRows($, clock, 3)
     fs.fail.write = true
     await press($, 'archive-item-w2')
-    expect(files[HISTORY]).toBeUndefined()
+    expect(sessionPaths(files, DIR)).toEqual([])
     const saved = (store.history as any[]) ?? []
     expect(saved.length).toBe(1)
     expect(saved[0].partial).toBe(true)
@@ -428,17 +439,18 @@ describe('safety of an archive press', () => {
     expect(desktopRows(await desktop($))).toEqual(['task 3'])
   })
 
-  test('the side file alone counts as saved when history.json cannot be read', async ($, on) => {
+  test('the session file alone counts as saved when the index cannot be read', async ($, on) => {
     const { files, fs, fail, clock } = engine(on)
     await start($)
     await plan($)
     await finishedRows($, clock, 2)
-    files[HISTORY] = '[]'
-    fs.unreadable.add(HISTORY)
+    const index = JSON.stringify({ version: 1, sessions: [] })
+    files[INDEX] = index
+    fs.unreadable.add(INDEX)
     fail.store = true
     await press($, 'archive-item-w2')
-    expect(files[HISTORY]).toBe('[]')
-    expect(JSON.parse(files[SIDE]!)[0].partial).toBe(true)
+    expect(files[INDEX]).toBe(index)
+    expect(JSON.parse(files[SESSION]!).partial).toBe(true)
     expect(desktopRows(await desktop($))).toEqual([])
   })
 
@@ -470,7 +482,8 @@ describe('safety of an archive press', () => {
     expect(list[0].status).toBe('finished')
     expect('partial' in list[0]).toBe(false)
     expect(ids(list[0])).toEqual(['w1', 'w2', 'w3'])
-    expect('partial' in JSON.parse(files[SIDE]!)[0]).toBe(false)
+    expect('partial' in JSON.parse(files[SESSION]!)).toBe(false)
+    expect(sessionPaths(files, DIR)).toEqual([SESSION])
   })
 
   test('archiving never deletes or empties a file', async ($, on) => {
@@ -532,7 +545,8 @@ describe('where the Archive button shows', () => {
     expect(t.text).toContain('task 1')
     await complete($, 'w1')
     t = await terminal($)
-    expect(archiveKeys(t.buttons)).toEqual(['archive-item-w2', 'archive-item-w1'])
+    // w1 finished again after w2, so it leads the latest-completion-first list
+    expect(archiveKeys(t.buttons)).toEqual(['archive-item-w1', 'archive-item-w2'])
   })
 
   test('30 rows: pressing the 10th newest archives 21, keeps 9', async ($, on) => {
@@ -587,7 +601,7 @@ describe('where the Archive button shows', () => {
     await finishedRows($, clock, 4)
     await press($, 'archive-item-w2')
     for (const surface of ['terminal', 'desktop'] as const) {
-      for (const tab of ['active', 'finished', 'plans', 'archive'] as const) {
+      for (const tab of ['active', 'finished', 'plans', 'archive', 'trash'] as const) {
         const p = await pane($, surface, 80, tab)
         const keys = (await p.findAll({ type: 'Button' })).map((b: any) => String(b.props.key))
         await p.unmount()
@@ -630,7 +644,7 @@ describe('the small archive icon', () => {
     }
   })
 
-  test('desktop: line 1 is the task name, the icon right after it, a spacer, the chevron at the far end; the drawing below keeps the full width', async ($, on) => {
+  test('desktop: line 1 is the indent, the chevron slot right before the task name, the icon right after it, a spacer, the completion time at the far end; the drawing below keeps the full width', async ($, on) => {
     const { clock } = engine(on)
     await start($)
     await plan($)
@@ -642,14 +656,27 @@ describe('the small archive icon', () => {
     const says = (n: any, s: string) => JSON.stringify(n).includes(s)
     // the innermost row Box of the native first line that holds the task name
     const titleLine = (r: any, name: string) => walk(kids(r)[0]).filter(n => n?.props?.flexDirection === 'row' && kids(n).some(c => says(c, name))).pop()
+    // when each finished row completed, against the clock now (`HH:MM` today)
+    const done: Record<string, string> = { w1: doneText(NOW + 61_000, NOW + 130_000), w2: doneText(NOW + 62_000, NOW + 130_000) }
     const parts = (line: any, id: string, name: string) =>
       kids(line).map(c =>
-        has(c, `archive-item-${id}`) ? 'icon' : has(c, `agent-fold-${id}`) ? 'chevron' : says(c, name) ? 'title' : c?.props?.flexGrow === 1 && kids(c).length === 0 ? 'spacer' : '?',
+        has(c, `archive-item-${id}`)
+          ? 'icon'
+          : has(c, `agent-fold-${id}`)
+            ? 'chevron'
+            : says(c, name)
+              ? 'title'
+              : c?.props?.flexGrow === 1 && kids(c).length === 0
+                ? 'spacer'
+                : done[id] && says(c, `"${done[id]}"`) && walk(c).some(n => n?.props?.dimColor)
+                  ? 'time'
+                  : '?',
       )
-    const expected: [string, string, string[], Tab][] = [
-      ['w2', 'task 2', ['title', 'icon', 'spacer', 'chevron'], 'finished'],
-      ['w1', 'task 1', ['title', 'icon', 'spacer'], 'finished'],
-      ['w9', 'still going', ['title', 'spacer'], 'active'],
+    // [id, name, the name line's parts, whether the chevron slot holds a chevron, tab]
+    const expected: [string, string, string[], boolean, Tab][] = [
+      ['w2', 'task 2', ['title', 'icon', 'spacer', 'time'], true, 'finished'],
+      ['w1', 'task 1', ['title', 'icon', 'spacer', 'time'], false, 'finished'],
+      ['w9', 'still going', ['title', 'spacer'], false, 'active'],
     ]
     for (const [cols, W] of [[31, 240], [46, 360], [120, 900]] as const) {
       const roots: Partial<Record<Tab, any>> = {}
@@ -660,13 +687,21 @@ describe('the small archive icon', () => {
         expect(JSON.stringify(roots[tab])).not.toContain('NaN')
       }
       const root = roots.finished
-      for (const [id, name, want, tab] of expected) {
+      for (const [id, name, want, hasChevron, tab] of expected) {
         const r = walk(roots[tab]).find(n => keyOf(n) === id)
         expect(r?.props?.flexDirection).toBe('column')
         const [first, drawing] = kids(r)
         expect(first?.props?.flexDirection).toBe('row')
-        // the indent lines the title up with the drawing's text at x 42
-        expect(Number(kids(first)[0]?.props?.width)).toBe(42)
+        // the indent (24) and the chevron slot (18) line the title up with the drawing's text at x 42
+        const [indent, slot, rest] = kids(first)
+        expect(Number(indent?.props?.width)).toBe(24)
+        expect(Number(slot?.props?.width)).toBe(18)
+        expect(slot?.props?.flexShrink).toBe(0)
+        expect(Number(indent?.props?.width) + Number(slot?.props?.width)).toBe(42)
+        // the chevron sits right before the name, in its own slot; a row with nothing to fold keeps the slot empty
+        expect(has(slot, `agent-fold-${id}`)).toBe(hasChevron)
+        if (!hasChevron) expect(kids(slot)).toEqual([])
+        expect(says(rest, name)).toBe(true)
         const line = titleLine(r, name)
         expect(line?.props?.flexDirection).toBe('row')
         expect(parts(line, id, name)).toEqual(want)
@@ -685,13 +720,14 @@ describe('the small archive icon', () => {
         expect(src).not.toContain(name)
         expect(src).not.toContain('font-size="13"')
       }
-      // the icon and the chevron are never stacked in one column
+      // the icon and the chevron are never stacked in one column, and the chevron is no longer at the far end
       expect(holder(root, 'archive-item-w2')?.props?.flexDirection).not.toBe('column')
       expect(holder(root, 'archive-item-w2')).not.toBe(holder(root, 'agent-fold-w2'))
+      expect(holder(root, 'agent-fold-w2')?.props?.width).toBe(18)
     }
   })
 
-  test('terminal: the glyph comes right after the task name on the first line', async ($, on) => {
+  test('terminal: the chevron comes right before the task name, the glyph right after it, the completion time at the far end', async ($, on) => {
     const { clock } = engine(on)
     await start($)
     await plan($)
@@ -705,7 +741,15 @@ describe('the small archive icon', () => {
         const line = kids(holder(root, `archive-item-${id}`))
         const at = line.findIndex(c => keyOf(c) === `archive-item-${id}`)
         expect(JSON.stringify(line[at - 1])).toContain(`task ${id.slice(1)}`)
-        if (id === 'w2') expect(line.findIndex(c => keyOf(c) === 'agent-fold-w2')).toBeGreaterThan(at + 1)
+        expect(JSON.stringify(line[0])).toContain('▣')
+        // the chevron (or a blank where there is nothing to fold) sits right before the name, so names line up
+        expect(at).toBe(3)
+        if (id === 'w2') expect(line.findIndex(c => keyOf(c) === 'agent-fold-w2')).toBe(at - 2)
+        else expect(JSON.stringify(line[at - 2])).toContain('" "')
+        // when it finished, at the far end
+        const time = doneText(NOW + 60_000 + Number(id.slice(1)) * 1000, NOW + 120_000)
+        expect(JSON.stringify(line.at(-1))).toContain(`"${time}"`)
+        expect(line.at(-1)?.props?.dimColor).toBe(true)
       }
     }
     const t = await terminal($)

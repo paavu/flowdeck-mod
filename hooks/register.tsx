@@ -1,21 +1,25 @@
 import { atom, read, update } from 'claude-code'
 import type { Elements, EngineInterface, Register, RenderChildren } from 'claude-code'
 
-import type { AgentRun, ArchiveEntry, ArchiveVolume, Flow, Panel, PanelTab, Phase, PlannedTask, PlanStage, Reading, Samples, TaskPlan, UsageWindow } from '../types'
+import type { AgentRun, ArchiveDetail, ArchiveEntry, ArchiveLists, ArchiveRecord, Flow, Panel, PanelTab, Phase, PlannedTask, PlanStage, Reading, Samples, TaskPlan, UsageWindow } from '../types'
 import { derive, finishItems, hasItemOps, ITEM_H, itemAlt, itemLine, itemsOf, itemSvg, stepItems } from './agent-items'
 import type { StepInput } from './agent-items'
 import { agentState, HOUSEKEEPING, isIncomplete, isSettled, markOf, progressOf, splitHead, stateText } from './agent-state'
 import { contextRows, contextSvg, toReading } from './context'
-import { EXTRA_FILE, isWorthKeeping, keyOf, planEntry, snapshot, VOLUME_MAX } from './archive'
-import { dataDir, getFile, loadLatest, parseJson, readVolume, saveToProject, saveToStore, writeData } from './archive-store'
-import type { Io, Latest } from './archive-store'
-import { ARCHIVE_PAGE, archiveSection, archiveTotal, UNREADABLE } from './archive-view'
-import type { FlowDrawing, FlowView, Planned } from './archive-view'
+import { isWorthKeeping, keyOf, planEntry, snapshot, VOLUME_MAX } from './archive'
+import { recordOf } from './archive-index'
+import { dataDir, getFile, loadArchive, parseJson, readSession, restoreSession, saveSession, saveToStore, trashSession, writeData } from './archive-store'
+import type { Io, Moved } from './archive-store'
+import { archiveSection, groupKey, isGroupOpen } from './archive-view'
+import type { ArchiveWords, FlowDrawing, FlowView, Planned } from './archive-view'
+import { foldGlyph } from './fold'
+import { sortNewest } from './order'
+import { doneText } from './time'
 import { importPlan, isFinished, isStoredStep, normalize, percent, PLAN_ID, placeBar, planId, str, where } from './plan'
 import { planBandSvg, planBandText, planRows, planSvg, STATE_COLOR, stateLabel } from './plan-view'
 import { acceptedOf, acceptedOnly, cleanAfter, linkRuns, norm, taskOf, taskTag, unstarted, workerTier } from './tasks'
 import type { TaskLike } from './tasks'
-import { asAgents, asArchive, asFlow, asMeta, asNow, asPanel, asReading, asUsage, asVolumes, PANEL_DEFAULT } from './shapes'
+import { ARCHIVE_PAGE, asAgents, asDetails, asFlow, asLists, asMeta, asNow, asPanel, asReading, asUsage, PANEL_DEFAULT } from './shapes'
 import { live, record, resetKey, resets, toWindows, usageRows, usageSvg } from './usage'
 
 const flow = atom({ plugin: 'flowdeck', key: 'flow' } as const, null)
@@ -24,9 +28,9 @@ const panel = atom({ plugin: 'flowdeck', key: 'panel' } as const, PANEL_DEFAULT)
 const usageState = atom({ plugin: 'flowdeck', key: 'usage' } as const, { windows: [] as UsageWindow[], samples: {} as Samples })
 const reading = atom({ plugin: 'flowdeck', key: 'reading' } as const, null as Reading | null)
 const now = atom({ plugin: 'flowdeck', key: 'now' } as const, 0)
-const archive = atom({ plugin: 'flowdeck', key: 'archive' } as const, [] as ArchiveEntry[])
-// The archive volumes of this project, newest first.
-const volumes = atom({ plugin: 'flowdeck', key: 'volumes' } as const, [] as ArchiveVolume[])
+// The Archive and Trash lists, from their indexes; the session files read for open groups (at most DETAILS_MAX).
+const archiveLists = atom({ plugin: 'flowdeck', key: 'archiveLists' } as const, { records: [], trash: [], warnings: [] } as ArchiveLists)
+const archiveDetails = atom({ plugin: 'flowdeck', key: 'archiveDetails' } as const, [] as ArchiveDetail[])
 const flowMeta = atom({ plugin: 'flowdeck', key: 'flowMeta' } as const, null as { startedAt: number; project: string } | null)
 const plans = atom({ plugin: 'flowdeck', key: 'plans' } as const, [] as TaskPlan[])
 // Why the band above the prompt last failed in this load, '' when it has not; the panel shows it, the band never reads it.
@@ -66,8 +70,10 @@ const updateMeta = async ($: EngineInterface, change: (m: Meta | null) => Meta |
     const next = change(was)
     return next === was ? prev : next
   }))
-const readArchive = async ($: EngineInterface): Promise<ArchiveEntry[]> => asArchive(await read($, archive))
-const readVolumes = async ($: EngineInterface): Promise<ArchiveVolume[]> => asVolumes(await read($, volumes))
+const readLists = async ($: EngineInterface): Promise<ArchiveLists> => asLists(await read($, archiveLists))
+const readDetails = async ($: EngineInterface): Promise<ArchiveDetail[]> => asDetails(await read($, archiveDetails))
+const updateDetails = async ($: EngineInterface, change: (list: ArchiveDetail[]) => ArchiveDetail[]): Promise<ArchiveDetail[]> =>
+  asDetails(await update($, archiveDetails, prev => change(asDetails(prev))))
 const readUsage = async ($: EngineInterface) => asUsage(await read($, usageState))
 const readReading = async ($: EngineInterface): Promise<Reading | null> => asReading(await read($, reading))
 const readNow = async ($: EngineInterface): Promise<number> => asNow(await read($, now))
@@ -133,6 +139,22 @@ const STRINGS = {
     nothingQueued: 'Nothing running or queued',
     noFinished: 'No finished items yet',
     noPlans: 'No plans',
+    untitled: 'Untitled',
+    noArchive: 'no archive yet',
+    trashEmpty: 'Trash is empty',
+    loading: 'loading…',
+    couldNotRead: 'could not read',
+    fileMissing: 'file missing',
+    showMore: 'Show more ({n})',
+    trashAsk: 'Move this session to the trash?',
+    trashTell: 'It leaves the Archive and shows in the Trash tab, where Restore brings it back. Its file is copied to .claude/flowdeck/.trash/; nothing is erased.',
+    moveToTrash: 'Move to trash',
+    restoreAsk: 'Move back to the Archive?',
+    restoreTell: 'It leaves the Trash and shows in the Archive again, in its place by when it ended.',
+    restore: 'Restore',
+    cancel: 'Cancel',
+    trashFailed: 'could not move it to the trash',
+    restoreFailed: 'could not restore it',
   },
   ru: {
     pane: 'flowdeck',
@@ -165,6 +187,22 @@ const STRINGS = {
     nothingQueued: 'Ничего не выполняется и не ждёт запуска',
     noFinished: 'Завершённых пока нет',
     noPlans: 'Планов нет',
+    untitled: 'Без названия',
+    noArchive: 'архив пока пуст',
+    trashEmpty: 'Корзина пуста',
+    loading: 'загрузка…',
+    couldNotRead: 'не удалось прочитать',
+    fileMissing: 'файл не найден',
+    showMore: 'Показать ещё ({n})',
+    trashAsk: 'Переместить эту сессию в корзину?',
+    trashTell: 'Она уйдёт из Архива во вкладку Trash, откуда её вернёт кнопка Восстановить. Её файл копируется в .claude/flowdeck/.trash/; ничего не стирается.',
+    moveToTrash: 'В корзину',
+    restoreAsk: 'Вернуть в Архив?',
+    restoreTell: 'Она уйдёт из Корзины и снова появится в Архиве, на своём месте по времени завершения.',
+    restore: 'Восстановить',
+    cancel: 'Отмена',
+    trashFailed: 'не удалось переместить в корзину',
+    restoreFailed: 'не удалось восстановить',
   },
 } as const
 
@@ -175,9 +213,6 @@ const tr = () => STRINGS[lang]
 let project = ''
 // The session the task plans are saved under; empty when the engine names none.
 let sessionId = ''
-// What one archive file stays under, in UTF-8 bytes (history.json rotates past it); FLOWDECK_ARCHIVE_VOLUME_MAX (or its old
-// name FLOWDECK_HISTORY_SEGMENT_MAX) can only lower it (the tests use a small one).
-let volumeMax = VOLUME_MAX
 
 // The engine's current session id, '' when it cannot say; a /clear changes it without a new session.start.
 const currentSessionId = async ($: EngineInterface): Promise<string> => {
@@ -234,7 +269,8 @@ const unionTasks = (kept: PlannedTask[], incoming: PlannedTask[]): PlannedTask[]
   return [...old, ...incoming.filter(t => !have.has(t.title.toLowerCase()))]
 }
 
-const merge = (prev: Flow | null, input: ProgressInput): Flow => {
+// `at` dates the tasks this call accepts (none without a clock).
+const merge = (prev: Flow | null, input: ProgressInput, at: number | null = null): Flow => {
   // A new title means a new flow: never carry counters over from an earlier one.
   const base = isNewFlow(prev, input) || !prev ? blank() : { ...blank(), ...prev }
   const incoming = cleanTasks(input.tasks)
@@ -249,7 +285,10 @@ const merge = (prev: Flow | null, input: ProgressInput): Flow => {
   // Task numbers name which tasks were accepted, on top of those accepted before (a count before it means the first ones);
   // a bare count still works and leaves the named list as it is.
   const named = Array.isArray(input.done) ? input.done.filter(n => Number.isInteger(n) && n >= 1 && n <= tasks.length) : null
-  const accepted = named ? [...new Set([...acceptedOf({ ...base, tasks }), ...named])].sort((a, b) => a - b) : base.accepted
+  const before = acceptedOf({ ...base, tasks })
+  const accepted = named ? [...new Set([...before, ...named])].sort((a, b) => a - b) : base.accepted
+  const isNew = named && at !== null ? named.filter(n => !before.includes(n)) : []
+  const acceptedAt = isNew.length ? { ...base.acceptedAt, ...Object.fromEntries(isNew.map(n => [String(n), at as number])) } : base.acceptedAt
   const count = named ? accepted?.length ?? 0 : typeof input.done === 'number' && Number.isFinite(input.done) ? input.done : base.done
   const done = Math.min(total || Infinity, Math.max(0, Math.round(count)))
   const phase = input.phase && PHASES.includes(input.phase) ? input.phase : base.phase
@@ -259,6 +298,7 @@ const merge = (prev: Flow | null, input: ProgressInput): Flow => {
     total,
     done,
     ...(accepted ? { accepted } : {}),
+    ...(acceptedAt ? { acceptedAt } : {}),
     phase: input.finished ? 'close' : phase,
     isFinished: input.finished === true,
     isLinked: true,
@@ -475,16 +515,25 @@ const elapsed = (a: AgentRun, at: number): number => (a.endedAt ?? Math.max(at, 
 
 const plannedOf = (f: Flow | null, list: AgentRun[]): Planned[] => (!f || f.isFinished ? [] : unstarted(f.tasks ?? [], list, acceptedOf(f)))
 
+// Where a row sits in a finished list (order.ts): when it finished, then when it started. A run without an end sits
+// last; an accepted task without a time sits at `fallback` (an archive entry's end), else last.
+const runPlace = (a: AgentRun) => ({ end: a.endedAt ?? 0, start: a.startedAt, id: a.id })
+const acceptedPlace = (pl: Planned) => ({ end: pl.doneAt ?? 0, start: pl.doneAt ?? 0, id: `accepted-${pl.n}` })
+const finishedFirst = (list: AgentRun[]): AgentRun[] => sortNewest(list, runPlace)
+
 // One flow's rows as the panel draws and counts them, live or from the archive.
-const rowsOf = (tasks: TaskLike[], list: AgentRun[], accepted: number[]) => {
+const rowsOf = (tasks: TaskLike[], list: AgentRun[], accepted: number[], acceptedAt?: Record<string, number>, fallback?: number) => {
   const links = linkRuns(tasks, list)
   return {
     links,
-    // An accepted task no run belongs to is an Accepted row of its own, after the finished rows.
-    acceptedRows: acceptedOnly(tasks, links, accepted).map((t): Planned => ({ title: t.title, tier: t.tier ?? '', after: t.after ?? [], n: t.n })),
+    // An accepted task no run belongs to is an Accepted row of its own, placed by when it was accepted.
+    acceptedRows: acceptedOnly(tasks, links, accepted).map((t): Planned => {
+      const doneAt = acceptedAt?.[String(t.n)] ?? fallback
+      return { title: t.title, tier: t.tier ?? '', after: t.after ?? [], n: t.n, ...(doneAt === undefined ? {} : { doneAt }) }
+    }),
     running: list.filter(a => a.status === 'running').reverse(),
     // Archived rows leave the finished list; the totals and the planned tasks still count them.
-    finished: list.filter(a => a.status !== 'running' && !a.archived).reverse(),
+    finished: finishedFirst(list.filter(a => a.status !== 'running' && !a.archived)),
     archivedCount: list.filter(a => a.status !== 'running' && a.archived).length,
   }
 }
@@ -743,9 +792,11 @@ ${statusMark(W - 8, out ? 12 : 16, markOf(a), color)}
   )
 }
 
-// The empty drawing that indents the native task name by the drawing's text column (x 42).
+// The native task name starts at the drawing's text column (x 42): an empty drawing, then the fold chevron's slot of
+// FOLD_W px right before the name (empty on a row with nothing to fold), so every name lines up.
 const TITLE_INDENT = 42
-const INDENT_SVG = `<svg xmlns="http://www.w3.org/2000/svg" width="${TITLE_INDENT}" height="1" viewBox="0 0 ${TITLE_INDENT} 1"/>`
+const FOLD_W = 18
+const INDENT_SVG = `<svg xmlns="http://www.w3.org/2000/svg" width="${TITLE_INDENT - FOLD_W}" height="1" viewBox="0 0 ${TITLE_INDENT - FOLD_W} 1"/>`
 
 // A planned row: the tier and its model, what it waits for, and `ready` once that is done (the wait goes first when short).
 const plannedSvg = (W: number, p: Planned): string => {
@@ -772,15 +823,18 @@ ${statusMark(W - 8, 16, 'planned', color)}
 // An accepted task no worker run belongs to: its number and title, its tier, `Accepted · no worker run` in green and the
 // tick; no step bar and no archive icon.
 const ACCEPTED_H = 46
-const acceptedSvg = (W: number, p: Planned): string => {
+const acceptedSvg = (W: number, p: Planned, done = ''): string => {
   const tier = p.tier in TIER_COLOR ? p.tier : 'other'
   const textW = W - 42 - 22
   const word = `${tr().acceptedRow} · ${tr().noRun}`
+  // When it was accepted, dim at the right of the title line; the title gives way to it.
+  const doneW = done ? textWidth(done, 11) + 10 : 0
   return svg(
     W,
     ACCEPTED_H,
     `${crab(0, 6, tier, true)}
-<text class="t" x="42" y="18" font-family="${FONT}" font-size="13" font-weight="600">${xml(fitText(`${p.n}. ${p.title}`, 13, textW))}</text>
+<text class="t" x="42" y="18" font-family="${FONT}" font-size="13" font-weight="600">${xml(fitText(`${p.n}. ${p.title}`, 13, Math.max(0, textW - doneW)))}</text>
+${done ? `<text class="s" x="${42 + textW}" y="18" text-anchor="end" font-family="${FONT}" font-size="11" font-variant-numeric="tabular-nums">${xml(done)}</text>` : ''}
 <text x="42" y="34" font-family="${FONT}" font-size="11"><tspan fill="${colorOf(tier)}">${xml(tier)}</tspan><tspan fill="${STATE_COLOR.done}">  ${xml(fitText(word, 11, Math.max(0, textW - textWidth(`${tier}  `, 11))))}</tspan></text>
 ${statusMark(W - 8, 16, 'done', colorOf(tier))}
 <line class="ln" x1="0" y1="${ACCEPTED_H - 0.5}" x2="${W}" y2="${ACCEPTED_H - 0.5}"/>`,
@@ -837,6 +891,7 @@ type TodoItem = { title: string; completed: boolean }
 // A linked flow takes the session task list's items as planned tasks (medium tier, display only) and counts one done when the list completes it.
 async function mirrorTasks($: EngineInterface, items: TodoItem[]): Promise<void> {
   if (!items.length) return
+  const at = await clockAt($)
   await updateFlow($, prev => {
     if (!prev || !prev.isLinked || prev.isFinished) return prev
     const tasks = [...prev.tasks]
@@ -859,7 +914,10 @@ async function mirrorTasks($: EngineInterface, items: TodoItem[]): Promise<void>
         accepted?.push(at + 1)
       }
     }
-    return { ...prev, tasks, total, done: Math.min(total, done), ...(accepted ? { accepted } : {}) }
+    // The items completed now are dated now, as tasks accepted through `progress` are.
+    const added = accepted && at !== null ? accepted.filter(n => !(prev.accepted ?? []).includes(n)) : []
+    const acceptedAt = added.length ? { ...prev.acceptedAt, ...Object.fromEntries(added.map(n => [String(n), at as number])) } : prev.acceptedAt
+    return { ...prev, tasks, total, done: Math.min(total, done), ...(accepted ? { accepted } : {}), ...(acceptedAt ? { acceptedAt } : {}) }
   })
 }
 
@@ -900,57 +958,146 @@ const io = ($: EngineInterface): Io => ({
   storeSet: value => $.store.set('history', value),
 })
 
-// Without a project folder, or when the project files cannot take it, the save goes to the shared store as before.
-// Only the latest part's view takes the entry; a volume being shown stays as it is. True when the entry was kept somewhere:
-// history.json, its side file or the shared store.
+// The clock, or null when it cannot be read.
+const clockAt = async ($: EngineInterface): Promise<number | null> => {
+  const at: unknown = await Promise.resolve()
+    .then(() => $.clock.now())
+    .catch(() => null)
+  return typeof at === 'number' ? at : null
+}
+
+const clockOr = async ($: EngineInterface, d: number): Promise<number> => {
+  const at: unknown = await Promise.resolve()
+    .then(() => $.clock.now())
+    .catch(() => d)
+  return typeof at === 'number' ? at : d
+}
+
+// At most this many session files are held for open groups; opening one more folds the one opened longest ago.
+const DETAILS_MAX = 10
+
+// One session's file held for its open group, the newest kept last; past DETAILS_MAX the oldest is let go and its group
+// folded, so a group shown open always has its file or is being read.
+async function holdDetail($: EngineInterface, d: ArchiveDetail): Promise<void> {
+  let dropped: ArchiveDetail[] = []
+  await updateDetails($, prev => {
+    const rest = prev.filter(x => !(x.list === d.list && x.id === d.id))
+    const next = [...rest, d]
+    dropped = next.slice(0, Math.max(0, next.length - DETAILS_MAX))
+    return next.slice(-DETAILS_MAX)
+  })
+  if (dropped.length) {
+    const keys = dropped.map(x => groupKey(x.list, x.id))
+    await updatePanel($, prev => ({ ...prev, openEntries: prev.openEntries.filter(k => !keys.includes(k)), closedEntries: [...prev.closedEntries.filter(k => !keys.includes(k)), ...keys] }))
+  }
+}
+
+const dropDetail = ($: EngineInterface, list: 'archive' | 'trash', id: string) => updateDetails($, prev => prev.filter(x => !(x.list === list && x.id === id)))
+
+// Reads one session's file for its open group, unless it is held or being read: `loading…` meanwhile, then the entry or
+// `could not read`. Never throws.
+async function loadDetail($: EngineInterface, list: 'archive' | 'trash', rec: ArchiveRecord): Promise<void> {
+  try {
+    const held = (await readDetails($)).find(x => x.list === list && x.id === rec.id)
+    if (held && held.state !== 'error') return
+    await holdDetail($, { list, id: rec.id, state: 'loading' })
+    const entry = await readSession(io($), project, list, rec).catch(() => null)
+    await holdDetail($, entry ? { list, id: rec.id, state: 'ok', entry } : { list, id: rec.id, state: 'error' })
+  } catch {
+    // A failing store leaves the group saying loading; the next press reads it again.
+  }
+}
+
+// The open groups of both lists whose files are not held yet are read: the first group of each list is open unless
+// folded. Called whenever the lists change.
+async function loadOpenDetails($: EngineInterface): Promise<void> {
+  const lists = await readLists($)
+  const p = await readPanel($)
+  for (const [list, records] of [['archive', lists.records], ['trash', lists.trash]] as const) {
+    const shown = records.slice(0, list === 'archive' ? p.archiveLimit : p.trashLimit)
+    for (const [i, rec] of shown.entries()) if (isGroupOpen(p, list, rec.id, i)) await loadDetail($, list, rec)
+  }
+}
+
+// The lists as a load, save or move left them; a held file of a session that changed is let go (read again when open).
+async function showLists($: EngineInterface, lists: ArchiveLists, saved?: ArchiveEntry): Promise<void> {
+  const before = await readLists($)
+  await update($, archiveLists, () => lists)
+  const changed = (list: 'archive' | 'trash', recs: ArchiveRecord[], old: ArchiveRecord[]) =>
+    recs.filter(r => {
+      const o = old.find(x => x.id === r.id)
+      return !o || o.endedAt !== r.endedAt || o.file !== r.file
+    }).map(r => `${list}\n${r.id}`)
+  const stale = new Set([...changed('archive', lists.records, before.records), ...changed('trash', lists.trash, before.trash)])
+  await updateDetails($, prev => prev.filter(d => !stale.has(`${d.list}\n${d.id}`)))
+  // The entry just saved is in memory already: its group, when open, needs no read.
+  const at = saved ? lists.records.findIndex(r => r.id === saved.id) : -1
+  if (saved && at >= 0 && isGroupOpen(await readPanel($), 'archive', saved.id, at)) await holdDetail($, { list: 'archive', id: saved.id, state: 'ok', entry: saved })
+  await loadOpenDetails($)
+}
+
+// Without a project folder, or when the project files cannot take it, the save goes to the shared store as before. True
+// when the entry was kept somewhere: its session file or the shared store.
 async function saveArchive($: EngineInterface, entry: ArchiveEntry): Promise<boolean> {
   if (!isWorthKeeping(entry)) return false
-  // A volume being shown keeps its entries; the Archive tab's count still takes the latest part's.
-  const showLatest = async (latest: ArchiveEntry[]): Promise<void> => {
-    if ((await readPanel($)).archiveVolume == null) await update($, archive, () => latest)
-    else await updatePanel($, prev => ({ ...prev, archiveLatestCount: latest.length }))
-  }
-  // The same calls, watched: a side file or the store taking the entry counts as kept.
-  const base = io($)
-  let isKept = false
-  const kept = <T,>(r: T): T => {
-    isKept = true
-    return r
-  }
-  const watched: Io = {
-    ...base,
-    write: (path, text) => Promise.resolve(base.write(path, text)).then(r => (EXTRA_FILE.test(path.slice(path.lastIndexOf('/') + 1)) ? kept(r) : r)),
-    storeSet: value => base.storeSet(value).then(kept),
-  }
-  let view: ArchiveEntry[] | null = null
+  const now = await clockOr($, entry.endedAt)
+  let note = ''
   if (project) {
-    const saved = await saveToProject(watched, project, volumeMax, entry).catch(() => null)
-    const vols = saved?.volumes
-    if (vols) await update($, volumes, () => vols)
-    if (saved) await updatePanel($, prev => ({ ...prev, archiveWarning: saved.isUnreadable ? UNREADABLE : '' }))
-    if (saved?.isSaved) {
-      await showLatest(saved.latest)
+    const saved = await saveSession(io($), project, entry, now).catch(() => null)
+    if (saved?.isSaved && saved.lists) {
+      await showLists($, saved.lists, entry)
       return true
     }
-    view = saved?.latest ?? null
+    if (saved?.isTooBig) note = `"${entry.title || entry.id}" is over 3,900,000 bytes and was not saved to the project folder`
   }
-  const next = await saveToStore(watched, entry, () => readArchive($))
-  await showLatest(view ?? next)
+  const isKept = await saveToStore(io($), entry).catch(() => false)
+  // One kept nowhere still shows for this session, and says so.
+  if (!isKept) note = `could not save "${entry.title || entry.id}" anywhere; it shows for this session only`
+  const lists = await readLists($)
+  const records = [...lists.records.filter(r => r.id !== entry.id), storeRecordOf(entry)]
+  await showLists($, { ...lists, records: sortRecords(records), warnings: note ? [...lists.warnings.filter(w => w !== note), note] : lists.warnings }, entry)
   return isKept
+}
+
+const storeRecordOf = (e: ArchiveEntry): ArchiveRecord => ({ ...recordOf(e, '', 0), source: 'store' })
+const sortRecords = (records: ArchiveRecord[]): ArchiveRecord[] => sortNewest(records, r => ({ end: r.endedAt, start: r.startedAt, id: r.id }))
+
+// Moves a session to the trash or back, after its confirmation; the lists show the result, and a failure is said above
+// them. Never throws into the press.
+async function moveSession($: EngineInterface, to: 'trash' | 'archive', id: string): Promise<void> {
+  try {
+    await updatePanel($, prev => ({ ...prev, confirm: null }))
+    const now = await clockOr($, Date.now())
+    const moved: Moved = to === 'trash' ? await trashSession(io($), project, id, now) : await restoreSession(io($), project, id, now)
+    const failed = moved.ok ? [] : [`${to === 'trash' ? tr().trashFailed : tr().restoreFailed}: ${moved.error ?? ''}`]
+    if (moved.lists) await showLists($, { ...moved.lists, warnings: [...moved.lists.warnings, ...failed] })
+    else if (failed.length) await update($, archiveLists, prev => ({ ...asLists(prev), warnings: [...asLists(prev).warnings, ...failed] }))
+    await dropDetail($, to === 'trash' ? 'archive' : 'trash', id)
+  } catch {
+    // A failing store leaves both lists as they are.
+  }
+}
+
+// The archive saves and moves, one after another.
+const queueArchive = <T,>(run: () => Promise<T>): Promise<T> => {
+  const next = archiving.then(run)
+  archiving = next.catch(() => {})
+  return next
 }
 
 // The archive presses, one after another; a flow's own record waits for the one under way, so a partial entry never
 // lands after the flow's full one.
 let archiving: Promise<unknown> = Promise.resolve()
 
-// The finished rows of the flow that can still be archived, newest first as the live Finished list shows them: rows
-// that began before the flow belong to the flow before it. An Incomplete row is not finished work: it stays, and a
-// press on a newer row passes over it.
+// The finished rows of the flow that can still be archived, latest completion first as the live Finished list shows
+// them: rows that began before the flow belong to the flow before it. An Incomplete row is not finished work: it stays,
+// and a press on a newer row passes over it.
 const archivable = (list: AgentRun[], meta: Meta | null): AgentRun[] =>
-  list.filter(a => isSettled(a) && !a.archived && (!meta || a.startedAt >= meta.startedAt)).reverse()
+  finishedFirst(list.filter(a => isSettled(a) && !a.archived && (!meta || a.startedAt >= meta.startedAt)))
 
-// Archives the row and every older finished row not archived yet: the open flow's entry is saved with all its archived
-// rows (`partial`), and only once it was kept do they leave the live list. Never throws into the press.
+// Archives the row and every finished row not archived yet that completed before it (by completion time, whatever the
+// order of the presses): the open flow's entry is saved with all its archived rows (`partial`), and only once it was
+// kept do they leave the live list. Never throws into the press.
 async function archiveRows($: EngineInterface, id: string): Promise<void> {
   try {
     const f = await readFlow($)
@@ -1040,10 +1187,11 @@ async function recordFlow($: EngineInterface, f: Flow, status: 'finished' | 'ope
 async function finishFlow($: EngineInterface, input: ProgressInput = {}): Promise<Flow | null> {
   const meta = await readMeta($)
   const list = await readAgents($)
+  const at = await clockAt($)
   let isEnding = false
   const next = await updateFlow($, p => {
     isEnding = !p?.isFinished
-    return isEnding ? merge(p, { ...input, finished: true }) : p
+    return isEnding ? merge(p, { ...input, finished: true }, at) : p
   })
   if (next && isEnding) {
     const used = (await recordFlow($, next, 'finished', { meta, agents: list })) ?? meta
@@ -1276,8 +1424,8 @@ function topToggleRow($: EngineInterface, ui: Pick<Elements['desktop'], 'Box' | 
   )
 }
 
-const TABS: readonly PanelTab[] = ['active', 'finished', 'plans', 'archive']
-const TAB_LABEL: Record<PanelTab, string> = { active: 'Active', finished: 'Finished', plans: 'Plans', archive: 'Archive' }
+const TABS: readonly PanelTab[] = ['active', 'finished', 'plans', 'archive', 'trash']
+const TAB_LABEL: Record<PanelTab, string> = { active: 'Active', finished: 'Finished', plans: 'Plans', archive: 'Archive', trash: 'Trash' }
 
 // The flowdeck group's tabs, one list shown at a time, each with its count (left out when it could not be read), then the
 // Band button. The selected tab is bold in the accent and underlined; pressing it changes nothing.
@@ -1286,7 +1434,10 @@ function tabRow($: EngineInterface, ui: Pick<Elements['desktop'], 'Box' | 'Text'
   const tabs = TABS.map(tab => {
     const n = counts[tab]
     const text = n === null ? TAB_LABEL[tab] : `${TAB_LABEL[tab]} (${n})`
-    const select = () => updatePanel($, prev => (prev.tab === tab ? prev : { ...prev, tab }))
+    const select = async () => {
+      await updatePanel($, prev => (prev.tab === tab ? prev : { ...prev, tab }))
+      if (tab === 'archive' || tab === 'trash') await loadOpenDetails($)
+    }
     return tab === p.tab ? (
       <Button key={`tab-${tab}`} plain onPress={() => undefined}>
         <Text bold underline color={ACCENT}>
@@ -1323,18 +1474,6 @@ export const register: Register = (on, options) => {
     const started = await next(e)
     lang = await detectLang($, options.language).catch((): Lang => 'en')
     project = typeof e.cwd === 'string' ? e.cwd : ''
-    // The new name wins when both are set; the old one keeps working.
-    const named: unknown = await Promise.resolve()
-      .then(() => $.env.get('FLOWDECK_ARCHIVE_VOLUME_MAX'))
-      .catch(() => undefined)
-    const old: unknown =
-      named != null && named !== ''
-        ? undefined
-        : await Promise.resolve()
-            .then(() => $.env.get('FLOWDECK_HISTORY_SEGMENT_MAX'))
-            .catch(() => undefined)
-    const max = Number(named != null && named !== '' ? named : old)
-    volumeMax = max > 0 && max < VOLUME_MAX ? max : VOLUME_MAX
     const stored = await $.store.get('contextShown').catch(() => undefined)
     if (typeof stored === 'boolean') await updatePanel($, prev => ({ ...prev, isContextShown: stored }))
     const storedUsage = await $.store.get('usageShown').catch(() => undefined)
@@ -1345,11 +1484,13 @@ export const register: Register = (on, options) => {
     if (typeof storedPlansShown === 'boolean') await updatePanel($, prev => ({ ...prev, isPlansShown: storedPlansShown }))
     const storedArchiveShown = await $.store.get('historyShown').catch(() => undefined)
     if (typeof storedArchiveShown === 'boolean') await updatePanel($, prev => ({ ...prev, isArchiveShown: storedArchiveShown }))
-    // The project's latest part, with this project's entries from the shared store merged in.
-    const loaded = await loadLatest(io($), project).catch((): Latest => ({ entries: [], volumes: [], isUnreadable: false }))
-    await update($, archive, () => loaded.entries)
-    await update($, volumes, () => loaded.volumes)
-    await updatePanel($, prev => ({ ...prev, archiveListOpen: false, archiveVolume: null, archiveError: '', archiveWarning: loaded.isUnreadable ? UNREADABLE : '' }))
+    // The Archive and Trash lists from their indexes (healed, the old archive imported once, this project's store entries
+    // put into files), then the first group's file.
+    const loadedAt = await clockOr($, 0)
+    const loaded = await loadArchive(io($), project, loadedAt).catch((): ArchiveLists => ({ records: [], trash: [], warnings: [] }))
+    await update($, archiveDetails, () => [])
+    await updatePanel($, prev => ({ ...prev, confirm: null }))
+    await showLists($, loaded)
     const sid = (started as { sessionId?: unknown }).sessionId
     sessionId = (await currentSessionId($)) || (typeof sid === 'string' ? sid : '')
     if (sessionId) {
@@ -1536,7 +1677,8 @@ export const register: Register = (on, options) => {
       // A new flow starts with a clean list; agents still running stay.
       await updateAgents($, list => list.filter(a => a.status === 'running'))
     }
-    const next = input.finished === true ? await finishFlow($, input) : await updateFlow($, p => merge(p, input))
+    const at = await clockAt($)
+    const next = input.finished === true ? await finishFlow($, input) : await updateFlow($, p => merge(p, input, at))
     if (isNewFlow(prev, input)) {
       await updatePanel($, p => ({ ...p, isBandHidden: false })) // a new flow brings the band back
     }
@@ -1904,7 +2046,7 @@ export const register: Register = (on, options) => {
     const foldButton = (a: AgentRun, kp = '', fp = '') => (
       <Button
         key={`${kp}agent-fold-${a.id}`}
-        label={isUnfolded(a, fp) ? '▾' : '▸'}
+        label={foldGlyph(isUnfolded(a, fp))}
         plain
         onPress={() =>
           updatePanel($, prev => {
@@ -1920,6 +2062,8 @@ export const register: Register = (on, options) => {
     const W = Math.max(240, Math.min(900, (e.props.bodyColumns || 40) * 8 - 8))
     const cols = Math.max(24, e.props.bodyColumns || 40)
     const barW = Math.max(6, Math.min(20, cols - 34))
+    // Today, as the rows' completion times are told against it (`HH:MM` today, the date before).
+    const today = await clockOr($, 0)
 
     // One flow as the panel draws it, live or from the archive (FlowView in archive-view.tsx says what it takes).
     const flowView = (v: FlowView): FlowDrawing => {
@@ -1927,7 +2071,14 @@ export const register: Register = (on, options) => {
       // The task each run belongs to: its number leads the row's name, its waits go on the model line.
       const tasks: TaskLike[] = v.tasks ?? []
       const accepted = v.accepted ?? []
-      const { links, acceptedRows, running, finished, archivedCount } = rowsOf(tasks, v.list, accepted)
+      const { links, acceptedRows, running, finished, archivedCount } = rowsOf(tasks, v.list, accepted, v.acceptedAt, v.acceptedFallback)
+      // When a finished row finished (an accepted one, when it was accepted), on its name line; running and queued rows show none.
+      const doneOf = (a: AgentRun): string => (a.status !== 'running' && a.endedAt ? doneText(a.endedAt, today) : '')
+      const acceptedDone = (pl: Planned): string => (pl.doneAt ? doneText(pl.doneAt, today) : '')
+      // The finished rows and the accepted ones in one list, latest completion first.
+      type Done = { a: AgentRun } | { pl: Planned }
+      const byDone = (runs: AgentRun[]): Done[] =>
+        sortNewest<Done>([...runs.map(a => ({ a })), ...acceptedRows.map(pl => ({ pl }))], r => ('a' in r ? runPlace(r.a) : acceptedPlace(r.pl)))
       const taskFor = (a: AgentRun) => taskOf(tasks, links, a)
       // A `#3 …` the description started with is not repeated after the number it gave.
       const nameOf = (a: AgentRun): string => {
@@ -1968,32 +2119,32 @@ export const register: Register = (on, options) => {
           return [
             archivedCount > 0 && note('archived', `${archivedCount} archived`),
             !finished.length && !acceptedRows.length && note('empty', s.noFinished),
-            ...finished.map(a => guard(a, () => d.agent(a, s.isFinished))),
-            ...acceptedRows.map(d.accepted),
+            ...byDone(finished).map(r => ('a' in r ? guard(r.a, () => d.agent(r.a, s.isFinished)) : d.accepted(r.pl))),
           ]
         }
-        // The archive's list: every row newest first.
+        // The archive's list: every row, latest completion first.
         return [
           v.list.length === 0 && acceptedRows.length === 0 && note('empty', s.empty),
-          ...v.list
-            .slice()
-            .reverse()
-            .map(a => guard(a, () => d.agent(a, a.status === 'running' ? s.isRunning : s.isFinished))),
-          ...acceptedRows.map(d.accepted),
+          ...byDone(v.list).map(r => ('a' in r ? guard(r.a, () => d.agent(r.a, r.a.status === 'running' ? s.isRunning : s.isFinished)) : d.accepted(r.pl))),
         ]
       }
       if (Svg) {
         const viewSummary = `≈${fmtCost(v.t.cost)}, ${fmtTokens(v.t.tokens)} ${s.tokensWord}, ${fmtTime(v.t.time)}`
-        // Every row: the task name natively on line 1, the archive icon right after it and the chevron at the far
-        // end (a Button cannot sit inside a drawing), then the drawing at the full width without its title line.
+        // Every row: line 1 is native (a Button cannot sit inside a drawing): the indent, the fold chevron right before
+        // the task name, the archive icon after the name and when it finished at the far end; then the drawing at the
+        // full width without its title line.
         const agentRow = (a: AgentRun, word: string) => {
           const alt = `${a.description}: ${modelName(a.model)}, ${word}`
           const items = itemsOf(a.items)
           const toArchive = archiveButton(a)
+          const done = doneOf(a)
           return (
             <Box key={`${kp}${a.id}`} flexDirection="column">
               <Box flexDirection="row" alignItems="center">
-                <Svg source={INDENT_SVG} alt="" width={TITLE_INDENT} height={1} />
+                <Svg source={INDENT_SVG} alt="" width={TITLE_INDENT - FOLD_W} height={1} />
+                <Box width={FOLD_W} flexShrink={0}>
+                  {items.length > 0 && foldButton(a, kp, fp)}
+                </Box>
                 <Box flexDirection="row" alignItems="center" gap={1} flexGrow={1} flexShrink={1} minWidth={0}>
                   <Box flexShrink={1} minWidth={0} overflow="hidden">
                     <Text bold wrap="truncate-end">
@@ -2002,7 +2153,11 @@ export const register: Register = (on, options) => {
                   </Box>
                   {toArchive && <Box flexShrink={0}>{toArchive}</Box>}
                   <Box flexGrow={1} />
-                  {items.length > 0 && <Box flexShrink={0}>{foldButton(a, kp, fp)}</Box>}
+                  {done && (
+                    <Box flexShrink={0}>
+                      <Text dimColor>{done}</Text>
+                    </Box>
+                  )}
                 </Box>
               </Box>
               <Svg source={agentSvg(W, a, at, { titleOutside: true, after: taskFor(a)?.after, isAccepted: isAccepted(a) })} alt={alt} width={W} height={agentHeight(true)} />
@@ -2014,7 +2169,7 @@ export const register: Register = (on, options) => {
           )
         }
         const acceptedRow = (pl: Planned) => (
-          <Svg key={`${kp}accepted-${pl.n}`} source={acceptedSvg(W, pl)} alt={`${pl.n}. ${pl.title}: ${s.acceptedRow} · ${s.noRun}`} width={W} height={ACCEPTED_H} />
+          <Svg key={`${kp}accepted-${pl.n}`} source={acceptedSvg(W, pl, acceptedDone(pl))} alt={`${pl.n}. ${pl.title}: ${s.acceptedRow} · ${s.noRun}`} width={W} height={ACCEPTED_H} />
         )
         return {
           header: [
@@ -2051,16 +2206,23 @@ export const register: Register = (on, options) => {
         const room = Math.max(state.name.length + 1, cols - 2 - barW - 1)
         const [lead, rest] = splitHead(clip(steps ? `${head} · ${steps}` : head, room), head)
         const items = itemsOf(a.items)
+        const done = doneOf(a)
+        // The fold chevron right before the name (a space on a row with nothing to fold, so names line up), the archive
+        // icon and the state glyph after it, when it finished at the far end.
         return (
           <Box key={`${kp}${a.id}`} flexDirection="column" marginBottom={1}>
             <Box flexDirection="row" gap={1}>
               <Text color={color}>▣</Text>
-              <Text bold wrap="truncate-end">
-                {nameOf(a)}
-              </Text>
+              {items.length > 0 ? foldButton(a, kp, fp) : <Text> </Text>}
+              <Box flexShrink={1} minWidth={0}>
+                <Text bold wrap="truncate-end">
+                  {nameOf(a)}
+                </Text>
+              </Box>
               {archiveButton(a)}
               <Text color={glyphColor(a, color)}>{STATUS_GLYPH[markOf(a)]}</Text>
-              {items.length > 0 && foldButton(a, kp, fp)}
+              {done ? <Box flexGrow={1} /> : null}
+              {done ? <Text dimColor>{done}</Text> : null}
             </Box>
             <Text dimColor wrap="truncate-end">
               {modelLine}
@@ -2093,9 +2255,17 @@ export const register: Register = (on, options) => {
         const tier = pl.tier in TIER_COLOR ? pl.tier : 'other'
         return (
           <Box key={`${kp}accepted-${pl.n}`} flexDirection="column" marginBottom={1}>
-            <Text wrap="truncate-end">
-              <Text color="green">✓</Text> {pl.n}. {pl.title}
-            </Text>
+            <Box flexDirection="row" gap={1}>
+              <Box flexShrink={1} minWidth={0}>
+                <Text wrap="truncate-end">
+                  <Text color="green">✓</Text>
+                  {'   '}
+                  {pl.n}. {pl.title}
+                </Text>
+              </Box>
+              {acceptedDone(pl) ? <Box flexGrow={1} /> : null}
+              {acceptedDone(pl) ? <Text dimColor>{acceptedDone(pl)}</Text> : null}
+            </Box>
             <Text wrap="truncate-end">
               {'  '}
               <Text color={colorOf(tier)}>{tier}</Text>
@@ -2115,7 +2285,9 @@ export const register: Register = (on, options) => {
         return (
           <Box key={`${kp}plan-${pl.n}`} flexDirection="column" marginBottom={1}>
             <Text dimColor wrap="truncate-end">
-              <Text color={colorOf(tier)}>▢</Text> {pl.n}. {pl.title} ◷
+              <Text color={colorOf(tier)}>▢</Text>
+              {'   '}
+              {pl.n}. {pl.title} ◷
             </Text>
             <Text wrap="truncate-end">
               <Text dimColor>
@@ -2151,25 +2323,6 @@ export const register: Register = (on, options) => {
     }
 
     const setIn = (ids: string[] | undefined, id: string, isIn: boolean): string[] => [...(ids ?? []).filter(x => x !== id), ...(isIn ? [id] : [])]
-    // Browsing only reads: a volume's entries replace the shown ones, Back to latest reads history.json again.
-    const openVolume = async (file: string) => {
-      const a = project ? await readVolume(io($), dataDir(project), file) : null
-      if (!a) {
-        await updatePanel($, prev => ({ ...prev, archiveError: file }))
-        return
-      }
-      // Leaving the latest part, its count is kept for the Archive tab.
-      const latest = (await readPanel($)).archiveVolume == null ? (await readArchive($)).length : null
-      await update($, archive, () => a.entries)
-      await updatePanel($, prev => ({ ...prev, ...(latest === null ? {} : { archiveLatestCount: latest }), archiveVolume: file, archiveListOpen: false, archiveError: '', archiveLimit: ARCHIVE_PAGE, openEntries: [], closedEntries: [] }))
-    }
-    const backToLatest = async () => {
-      const loaded = await loadLatest(io($), project).catch(() => null)
-      if (!loaded) return
-      await update($, archive, () => loaded.entries)
-      await update($, volumes, () => loaded.volumes)
-      await updatePanel($, prev => ({ ...prev, archiveVolume: null, archiveError: '', archiveWarning: loaded.isUnreadable ? UNREADABLE : '', archiveLimit: ARCHIVE_PAGE, openEntries: [], closedEntries: [] }))
-    }
 
     // Context, Usage and the Archive draw on their own, each from its own values, whatever the flow is doing.
     const contextSection = await safe('Context', async () => {
@@ -2320,29 +2473,60 @@ export const register: Register = (on, options) => {
       )
     }
 
-    const archivePart = async (): Promise<RenderChildren> =>
-      archiveSection({
+    const archiveWords: ArchiveWords = {
+      tokensWord: s.tokensWord,
+      untitled: s.untitled,
+      noArchive: s.noArchive,
+      trashEmpty: s.trashEmpty,
+      loading: s.loading,
+      couldNotRead: s.couldNotRead,
+      fileMissing: s.fileMissing,
+      showMore: s.showMore,
+      trashAsk: s.trashAsk,
+      trashTell: s.trashTell,
+      moveToTrash: s.moveToTrash,
+      restoreAsk: s.restoreAsk,
+      restoreTell: s.restoreTell,
+      restore: s.restore,
+      cancel: s.cancel,
+    }
+    // The Archive or Trash tab: the list from its index; a group's file is read when it opens and let go when it folds.
+    const archivePart = (list: 'archive' | 'trash') => async (): Promise<RenderChildren> => {
+      const lists = await readLists($)
+      return archiveSection({
         ui: { Box, Text, Button },
         Svg,
         W,
         cols,
         svg,
         fmt: { cost: fmtCost, tokens: fmtTokens, time: fmtTime },
-        tokensWord: s.tokensWord,
+        words: archiveWords,
         p,
-        entries: await readArchive($),
-        volumes: await readVolumes($),
+        list,
+        records: list === 'archive' ? lists.records : lists.trash,
+        details: await readDetails($),
+        warnings: lists.warnings,
+        canMove: !!project,
         flowView,
         plan: planDrawing,
         on: {
           // A press records the user's choice, which wins over the default (the first group shown open).
-          entry: (id, isOpen) => updatePanel($, prev => ({ ...prev, openEntries: setIn(prev.openEntries, id, !isOpen), closedEntries: setIn(prev.closedEntries, id, isOpen) })),
-          list: () => updatePanel($, prev => ({ ...prev, archiveListOpen: !prev.archiveListOpen, archiveError: '' })),
-          volume: openVolume,
-          latest: backToLatest,
-          more: () => updatePanel($, prev => ({ ...prev, archiveLimit: (prev.archiveLimit ?? ARCHIVE_PAGE) + ARCHIVE_PAGE })),
+          entry: async (rec, isOpen) => {
+            const k = groupKey(list, rec.id)
+            await updatePanel($, prev => ({ ...prev, openEntries: setIn(prev.openEntries, k, !isOpen), closedEntries: setIn(prev.closedEntries, k, isOpen) }))
+            if (isOpen) await dropDetail($, list, rec.id)
+            else await loadDetail($, list, rec)
+          },
+          ask: rec => updatePanel($, prev => ({ ...prev, confirm: { list, id: rec.id } })),
+          confirm: rec => queueArchive(() => moveSession($, list === 'archive' ? 'trash' : 'archive', rec.id)),
+          cancel: () => updatePanel($, prev => ({ ...prev, confirm: null })),
+          more: async () => {
+            await updatePanel($, prev => (list === 'archive' ? { ...prev, archiveLimit: prev.archiveLimit + ARCHIVE_PAGE } : { ...prev, trashLimit: prev.trashLimit + ARCHIVE_PAGE }))
+            await loadOpenDetails($)
+          },
         },
       })
+    }
 
     // The Active or Finished tab: the flow's header, then its one list. Without a flow or a run only the list's empty line.
     // `top` is the compact desktop strip above the buttons, `main` the rest.
@@ -2386,6 +2570,7 @@ export const register: Register = (on, options) => {
           list,
           tasks: f?.tasks ?? [],
           accepted: f ? acceptedOf(f) : [],
+          acceptedAt: f?.acceptedAt,
           planned,
           at,
           t,
@@ -2435,7 +2620,9 @@ export const register: Register = (on, options) => {
       active: flowCount?.active ?? null,
       finished: flowCount?.finished ?? null,
       plans: await readPlans($).then(l => l.length, () => null),
-      archive: await Promise.all([readArchive($), readVolumes($)]).then(([en, vo]) => archiveTotal(p, en, vo), () => null),
+      // The sessions each index lists in that tab (archive-index.ts `reconcile`).
+      archive: await readLists($).then(l => l.records.length, () => null),
+      trash: await readLists($).then(l => l.trash.length, () => null),
     }
     const tabs = await safe('Tabs', () => tabRow($, { Box, Text, Button }, p, counts))
     // The compact desktop strip stays above the top buttons whatever tab is shown.
@@ -2448,7 +2635,7 @@ export const register: Register = (on, options) => {
         flowPart = { top: null, main: failed(TAB_LABEL[p.tab]) }
       }
     }
-    const shown = isFlowTab ? flowPart.main : await safe(TAB_LABEL[p.tab], p.tab === 'plans' ? plansSection : archivePart)
+    const shown = isFlowTab ? flowPart.main : await safe(TAB_LABEL[p.tab], p.tab === 'plans' ? plansSection : archivePart(p.tab === 'trash' ? 'trash' : 'archive'))
     const group = (
       <Box key="flowdeck-group" flexDirection="column" marginTop={1} gap={Svg && p.isCompact ? 1 : 0}>
         {tabs}
@@ -2484,7 +2671,7 @@ export const register: Register = (on, options) => {
     return (
       <Box flexDirection="column">
         {topToggleRow($, { Box, Button }, p)}
-        {tabRow($, { Box, Text, Button }, p, { active: null, finished: null, plans: null, archive: null })}
+        {tabRow($, { Box, Text, Button }, p, { active: null, finished: null, plans: null, archive: null, trash: null })}
         <Text dimColor>flowdeck could not draw this panel</Text>
       </Box>
     )

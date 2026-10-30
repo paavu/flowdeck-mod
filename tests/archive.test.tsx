@@ -102,12 +102,16 @@ describe('addEntry', () => {
     expect(h.map(e => e.id)).toEqual([entry(2).id, entry(1).id])
   })
 
-  test('a later snapshot of the same flow replaces it and moves to the front', () => {
+  test('a later snapshot of the same flow replaces it and moves to where its later end puts it, the front', () => {
     const h = [entry(3), entry(2), entry(1)]
-    const next = addEntry(h, entry(1, { status: 'open', done: 3 }))
+    const next = addEntry(h, entry(1, { status: 'open', done: 3, endedAt: END + 10 }))
     expect(next.map(e => e.id)).toEqual([entry(1).id, entry(3).id, entry(2).id])
     expect(next[0]!.done).toBe(3)
     expect(next.length).toBe(3)
+    // a snapshot that ends no later stays where its end puts it
+    const same = addEntry(h, entry(1, { done: 0 }))
+    expect(same.map(e => e.id)).toEqual([entry(3).id, entry(2).id, entry(1).id])
+    expect(same[2]!.done).toBe(0)
   })
 
   test('never drops an entry', () => {

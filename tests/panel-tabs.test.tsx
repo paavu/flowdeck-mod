@@ -1,18 +1,19 @@
 import { describe, expect, test } from 'claude-code/testing'
 
-import { keyOf } from '../hooks/archive'
-import { archiveTotal } from '../hooks/archive-view'
+import { keyOf, parseSession } from '../hooks/archive'
+import { byNewest, recordOf } from '../hooks/archive-index'
 import { asPanel, PANEL_DEFAULT } from '../hooks/shapes'
+import { fileOf } from './archive-files'
 import { showTab } from './tabs'
 import type { Tab } from './tabs'
 
-// The flowdeck group under Context and Usage: the tabs Active, Finished, Plans and Archive with their counts, the Band
-// button at the end, and the one list of the selected tab below them.
+// The flowdeck group under Context and Usage: the tabs Active, Finished, Plans, Archive and Trash with their counts, the
+// Band button at the end, and the one list of the selected tab below them.
 
 const NOW = Date.UTC(2026, 9, 30, 13, 0)
 const HOUR = 3_600_000
 const SURFACES = ['terminal', 'desktop'] as const
-const TABS: Tab[] = ['active', 'finished', 'plans', 'archive']
+const TABS: Tab[] = ['active', 'finished', 'plans', 'archive', 'trash']
 
 function engine(on: any, opts: { store?: Record<string, unknown> } = {}) {
   const store = opts.store ?? {}
@@ -43,6 +44,13 @@ const held = (on: any, key: string, value: unknown) =>
     return r?.value?.version > 0 ? r : { value: { value, version: r?.value?.version ?? 0 } }
   })
 
+// A value the held state always answers, whatever a load or save wrote.
+const pinned = (on: any, key: string, value: unknown) =>
+  on('state.get', { plugin: 'flowdeck', key }, async (_$: any, e: any, next: any) => {
+    const r = await next(e)
+    return { value: { value, version: r?.value?.version ?? 0 } }
+  })
+
 const start = ($: any) => $.session.start({ surface: 'terminal', isInteractive: true, cwd: '/work/app' } as any)
 const mount = ($: any, surface: 'terminal' | 'desktop', bodyColumns = 80) =>
   $.ui.mount({ plugin: 'flowdeck', surface, component: 'Pane', requestId: 'flowdeck-agents', props: { bodyColumns } } as any)
@@ -64,6 +72,9 @@ const entry = (i: number) => ({
   tokens: 1000,
   time: 60_000,
 })
+// The index records of these entries, newest first; `trashed` marks them as moved to the trash at NOW.
+const recordsOf = (entries: any[], trashed = false) =>
+  byNewest(entries.map(e => ({ ...recordOf(parseSession(e)!, fileOf(e), 0), ...(trashed ? { trashedAt: NOW, originalFile: fileOf(e) } : {}) })))
 
 // One of everything: a running run, a finished run, a queued task, a plan and a saved session.
 async function everything($: any) {
@@ -88,6 +99,7 @@ const MARK: Record<Tab, RegExp> = {
   finished: /done b/,
   plans: /Alpha rollout/,
   archive: new RegExp(`archive-${keyOf('e1')}`),
+  trash: new RegExp(`trash-${keyOf('e9')}`),
 }
 const tabText = async (p: any, tab: Tab) => (await p.find({ type: 'Button', key: `tab-${tab}` }))?.text
 
@@ -144,8 +156,13 @@ describe('the tabs', () => {
     expect(asPanel({ tab: 'bogus' }).tab).toBe('active')
     expect(asPanel({ tab: 7 }).tab).toBe('active')
     expect(asPanel({ tab: 'archive' }).tab).toBe('archive')
-    expect(asPanel({ archiveLatestCount: -3 }).archiveLatestCount).toBe(0)
-    expect(asPanel({ archiveLatestCount: 'x' }).archiveLatestCount).toBe(0)
+    expect(asPanel({ tab: 'trash' }).tab).toBe('trash')
+    // the fields of the volumes are dropped; a page is never under 50, and a confirmation of the wrong kind is none
+    for (const k of ['archiveVolume', 'archiveListOpen', 'archiveError', 'archiveWarning', 'archiveLatestCount']) expect(k in asPanel({ archiveVolume: 'history-3.json', archiveListOpen: true, archiveError: 'x', archiveWarning: 'y', archiveLatestCount: 5 })).toBe(false)
+    expect(asPanel({ archiveLimit: 10, trashLimit: 'x' })).toMatchObject({ archiveLimit: 50, trashLimit: 50 })
+    expect(asPanel({ archiveLimit: 100 }).archiveLimit).toBe(100)
+    expect(asPanel({ confirm: { list: 'archive', id: 'e1' } }).confirm).toEqual({ list: 'archive', id: 'e1' })
+    expect(asPanel({ confirm: { list: 'volumes', id: 'e1' } }).confirm).toBeNull()
     expect(asPanel(null).tab).toBe(PANEL_DEFAULT.tab)
     engine(on)
     held(on, 'panel', { isCompact: false, isDoneCollapsed: true, isContextShown: true, isUsageShown: true, isPlansShown: false, isArchiveShown: false, autoOpenedFor: '' })
@@ -177,7 +194,7 @@ describe('the tabs', () => {
       const row = (key: string) => walk(root).find(n => keyOfNode(n) === key)
       const keys = (n: any) => walk(n).map(keyOfNode).filter(Boolean)
       expect(keys(row('top-toggles'))).toEqual(['top-toggles', 'context', 'usage'])
-      expect(keys(row('tabs'))).toEqual(['tabs', 'tab-active', 'tab-finished', 'tab-plans', 'tab-archive', 'band'])
+      expect(keys(row('tabs'))).toEqual(['tabs', 'tab-active', 'tab-finished', 'tab-plans', 'tab-archive', 'tab-trash', 'band'])
       // the group comes after Context and Usage
       const order = walk(root).map(keyOfNode)
       expect(order.indexOf('top-toggles')).toBeLessThan(order.indexOf('flowdeck-group'))
@@ -191,6 +208,8 @@ describe('one list at a time', () => {
   for (const surface of SURFACES) {
     test(`each tab draws its own list and none of the others (${surface})`, async ($, on) => {
       engine(on, { store: { history: [entry(1)] } })
+      // the Archive holds e1, the Trash e9
+      pinned(on, 'archiveLists', { records: recordsOf([entry(1)]), trash: recordsOf([entry(9)], true), warnings: [] })
       await everything($)
       for (const tab of TABS) {
         await showTab($, tab)
@@ -213,6 +232,7 @@ describe('one list at a time', () => {
         expect(await tabText(p, 'finished')).toBe('Finished (1)')
         expect(await tabText(p, 'plans')).toBe('Plans (1)')
         expect(await tabText(p, 'archive')).toBe('Archive (2)')
+        expect(await tabText(p, 'trash')).toBe('Trash (0)')
         await p.unmount()
       }
     }
@@ -221,7 +241,7 @@ describe('one list at a time', () => {
   test('every count is (0) with nothing to show, and each tab says so', async ($, on) => {
     engine(on)
     await start($)
-    const empty: Record<Tab, string> = { active: 'Nothing running or queued', finished: 'No finished items yet', plans: 'No plans', archive: 'no archive yet' }
+    const empty: Record<Tab, string> = { active: 'Nothing running or queued', finished: 'No finished items yet', plans: 'No plans', archive: 'no archive yet', trash: 'Trash is empty' }
     for (const surface of SURFACES) {
       for (const tab of TABS) {
         await showTab($, tab)
@@ -278,13 +298,25 @@ describe('one list at a time', () => {
   })
 })
 
-describe('the Archive count', () => {
-  const vol = (count: number) => ({ file: `history-${count}.json`, count, from: 0, to: 0, cost: 0, tokens: 0, time: 0, size: 0 })
-  test('the latest part’s entries and every volume’s; while a volume is shown, the remembered latest count', () => {
-    const latest = [entry(1), entry(2)] as any[]
-    expect(archiveTotal(PANEL_DEFAULT, latest, [])).toBe(2)
-    expect(archiveTotal(PANEL_DEFAULT, latest, [vol(3), vol(4)])).toBe(9)
-    expect(archiveTotal({ ...PANEL_DEFAULT, archiveVolume: 'history-3.json', archiveLatestCount: 5 }, [entry(9)] as any[], [vol(3), vol(4)])).toBe(12)
-    expect(archiveTotal(PANEL_DEFAULT, [], [])).toBe(0)
+describe('the Archive and Trash counts', () => {
+  test('every session each list holds, the ones past the page too; drawn or not, on both surfaces', async ($, on) => {
+    engine(on)
+    const archived = Array.from({ length: 52 }, (_, i) => entry(i + 1))
+    pinned(on, 'archiveLists', { records: recordsOf(archived), trash: recordsOf([entry(60), entry(61)], true), warnings: [] })
+    for (const surface of SURFACES) {
+      for (const tab of ['active', 'archive', 'trash'] as const) {
+        await showTab($, tab)
+        const p = await mount($, surface)
+        expect(await tabText(p, 'archive')).toBe('Archive (52)')
+        expect(await tabText(p, 'trash')).toBe('Trash (2)')
+        if (tab === 'archive') {
+          // a page of 50 is drawn; the other two are a press away
+          expect((await p.findAll({ type: 'Button' })).filter((b: any) => /^archive-k[a-z0-9]+$/.test(String(b.props.key)))).toHaveLength(50)
+          expect(String((await p.find({ type: 'Button', key: 'archive-more' }))?.props.label)).toBe('Show more (2)')
+        }
+        await p.unmount()
+      }
+    }
+    await showTab($, 'active')
   })
 })

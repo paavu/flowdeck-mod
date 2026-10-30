@@ -1,8 +1,12 @@
 // The held values as the panel and the band read them. A reload keeps what an older flowdeck wrote, in its older shape,
 // so every read goes through these: defaults fill what is missing, a field of the wrong kind falls back to its default,
 // fields no longer used are dropped, and entries that are no entry at all are left out.
-import type { AgentRun, AgentStatus, ArchiveEntry, ArchiveVolume, Flow, Panel, PanelTab, Phase, PlannedTask, Reading, Sample, Samples, UsageWindow } from '../types'
-import { parseArchive, parseIndex } from './archive'
+import type { AgentRun, AgentStatus, ArchiveDetail, ArchiveEntry, ArchiveLists, Flow, Panel, PanelTab, Phase, PlannedTask, Reading, Sample, Samples, UsageWindow } from '../types'
+import { parseArchive, stampsOf } from './archive'
+import { parseRecords } from './archive-index'
+
+/** How many Archive or Trash rows are drawn at first; `Show more` adds as many. */
+export const ARCHIVE_PAGE = 50
 
 export const PANEL_DEFAULT: Panel = {
   isCompact: false,
@@ -17,17 +21,14 @@ export const PANEL_DEFAULT: Panel = {
   openEntries: [],
   openAgents: [],
   closedEntries: [],
-  archiveLimit: 10,
-  archiveListOpen: false,
-  archiveVolume: null,
-  archiveError: '',
-  archiveWarning: '',
+  archiveLimit: ARCHIVE_PAGE,
+  trashLimit: ARCHIVE_PAGE,
+  confirm: null,
   autoOpenedFor: '',
   tab: 'active',
-  archiveLatestCount: 0,
 }
 
-const TABS: readonly PanelTab[] = ['active', 'finished', 'plans', 'archive']
+const TABS: readonly PanelTab[] = ['active', 'finished', 'plans', 'archive', 'trash']
 
 type Obj = Record<string, unknown>
 const isObj = (v: unknown): v is Obj => !!v && typeof v === 'object' && !Array.isArray(v)
@@ -50,14 +51,12 @@ export function asPanel(v: unknown): Panel {
     openEntries: strings(o.openEntries),
     openAgents: strings(o.openAgents),
     closedEntries: strings(o.closedEntries),
-    archiveLimit: Math.max(1, num(o.archiveLimit) ?? d.archiveLimit),
-    archiveListOpen: bool(o.archiveListOpen, d.archiveListOpen),
-    archiveVolume: typeof o.archiveVolume === 'string' ? o.archiveVolume : null,
-    archiveError: text(o.archiveError, d.archiveError),
-    archiveWarning: text(o.archiveWarning, ''),
+    // A page is never smaller than the default (a panel held from before 1.0.0025 had 10).
+    archiveLimit: Math.max(ARCHIVE_PAGE, num(o.archiveLimit) ?? d.archiveLimit),
+    trashLimit: Math.max(ARCHIVE_PAGE, num(o.trashLimit) ?? d.trashLimit),
+    confirm: isObj(o.confirm) && (o.confirm.list === 'archive' || o.confirm.list === 'trash') && typeof o.confirm.id === 'string' ? { list: o.confirm.list, id: o.confirm.id } : null,
     autoOpenedFor: text(o.autoOpenedFor, d.autoOpenedFor),
     tab: TABS.includes(o.tab as PanelTab) ? (o.tab as PanelTab) : d.tab,
-    archiveLatestCount: Math.max(0, Math.round(num(o.archiveLatestCount) ?? d.archiveLatestCount)),
   }
 }
 
@@ -83,6 +82,7 @@ export function asFlow(v: unknown): Flow | null {
     isLinked: bool(v.isLinked, false),
     tasks: (Array.isArray(v.tasks) ? v.tasks : []).flatMap(asTask),
     ...(Array.isArray(v.accepted) ? { accepted: v.accepted.filter((n): n is number => Number.isInteger(n) && n > 0) } : {}),
+    ...(stampsOf(v.acceptedAt) ? { acceptedAt: stampsOf(v.acceptedAt) } : {}),
   }
 }
 
@@ -134,11 +134,25 @@ const isEntry = (e: unknown): e is ArchiveEntry =>
   Array.isArray(e.tasks) &&
   (e.agents === undefined || Array.isArray(e.agents)) &&
   (e.accepted === undefined || (Array.isArray(e.accepted) && e.accepted.every(n => Number.isInteger(n) && n > 0))) &&
+  e.acceptedAt === undefined &&
   ENTRY_NUMS.every(k => num(e[k]) !== undefined)
 
 export const asArchive = (v: unknown): ArchiveEntry[] => (Array.isArray(v) ? v.flatMap(e => (isEntry(e) ? [e] : parseArchive([e]))) : [])
 
-export const asVolumes = (v: unknown): ArchiveVolume[] => parseIndex({ segments: Array.isArray(v) ? v : [] })?.volumes ?? []
+export const asLists = (v: unknown): ArchiveLists => {
+  const o = isObj(v) ? v : {}
+  return { records: parseRecords(o.records), trash: parseRecords(o.trash), warnings: strings(o.warnings) }
+}
+
+// The session files held for open groups; one that is no detail is left out, an entry that does not parse reads as an error.
+export const asDetails = (v: unknown): ArchiveDetail[] =>
+  (Array.isArray(v) ? v : []).flatMap((d): ArchiveDetail[] => {
+    if (!isObj(d) || (d.list !== 'archive' && d.list !== 'trash') || typeof d.id !== 'string') return []
+    const state = d.state === 'loading' || d.state === 'ok' ? d.state : 'error'
+    if (state !== 'ok') return [{ list: d.list, id: d.id, state }]
+    const entry = asArchive([d.entry])[0]
+    return entry ? [{ list: d.list, id: d.id, state, entry }] : [{ list: d.list, id: d.id, state: 'error' }]
+  })
 
 const KINDS = ['five_hour', 'seven_day'] as const
 

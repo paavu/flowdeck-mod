@@ -1,6 +1,8 @@
 import { describe, expect, test } from 'claude-code/testing'
 
-import { keyOf } from '../hooks/archive'
+import { keyOf, parseSession } from '../hooks/archive'
+import { byNewest, recordOf } from '../hooks/archive-index'
+import { fileOf } from './archive-files'
 import { showTab } from './tabs'
 import type { Tab } from './tabs'
 
@@ -132,8 +134,10 @@ const entry = (i: number) => ({
   tokens: 12_000,
   time: 30 * 60_000,
 })
+// The held Archive list of these entries, as a load leaves it: one index record each, newest first (e1 ended last).
+const listsOf = (...entries: any[]) => ({ records: byNewest(entries.map(e => recordOf(parseSession(e)!, fileOf(e), 0))), trash: [], warnings: [] })
 
-const TOP = ['context', 'usage', 'tab-active', 'tab-finished', 'tab-plans', 'tab-archive', 'band']
+const TOP = ['context', 'usage', 'tab-active', 'tab-finished', 'tab-plans', 'tab-archive', 'tab-trash', 'band']
 const hasTop = async (p: any) => {
   for (const key of TOP) expect(await p.find({ type: 'Button', key })).toBeDefined()
 }
@@ -171,7 +175,7 @@ describe('a panel held from an older flowdeck', () => {
   test('draws before session.start has run again too', async ($, on) => {
     engine(on)
     holdOld(on)
-    held(on, 'archive', [entry(2), entry(1)])
+    held(on, 'archiveLists', listsOf(entry(2), entry(1)))
     for (const surface of SURFACES) {
       let p = await pane($, surface, 'finished')
       await hasTop(p)
@@ -211,11 +215,12 @@ describe('a panel held from an older flowdeck', () => {
     ['band', 'band', undefined, p => p.find({ type: 'Button', key: 'band', text: /▾ Band/ }), p => p.find({ type: 'Button', key: 'band', text: /▸ Band/ })],
     ['finished tab', 'tab-finished', undefined, p => selected(p, 'Active (1)'), p => selected(p, 'Finished (1)')],
     ['plans tab', 'tab-plans', undefined, p => selected(p, 'Active (1)'), p => selected(p, 'Plans (0)')],
-    ['archive tab', 'tab-archive', undefined, p => selected(p, 'Active (1)'), p => p.find({ type: 'Button', key: `archive-${keyOf('e2')}` })],
+    ['archive tab', 'tab-archive', undefined, p => selected(p, 'Active (1)'), p => p.find({ type: 'Button', key: `archive-${keyOf('e1')}` })],
     ['compact', 'compact', 'active', p => p.find({ type: 'Button', key: 'compact', text: /Collapse/ }), p => p.find({ type: 'Button', key: 'compact', text: /Expand/ })],
     ['agent fold', 'agent-fold-w1', 'finished', p => p.find({ type: 'Button', key: 'agent-fold-w1', text: '▸' }), p => p.find({ type: 'Button', key: 'agent-fold-w1', text: '▾' })],
-    ['open archive group', `archive-${keyOf('e2')}`, 'archive', p => p.find({ type: 'Button', key: `archive-${keyOf('e2')}`, text: /^▾/ }), p => p.find({ type: 'Button', key: `archive-${keyOf('e2')}`, text: /^▸/ })],
-    ['folded archive group', `archive-${keyOf('e1')}`, 'archive', p => p.find({ type: 'Button', key: `archive-${keyOf('e1')}`, text: /^▸/ }), p => p.find({ type: 'Button', key: `archive-${keyOf('e1')}`, text: /^▾/ })],
+    // the newest group (e1) is open by default
+    ['open archive group', `archive-${keyOf('e1')}`, 'archive', p => p.find({ type: 'Button', key: `archive-${keyOf('e1')}`, text: /^▾/ }), p => p.find({ type: 'Button', key: `archive-${keyOf('e1')}`, text: /^▸/ })],
+    ['folded archive group', `archive-${keyOf('e2')}`, 'archive', p => p.find({ type: 'Button', key: `archive-${keyOf('e2')}`, text: /^▸/ }), p => p.find({ type: 'Button', key: `archive-${keyOf('e2')}`, text: /^▾/ })],
     ['finish flow', 'flow-finish', 'active', p => p.find({ type: 'Button', key: 'flow-finish' }), async p => ((await p.find({ type: 'Button', key: 'flow-finish' })) ? undefined : true)],
     ['archive item', 'archive-item-w1', 'finished', p => p.find({ type: 'Button', key: 'archive-item-w1' }), p => p.find({ type: 'Text', text: /1 archived/ })],
   ]
@@ -224,7 +229,7 @@ describe('a panel held from an older flowdeck', () => {
       test(`the ${name} press works on it (${surface})`, async ($, on) => {
         engine(on)
         holdOld(on)
-        held(on, 'archive', [entry(2), entry(1)])
+        held(on, 'archiveLists', listsOf(entry(2), entry(1)))
         const p = await pane($, surface, tab)
         expect(await before(p)).toBeDefined()
         await p.press({ key })
@@ -276,7 +281,9 @@ describe('a failing part leaves the rest drawn', () => {
 
   test('an archive group that throws draws one dim line, and the other groups draw', async ($, on) => {
     engine(on)
-    pinned(on, 'archive', [entry(2), { ...entry(1), tasks: [null] }])
+    // the newest group (e1) is open by default; its session file holds a task that is no task
+    pinned(on, 'archiveLists', listsOf(entry(2), entry(1)))
+    pinned(on, 'archiveDetails', [{ list: 'archive', id: 'e1', state: 'ok', entry: { ...entry(1), tasks: [null] } }])
     for (const surface of SURFACES) {
       const p = await pane($, surface, 'archive')
       expect((await p.findAll({ type: 'Text', text: 'Archive group could not be drawn' })).length).toBe(1)
@@ -316,7 +323,7 @@ describe('the panel without a flow', () => {
     for (const surface of SURFACES) {
       let p = await pane($, surface)
       await hasTop(p)
-      for (const label of ['Active (0)', 'Finished (0)', 'Plans (0)', 'Archive (0)']) expect(await p.find({ type: 'Button', text: label })).toBeDefined()
+      for (const label of ['Active (0)', 'Finished (0)', 'Plans (0)', 'Archive (0)', 'Trash (0)']) expect(await p.find({ type: 'Button', text: label })).toBeDefined()
       expect(await p.find({ type: 'Text', text: /no context data yet/ })).toBeDefined()
       expect(await p.find({ type: 'Text', text: /no usage data yet/ })).toBeDefined()
       expect(await p.find({ type: 'Text', text: 'Nothing running or queued' })).toBeDefined()

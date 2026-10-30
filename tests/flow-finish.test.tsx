@@ -1,9 +1,10 @@
 import { describe, expect, test } from 'claude-code/testing'
 
+import { indexPath, records, sessionPaths, sessions } from './archive-files'
 import { fakeFs } from './fake-fs'
 
 const NOW = Date.UTC(2026, 9, 26, 12, 40)
-const HISTORY = '/work/app/.claude/flowdeck/history.json'
+const DIR = '/work/app/.claude/flowdeck'
 
 type Fail = { fs?: boolean; store?: boolean; clock?: boolean }
 
@@ -60,7 +61,7 @@ const plan = ($: any, title = 'Ship it') =>
 const band = ($: any, surface: 'desktop' | 'terminal') =>
   $.ui.mount({ plugin: 'flowdeck', surface, component: 'AbovePrompt', props: { hasSurvey: false, isWorking: false, maxRows: 20, bodyColumns: 100 } } as any)
 const pane = ($: any) => $.ui.mount({ plugin: 'flowdeck', surface: 'terminal', component: 'Pane', requestId: 'flowdeck-agents', props: { bodyColumns: 80 } } as any)
-const entries = (files: Record<string, string>): any[] => JSON.parse(files[HISTORY] ?? '[]')
+const entries = (files: Record<string, string>): any[] => sessions(files, DIR)
 const has = async (m: any, key: string) => (await m.findAll({ type: 'Button' })).some((b: any) => JSON.stringify(b).includes(`"${key}"`))
 const bandHas = async ($: any, surface: 'desktop' | 'terminal', key: string) => {
   const b = await band($, surface)
@@ -323,7 +324,8 @@ describe('finish races', () => {
     fs.delay = null
     const list = entries(files)
     expect(list.map(e => [e.title, e.done, e.total, e.tasks.length, e.agents.length])).toEqual([['Ship it', 1, 2, 2, 1]])
-    expect(Object.keys(files).filter(p => p.includes('/history-extra-'))).toHaveLength(1)
+    expect(sessionPaths(files, DIR)).toHaveLength(1)
+    expect(records(files, indexPath(DIR))?.map(r => r.title)).toEqual(['Ship it'])
     expect(await terminalLabel($)).toBe(true)
   })
 
@@ -346,7 +348,8 @@ describe('finish races', () => {
     await p.unmount()
     fs.delay = null
     expect(entries(files).map(e => [e.title, e.done, e.total, e.tasks.length, e.agents.length])).toEqual([['Ship it', 1, 2, 2, 1]])
-    expect(Object.keys(files).filter(f => f.includes('/history-extra-'))).toHaveLength(1)
+    expect(sessionPaths(files, DIR)).toHaveLength(1)
+    expect(records(files, indexPath(DIR))?.map(r => r.title)).toEqual(['Ship it'])
   })
 
   test('a restart while Finish is still saving keeps the new flow’s start; the old record keeps its own', async ($, on) => {
