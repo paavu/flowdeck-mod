@@ -36,10 +36,15 @@ const start = (it: AgentItem, now?: number) => {
   if (now === undefined) delete it.startedAt
   else it.startedAt = now
 }
+// The first move to done or failed dates the item; a time it already has is never overwritten.
+const stamp = (it: AgentItem, now?: number) => {
+  if (now !== undefined && it.doneAt === undefined) it.doneAt = now
+}
 const finish = (it: AgentItem, now?: number) => {
   it.status = 'done'
-  if (now !== undefined) it.doneAt = now
+  stamp(it, now)
 }
+const isEnded = (s: AgentItemStatus) => s === 'done' || s === 'error'
 
 // The stored items, cleaned: anything that is not an item is dropped.
 export const itemsOf = (v: unknown): AgentItem[] =>
@@ -71,6 +76,12 @@ export function parseSteps(raw: unknown, prev: AgentItem[], now?: number): Agent
       if (was && (!asked || asked === was.status)) return [{ ...was, title }]
       const item: AgentItem = { title, status: asked ?? 'pending' }
       if (item.status === 'active' && now !== undefined) item.startedAt = now
+      // Resent as done or failed: it keeps when it started and is dated now, unless it ended before.
+      if (isEnded(item.status)) {
+        if (was?.startedAt !== undefined) item.startedAt = was.startedAt
+        if (was?.doneAt !== undefined) item.doneAt = was.doneAt
+        stamp(item, now)
+      }
       return [item]
     })
     .slice(0, MAX_ITEMS)
@@ -137,7 +148,7 @@ export function applyItemOps(items: AgentItem[], input: StepInput, now?: number)
   const failed = typeof input.failed === 'string' && input.failed.trim() ? find(input.failed) : undefined
   if (failed) {
     failed.status = 'error'
-    if (now !== undefined) failed.doneAt = now
+    stamp(failed, now)
   }
   return { items: next, unknown }
 }
@@ -164,10 +175,38 @@ export const finishItems = (items: AgentItem[], isOk: boolean, now?: number): Ag
   items.map(it => {
     if (it.status !== 'active') return it
     const out: AgentItem = { ...it, status: isOk ? 'done' : 'error' }
-    if (now !== undefined) out.doneAt = now
+    stamp(out, now)
     return out
   })
 
+// The items with the times they are drawn with. A done or failed item without a start (closed in a batch, marked done
+// out of order, never made active) starts where the nearest item before it ended (one that ended no later than it did),
+// else when the run started; one without an end (saved without a clock) ends where the next item started, else when the
+// run ended, else at its start (`0s`). An active item without a start runs from the same place; pending items have no
+// time. Only for drawing: nothing is saved, so items stored by older versions read the same way.
+export function timedItems(items: AgentItem[], run: { startedAt?: number; endedAt?: number }): AgentItem[] {
+  const ends: (number | undefined)[] = []
+  return items.map((it, i) => {
+    if (it.status === 'pending') {
+      ends.push(undefined)
+      return it
+    }
+    const out: AgentItem = { ...it }
+    if (out.startedAt === undefined) {
+      const before = [...ends].reverse().find(e =>e !== undefined && (it.doneAt === undefined || e <= it.doneAt))
+      const from = before ?? run.startedAt
+      if (from !== undefined) out.startedAt = from
+    }
+    if (isEnded(out.status) && out.doneAt === undefined) {
+      const end = items.slice(i + 1).find(x => x.startedAt !== undefined)?.startedAt ?? run.endedAt ?? out.startedAt
+      if (end !== undefined) out.doneAt = end
+    }
+    ends.push(isEnded(out.status) ? out.doneAt : undefined)
+    return out
+  })
+}
+
+// Pass items through timedItems first: an item without its own times then still has one.
 export const itemElapsed = (it: AgentItem, now: number): number | null => {
   if (it.startedAt === undefined) return null
   if (it.status === 'active') return Math.max(0, now - it.startedAt)
@@ -203,6 +242,12 @@ export function itemSvg(W: number, it: AgentItem, now: number, fit: Fit): string
   return `${mark(INDENT + 5, ITEM_H / 2, it.status)}
 <text class="t" x="${titleX}" y="15" font-family="${FONT}" font-size="11">${esc(title)}</text>
 ${t ? `<text class="s" x="${right}" y="15" text-anchor="end" font-family="${FONT}" font-size="11" font-variant-numeric="tabular-nums">${t}</text>` : ''}`
+}
+
+// One dim line at the child rows' title column, W wide and ITEM_H tall: what an opened row with no step list shows.
+export function noteSvg(W: number, text: string, fit: Fit): string {
+  const titleX = INDENT + 16
+  return `<text class="s" x="${titleX}" y="15" font-family="${FONT}" font-size="11">${esc(fit(text, 11, Math.max(0, W - 22 - titleX)))}</text>`
 }
 
 // One child row in the terminal: `   ● title  12s`, the title cut so the time keeps its room.

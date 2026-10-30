@@ -2,6 +2,12 @@
 
 Versions are `M.m.xxxx`; every build bumps the 4-digit build number. Details and rulings: `docs/ledger.md`, `docs/design.md`.
 
+## 1.0.0026 (2026-10-30)
+- The band's `Tasks X/Y`, bar and percent count the rows the tabs count, on the desktop and in the terminal: Y = Active rows + Finished rows (+ archived runs), X = the complete finished rows (Done runs and `Accepted · no worker run` rows; Incomplete and Error rows are not). A run linked to no task counts as its own row. A flow with no rows keeps the orchestrator's total and accepted count. One function (`flowProgress`) feeds the band and the tab counts.
+- The terminal band draws its text row again: the terminal's kit has an `Svg` too (drawn as an empty box), so the flow row had shown only its buttons there.
+- Every agent row has its fold chevron in the slot before its name, running rows without a step list included; it is dim on a row with no step list, and opening such a row shows its model and effort, start time (`HH:MM`), tokens and cost, then a dim `No steps reported yet`.
+- Every done or failed step shows a time. A step's first move to done or failed dates it (an existing end is never overwritten; a resent list keeps the start); a step without a start begins where the nearest earlier step ended, else at the run's start; one without an end (saved without a clock, or by an older version) ends where the next step started, else when the run ended. Batch-closed steps may read `0s`.
+
 ## 1.0.0025 (2026-10-30)
 - The archive is one file per saved session (`.claude/flowdeck/archive/<key>-<startedAt>.json`) plus a small index (`archive-index.json`, one record per session: title, dates, item and task counts, cost, tokens, time, size). The Archive tab draws its whole list from the index, collapsed rows newest first, each with its summary line (`≈$1.23 · 45k tokens · 12:03`), 50 at a time with `Show more (n)`; opening a row reads that session's file (`loading…`), folding it lets the file go, at most 10 held. Volumes, `Older volumes`, `Back to latest` and `Show older` are gone.
 - The index heals itself: a session file it does not list is added, a record whose file is gone is kept and marked `file missing`, a damaged index is rebuilt from the files (the damaged one kept in `.trash/damaged/`). Every save writes the session's file first.

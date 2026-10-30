@@ -456,11 +456,11 @@ describe('archive groups in the panel', () => {
     const p = await pane($, 'desktop')
     const root = await p.drawn()
     await p.unmount()
-    // line 1: the indent, the fold chevron's place (the chevron when the row has items) right before the name, the name,
-    // a spacer and when the row finished at the far end
+    // line 1: the indent, the fold chevron right before the name (every row folds; dim on a row with no step list), the
+    // name, a spacer and when the row finished at the far end
     for (const [id, name, want] of [
       ['a2', 'wire it', ['indent', 'chevron', 'title', 'spacer', 'time']],
-      ['a1', 'write tests', ['indent', 'no chevron', 'title', 'spacer', 'time']],
+      ['a1', 'write tests', ['indent', 'chevron', 'title', 'spacer', 'time']],
     ] as const) {
       const r = walk(root).find(n => keyOfNode(n) === `${kp}${id}`)
       expect(r?.props?.flexDirection).toBe('column')

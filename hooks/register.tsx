@@ -2,9 +2,9 @@ import { atom, read, update } from 'claude-code'
 import type { Elements, EngineInterface, Register, RenderChildren } from 'claude-code'
 
 import type { AgentRun, ArchiveDetail, ArchiveEntry, ArchiveLists, ArchiveRecord, Flow, Panel, PanelTab, Phase, PlannedTask, PlanStage, Reading, Samples, TaskPlan, UsageWindow } from '../types'
-import { derive, finishItems, hasItemOps, ITEM_H, itemAlt, itemLine, itemsOf, itemSvg, stepItems } from './agent-items'
+import { derive, finishItems, hasItemOps, ITEM_H, itemAlt, itemLine, itemsOf, itemSvg, noteSvg, stepItems, timedItems } from './agent-items'
 import type { StepInput } from './agent-items'
-import { agentState, HOUSEKEEPING, isIncomplete, isSettled, markOf, progressOf, splitHead, stateText } from './agent-state'
+import { agentState, HOUSEKEEPING, isComplete, isIncomplete, isSettled, markOf, progressOf, splitHead, stateText } from './agent-state'
 import { contextRows, contextSvg, toReading } from './context'
 import { isWorthKeeping, keyOf, planEntry, snapshot, VOLUME_MAX } from './archive'
 import { recordOf } from './archive-index'
@@ -138,6 +138,8 @@ const STRINGS = {
     acceptedTag: 'accepted',
     nothingQueued: 'Nothing running or queued',
     noFinished: 'No finished items yet',
+    started: 'started',
+    noSteps: 'No steps reported yet',
     noPlans: 'No plans',
     untitled: 'Untitled',
     noArchive: 'no archive yet',
@@ -186,6 +188,8 @@ const STRINGS = {
     acceptedTag: 'принята',
     nothingQueued: 'Ничего не выполняется и не ждёт запуска',
     noFinished: 'Завершённых пока нет',
+    started: 'начат',
+    noSteps: 'Шагов пока нет',
     noPlans: 'Планов нет',
     untitled: 'Без названия',
     noArchive: 'архив пока пуст',
@@ -538,10 +542,30 @@ const rowsOf = (tasks: TaskLike[], list: AgentRun[], accepted: number[], accepte
   }
 }
 
-// The live flow's Active and Finished counts: the rows those lists draw.
-const flowCounts = (f: Flow | null, list: AgentRun[]): { active: number; finished: number } => {
+// The live flow's numbers from the rows its lists draw, the one source of the tab counts and the band's X/Y and bar:
+// Active = running runs + queued tasks; Finished = finished runs not archived + Accepted rows; done = the finished rows
+// that are complete (a Done run or an Accepted row; Incomplete and failed ones are not); total = every row (archived
+// runs stay counted, as finished, so archiving never moves the band back). `hasRows` is false for a flow with no row
+// at all, which keeps the orchestrator's own total and accepted count (a fresh plan without tasks).
+const flowProgress = (f: Flow | null, list: AgentRun[]) => {
   const r = rowsOf(f?.tasks ?? [], list, f ? acceptedOf(f) : [])
-  return { active: r.running.length + plannedOf(f, list).length, finished: r.finished.length + r.acceptedRows.length }
+  const archived = list.filter(a => a.status !== 'running' && a.archived)
+  const active = r.running.length + plannedOf(f, list).length
+  const finished = r.finished.length + r.acceptedRows.length
+  const done = [...r.finished, ...archived].filter(isComplete).length + r.acceptedRows.length
+  const total = active + finished + archived.length
+  return { active, finished, done, total, running: r.running.length, hasRows: total > 0 }
+}
+
+const flowCounts = (f: Flow | null, list: AgentRun[]): { active: number; finished: number } => {
+  const { active, finished } = flowProgress(f, list)
+  return { active, finished }
+}
+
+// The flow as the band draws it (label, bar, percent, ticks): its done/total/running from flowProgress.
+const shownFlow = (f: Flow, list: AgentRun[]): Flow => {
+  const g = flowProgress(f, list)
+  return g.hasRows ? { ...f, done: g.done, total: g.total, running: g.running } : f
 }
 
 const totals = (list: AgentRun[], at: number) => {
@@ -2043,11 +2067,13 @@ export const register: Register = (on, options) => {
     // `fp` prefixes an archive group's fold state (`<entryId>:<agentId>`), so folding a row there never folds the live one.
     const isUnfolded = (a: AgentRun, fp = '') => (p.openAgents ?? []).includes(fp + a.id)
     // `kp` prefixes the keys of an archive group's rows, so they never share a key with the live ones.
-    const foldButton = (a: AgentRun, kp = '', fp = '') => (
+    // Every agent row folds; a row with no step list yet has a dim chevron and opens on its details.
+    const foldButton = (a: AgentRun, kp = '', fp = '', hasItems = true) => (
       <Button
         key={`${kp}agent-fold-${a.id}`}
         label={foldGlyph(isUnfolded(a, fp))}
         plain
+        dimColor={!hasItems}
         onPress={() =>
           updatePanel($, prev => {
             const open = prev.openAgents ?? []
@@ -2093,6 +2119,11 @@ export const register: Register = (on, options) => {
         const t = taskFor(a)
         return !!t && accepted.includes(t.n)
       }
+      // An opened row with no step list: its model and effort, when it started, its tokens and cost, then that none came.
+      const detailLines = (a: AgentRun): string[] => [
+        [a.effort ? `${modelName(a.model)} · ${a.effort}` : modelName(a.model), `${s.started} ${doneText(a.startedAt, today)}`, `${fmtTokens(a.tokens)} ${s.tokensWord}`, `≈${fmtCost(a.costUsd)}`].join(' · '),
+        s.noSteps,
+      ]
       const archiveButton = (a: AgentRun) =>
         v.archive?.can(a) ? <Button key={`archive-item-${a.id}`} label={ARCHIVE_ICON} plain dimColor onPress={() => v.archive?.press(a)} /> : null
       // A row that throws draws one dim line in its place; the other rows still draw.
@@ -2135,7 +2166,7 @@ export const register: Register = (on, options) => {
         // full width without its title line.
         const agentRow = (a: AgentRun, word: string) => {
           const alt = `${a.description}: ${modelName(a.model)}, ${word}`
-          const items = itemsOf(a.items)
+          const items = timedItems(itemsOf(a.items), a)
           const toArchive = archiveButton(a)
           const done = doneOf(a)
           return (
@@ -2143,7 +2174,7 @@ export const register: Register = (on, options) => {
               <Box flexDirection="row" alignItems="center">
                 <Svg source={INDENT_SVG} alt="" width={TITLE_INDENT - FOLD_W} height={1} />
                 <Box width={FOLD_W} flexShrink={0}>
-                  {items.length > 0 && foldButton(a, kp, fp)}
+                  {foldButton(a, kp, fp, items.length > 0)}
                 </Box>
                 <Box flexDirection="row" alignItems="center" gap={1} flexGrow={1} flexShrink={1} minWidth={0}>
                   <Box flexShrink={1} minWidth={0} overflow="hidden">
@@ -2164,6 +2195,11 @@ export const register: Register = (on, options) => {
               {isUnfolded(a, fp) &&
                 items.map((it, i) => (
                   <Svg key={`${kp}agent-item-${a.id}-${i}`} source={svg(W, ITEM_H, itemSvg(W, it, at, fitText))} alt={itemAlt(it, at)} width={W} height={ITEM_H} />
+                ))}
+              {isUnfolded(a, fp) &&
+                items.length === 0 &&
+                detailLines(a).map((line, i) => (
+                  <Svg key={`${kp}agent-detail-${a.id}-${i}`} source={svg(W, ITEM_H, noteSvg(W, line, fitText))} alt={line} width={W} height={ITEM_H} />
                 ))}
             </Box>
           )
@@ -2205,15 +2241,15 @@ export const register: Register = (on, options) => {
         const head = headOf(a, isAccepted(a))
         const room = Math.max(state.name.length + 1, cols - 2 - barW - 1)
         const [lead, rest] = splitHead(clip(steps ? `${head} · ${steps}` : head, room), head)
-        const items = itemsOf(a.items)
+        const items = timedItems(itemsOf(a.items), a)
         const done = doneOf(a)
-        // The fold chevron right before the name (a space on a row with nothing to fold, so names line up), the archive
-        // icon and the state glyph after it, when it finished at the far end.
+        // The fold chevron right before the name (dim on a row with no step list yet), the archive icon and the state
+        // glyph after it, when it finished at the far end.
         return (
           <Box key={`${kp}${a.id}`} flexDirection="column" marginBottom={1}>
             <Box flexDirection="row" gap={1}>
               <Text color={color}>▣</Text>
-              {items.length > 0 ? foldButton(a, kp, fp) : <Text> </Text>}
+              {foldButton(a, kp, fp, items.length > 0)}
               <Box flexShrink={1} minWidth={0}>
                 <Text bold wrap="truncate-end">
                   {nameOf(a)}
@@ -2248,6 +2284,14 @@ export const register: Register = (on, options) => {
                   </Text>
                 )
               })}
+            {isUnfolded(a, fp) &&
+              items.length === 0 &&
+              detailLines(a).map((line, i) => (
+                <Text key={`${kp}agent-detail-${a.id}-${i}`} dimColor wrap="truncate-end">
+                  {'   '}
+                  {line}
+                </Text>
+              ))}
           </Box>
         )
       }
@@ -2718,11 +2762,13 @@ export const register: Register = (on, options) => {
     const list = await readAgents($)
     const crew = list.length + plannedOf(f, list).length
     const isWorking = list.some(a => a.status === 'running')
+    // X/Y, the bar and the percent come from the rows the panel's tabs count (flowProgress).
+    const g = shownFlow(f, list)
     const crewButton = (
       <Button key="flowdeck-agents" label={`×${crew}`} plain onPress={() => void togglePane($)} />
     )
     const finish = f.isFinished ? null : <Button key="flowdeck-finish" label="Finish" plain onPress={() => finishOpenFlow($)} />
-    const percent = `${Math.round(ratio(f) * 100)}%`
+    const percent = `${Math.round(ratio(g) * 100)}%`
     const dismiss = (
       <Button
         key="flowdeck-dismiss"
@@ -2735,7 +2781,8 @@ export const register: Register = (on, options) => {
       />
     )
 
-    if ('Svg' in ui) {
+    // The terminal's kit has an Svg too, drawn as an empty box: the terminal takes the text row, as the plan rows do.
+    if (e.surface !== 'terminal' && 'Svg' in ui) {
       const { Svg } = ui
       // About 9 CSS px per reported column (measured in the desktop app; savvy-progress assumed 8 and stopped
       // short); the count, the dismiss and their gaps take the rest, so the row runs to the right edge like the other bars.
@@ -2743,7 +2790,7 @@ export const register: Register = (on, options) => {
       return (
         <Box flexDirection="column">
           <Box flexDirection="row" alignItems="center" gap={1} flexShrink={1} minWidth={0} overflow="hidden">
-            <Svg source={rowSvg(f, width, isWorking)} alt={`${f.title}: ${label(f)}, ${percent}`} width={width} height={H} />
+            <Svg source={rowSvg(g, width, isWorking)} alt={`${g.title}: ${label(g)}, ${percent}`} width={width} height={H} />
             {crewButton}
             {finish}
             {dismiss}
@@ -2764,8 +2811,8 @@ export const register: Register = (on, options) => {
           <Text color={f.isFinished ? DONE : ACCENT}>● </Text>
           <Text wrap="truncate-end">{f.title}</Text>
         </Box>
-        <Text color={f.isFinished ? DONE : ACCENT}>{barText(f, width)}</Text>
-        <Text bold>{label(f)}</Text>
+        <Text color={f.isFinished ? DONE : ACCENT}>{barText(g, width)}</Text>
+        <Text bold>{label(g)}</Text>
         <Text dimColor>{percent}</Text>
         <Text color={CLAY}>▣</Text>
         {crewButton}

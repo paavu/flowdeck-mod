@@ -277,7 +277,10 @@ describe('agent items through the step tool', () => {
     await step($, { done: 1, total: 3, note: 'tests' })
     const t = await terminal($)
     expect(t.text).toMatch(/1\/3 tests/)
-    for (const label of ['▸', '▾']) expect(t.buttons.map((b: any) => String(b.props.label))).not.toContain(label)
+    // No step list: the chevron is there, dim, and opens on the row's details.
+    const chevron = t.buttons.find((b: any) => String(b.props.key) === 'agent-fold-w1')
+    expect(String(chevron?.props.label)).toBe('▸')
+    expect(chevron?.props.dimColor).toBe(true)
   })
 
   test('calls from the main agent stay ignored', async ($, on) => {
@@ -335,7 +338,7 @@ describe('agent items through the step tool', () => {
 })
 
 describe('agent items in the panel', () => {
-  test('the chevron shows only for an agent with items and toggles its children (terminal)', async ($, on) => {
+  test('every agent row has a chevron, dim without items; it toggles its children (terminal)', async ($, on) => {
     engine(on)
     await start($)
     await spawn($, 'w1', 'with items')
@@ -344,8 +347,10 @@ describe('agent items in the panel', () => {
     await step($, { done: 1, total: 4 }, 'w2')
     let t = await terminal($)
     const chevrons = t.buttons.filter((b: any) => /^[▸▾]$/.test(String(b.props.label)))
-    expect(chevrons.length).toBe(1)
-    expect(String(chevrons[0].props.label)).toBe('▸')
+    expect(chevrons.length).toBe(2)
+    expect(chevrons.map((b: any) => String(b.props.label))).toEqual(['▸', '▸'])
+    expect(chevrons.find((b: any) => b.props.key === 'agent-fold-w1')?.props.dimColor).toBe(false)
+    expect(chevrons.find((b: any) => b.props.key === 'agent-fold-w2')?.props.dimColor).toBe(true)
     expect(t.text).not.toMatch(/fix types/)
     await fold($, 'w1')
     t = await terminal($)
@@ -369,7 +374,11 @@ describe('agent items in the panel', () => {
     await step($, { next: true }, 'w1')
     let d = await desktop($)
     const before = d.svgs.length
-    expect(d.buttons.filter((b: any) => /^[▸▾]$/.test(String(b.props.label))).length).toBe(1)
+    const chevrons = d.buttons.filter((b: any) => /^[▸▾]$/.test(String(b.props.label)))
+    expect(chevrons.map((b: any) => [String(b.props.key), b.props.dimColor])).toEqual([
+      ['agent-fold-w2', true],
+      ['agent-fold-w1', false],
+    ])
     await fold($, 'w1', 'desktop')
     d = await desktop($)
     expect(d.svgs.length).toBe(before + 6)

@@ -103,7 +103,8 @@ describe('the Archive list draws from the index alone', () => {
       const at = (k: string) => s.keys.indexOf(k)
       expect(at(`archive-${K(2)}`)).toBeLessThan(at(`archive-del-${K(2)}`))
       expect(at(`archive-del-${K(2)}`)).toBeLessThan(at(`archive-${K(3)}`))
-      expect(s.buttons.filter(b => /[▸▾]$/.test(b.text))).toEqual([])
+      // (the open group's own agent rows have their chevrons before their names)
+      expect(s.buttons.filter(b => /[▸▾]$/.test(b.text) && !/-agent-fold-/.test(b.key))).toEqual([])
     }
   })
 

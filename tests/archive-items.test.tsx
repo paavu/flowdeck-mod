@@ -672,7 +672,7 @@ describe('the small archive icon', () => {
                   ? 'time'
                   : '?',
       )
-    // [id, name, the name line's parts, whether the chevron slot holds a chevron, tab]
+    // [id, name, the name line's parts, whether the row has a step list (else its chevron is dim), tab]
     const expected: [string, string, string[], boolean, Tab][] = [
       ['w2', 'task 2', ['title', 'icon', 'spacer', 'time'], true, 'finished'],
       ['w1', 'task 1', ['title', 'icon', 'spacer', 'time'], false, 'finished'],
@@ -698,9 +698,9 @@ describe('the small archive icon', () => {
         expect(Number(slot?.props?.width)).toBe(18)
         expect(slot?.props?.flexShrink).toBe(0)
         expect(Number(indent?.props?.width) + Number(slot?.props?.width)).toBe(42)
-        // the chevron sits right before the name, in its own slot; a row with nothing to fold keeps the slot empty
-        expect(has(slot, `agent-fold-${id}`)).toBe(hasChevron)
-        if (!hasChevron) expect(kids(slot)).toEqual([])
+        // the chevron sits right before the name, in its own slot, on every row; dim when the row has no step list
+        expect(has(slot, `agent-fold-${id}`)).toBe(true)
+        expect(walk(slot).find(n => keyOf(n) === `agent-fold-${id}`)?.props?.dimColor).toBe(!hasChevron)
         expect(says(rest, name)).toBe(true)
         const line = titleLine(r, name)
         expect(line?.props?.flexDirection).toBe('row')
@@ -742,10 +742,10 @@ describe('the small archive icon', () => {
         const at = line.findIndex(c => keyOf(c) === `archive-item-${id}`)
         expect(JSON.stringify(line[at - 1])).toContain(`task ${id.slice(1)}`)
         expect(JSON.stringify(line[0])).toContain('▣')
-        // the chevron (or a blank where there is nothing to fold) sits right before the name, so names line up
+        // the chevron sits right before the name on every row (dim without a step list), so names line up
         expect(at).toBe(3)
-        if (id === 'w2') expect(line.findIndex(c => keyOf(c) === 'agent-fold-w2')).toBe(at - 2)
-        else expect(JSON.stringify(line[at - 2])).toContain('" "')
+        expect(line.findIndex(c => keyOf(c) === `agent-fold-${id}`)).toBe(at - 2)
+        expect(line[at - 2]?.props?.dimColor).toBe(id !== 'w2')
         // when it finished, at the far end
         const time = doneText(NOW + 60_000 + Number(id.slice(1)) * 1000, NOW + 120_000)
         expect(JSON.stringify(line.at(-1))).toContain(`"${time}"`)

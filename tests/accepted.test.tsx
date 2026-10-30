@@ -191,7 +191,7 @@ describe('accepted tasks in the panel', () => {
     await settle()
     await showTab($, 'archive')
     const p = await pane($, 'terminal')
-    await p.press({ key: (await p.findAll({ type: 'Button' })).map((b: any) => String(b.props.key)).filter((k: string) => k.startsWith('archive-k'))[1] })
+    await p.press({ key: (await p.findAll({ type: 'Button' })).map((b: any) => String(b.props.key)).filter((k: string) => /^archive-k[a-z0-9]+$/.test(k))[1] })
     await settle()
     await p.unmount()
     const txt = (await terminal($, ['archive'])).text
