@@ -148,15 +148,18 @@ describe('archiving finished items of the live flow', () => {
     await p.unmount()
     expect(desktopRows(await desktop($))).toEqual(['task 4', 'task 3', 'task 2'])
     expect(ids(entries(files)[0])).toEqual(['w1'])
-    const writes = fs.writes.length
-    const before = JSON.stringify(files)
+    // flow-live.json's heartbeat is left out: the press itself writes nothing
+    const archived = () => fs.writes.filter(w => !w.endsWith('/flow-live.json')).length
+    const archive = () => JSON.stringify(Object.entries(files).filter(([k]) => !k.endsWith('/flow-live.json')))
+    const writes = archived()
+    const before = archive()
     clock.now = NOW + 180_000
     p = await pane($)
     await p.press({ key: 'archive-item-w1' }).catch(() => {})
     await settle()
     await p.unmount()
-    expect(fs.writes.length).toBe(writes)
-    expect(JSON.stringify(files)).toBe(before)
+    expect(archived()).toBe(writes)
+    expect(archive()).toBe(before)
     expect(desktopRows(await desktop($))).toEqual(['task 4', 'task 3', 'task 2'])
   })
 
@@ -461,8 +464,9 @@ describe('safety of an archive press', () => {
     await finishedRows($, clock, 3)
     let release: () => void = () => {}
     let held = false
-    fs.delay = op => {
-      if (op !== 'write' || held) return
+    // the press's first archive write is held (the 5-second tick's flow-live.json writes are not)
+    fs.delay = (op, path) => {
+      if (op !== 'write' || held || path.endsWith('/flow-live.json')) return
       held = true
       return new Promise<void>(done => (release = done))
     }
@@ -644,7 +648,7 @@ describe('the small archive icon', () => {
     }
   })
 
-  test('desktop: line 1 is the indent, the chevron slot right before the task name, the icon right after it, a spacer, the completion time at the far end; the drawing below keeps the full width', async ($, on) => {
+  test('desktop: line 1 is the chevron at the far left, the indent to the text column, the task name, the icon right after it, a spacer, the completion time at the far end; the drawing below keeps the full width', async ($, on) => {
     const { clock } = engine(on)
     await start($)
     await plan($)
@@ -692,12 +696,16 @@ describe('the small archive icon', () => {
         expect(r?.props?.flexDirection).toBe('column')
         const [first, drawing] = kids(r)
         expect(first?.props?.flexDirection).toBe('row')
-        // the indent (24) and the chevron slot (18) line the title up with the drawing's text at x 42
-        const [indent, slot, rest] = kids(first)
-        expect(Number(indent?.props?.width)).toBe(24)
-        expect(Number(slot?.props?.width)).toBe(18)
+        // the chevron at the far left at its own width (about 20 px), then a 22 px drawing: the title starts at the drawing's
+        // text column, x 42. No Box on the line has a width: a Box's width counts character cells, not pixels
+        const [slot, indent, rest] = kids(first)
+        expect(slot?.props?.width).toBeUndefined()
         expect(slot?.props?.flexShrink).toBe(0)
-        expect(Number(indent?.props?.width) + Number(slot?.props?.width)).toBe(42)
+        expect(indent?.props?.source).toBeDefined()
+        expect(Number(indent?.props?.width)).toBe(22)
+        expect(String(indent?.props?.source)).toContain('width="22"')
+        expect(Number(indent?.props?.width) + 20).toBe(42)
+        expect(walk(first).filter(n => n?.props?.source === undefined && n?.props?.width !== undefined)).toEqual([])
         // the chevron sits right before the name, in its own slot, on every row; dim when the row has no step list
         expect(has(slot, `agent-fold-${id}`)).toBe(true)
         expect(walk(slot).find(n => keyOf(n) === `agent-fold-${id}`)?.props?.dimColor).toBe(!hasChevron)
@@ -723,7 +731,7 @@ describe('the small archive icon', () => {
       // the icon and the chevron are never stacked in one column, and the chevron is no longer at the far end
       expect(holder(root, 'archive-item-w2')?.props?.flexDirection).not.toBe('column')
       expect(holder(root, 'archive-item-w2')).not.toBe(holder(root, 'agent-fold-w2'))
-      expect(holder(root, 'agent-fold-w2')?.props?.width).toBe(18)
+      expect(holder(root, 'agent-fold-w2')?.props?.width).toBeUndefined()
     }
   })
 

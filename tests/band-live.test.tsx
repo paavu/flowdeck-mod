@@ -50,7 +50,7 @@ const pane = ($: any, surface: 'desktop' | 'terminal') =>
 const band = ($: any, surface: 'desktop' | 'terminal', bodyColumns = 100) =>
   $.ui.mount({ plugin: 'flowdeck', surface, component: 'AbovePrompt', props: { hasSurvey: false, isWorking: true, maxRows: 20, bodyColumns } } as any)
 
-// The flow row is drawn: its count, Finish and dismiss buttons, and on the desktop its drawing.
+// The flow row is drawn: its count and dismiss buttons (no Finish: a flow finishes by itself), and on the desktop its drawing.
 async function rowOf($: any, surface: 'desktop' | 'terminal', bodyColumns = 100) {
   const b = await band($, surface, bodyColumns)
   const crew = await b.find({ type: 'Button', key: 'flowdeck-agents' })
@@ -95,7 +95,7 @@ describe('the band in a live-like session', () => {
         for (const columns of [40, 100, 400]) {
           const r = await rowOf($, s, columns)
           expect(r.shown).toBe(true)
-          expect(r.finish).toBe(true)
+          expect(r.finish).toBe(false)
           expect(r.below).toBe(true)
           expect(r.crew).toMatch(/^×\d+$/)
         }

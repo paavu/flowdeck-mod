@@ -48,7 +48,7 @@ export const parseJson = (text: string | null): unknown => {
 }
 
 // The file names in a folder (folders left out); null when it cannot be listed (a folder not made yet cannot either).
-const listing = async (io: Io, dir: string): Promise<string[] | null> => {
+export const listing = async (io: Io, dir: string): Promise<string[] | null> => {
   const list: unknown = await Promise.resolve()
     .then(() => io.list(dir))
     .catch(() => null)

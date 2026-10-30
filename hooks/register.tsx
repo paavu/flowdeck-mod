@@ -4,11 +4,11 @@ import type { Elements, EngineInterface, Register, RenderChildren } from 'claude
 import type { AgentRun, ArchiveDetail, ArchiveEntry, ArchiveLists, ArchiveRecord, Flow, Panel, PanelTab, Phase, PlannedTask, PlanStage, Reading, Samples, TaskPlan, UsageWindow } from '../types'
 import { derive, finishItems, hasItemOps, ITEM_H, itemAlt, itemLine, itemsOf, itemSvg, noteSvg, stepItems, timedItems } from './agent-items'
 import type { StepInput } from './agent-items'
-import { agentState, HOUSEKEEPING, isComplete, isIncomplete, isSettled, markOf, progressOf, splitHead, stateText } from './agent-state'
+import { agentState, HOUSEKEEPING, isComplete, isIncomplete, isLive, isSettled, markOf, progressOf, splitHead, stateText } from './agent-state'
 import { contextRows, contextSvg, toReading } from './context'
 import { isWorthKeeping, keyOf, planEntry, snapshot, VOLUME_MAX } from './archive'
-import { recordOf } from './archive-index'
-import { dataDir, getFile, loadArchive, parseJson, readSession, restoreSession, saveSession, saveToStore, trashSession, writeData } from './archive-store'
+import { INDEX_FILE, parseIndexFile, recordOf, TRASH_DIR, TRASH_INDEX } from './archive-index'
+import { dataDir, getFile, listing, loadArchive, parseJson, readSession, restoreSession, saveSession, saveToStore, trashSession, writeData } from './archive-store'
 import type { Io, Moved } from './archive-store'
 import { archiveSection, groupKey, isGroupOpen } from './archive-view'
 import type { ArchiveWords, FlowDrawing, FlowView, Planned } from './archive-view'
@@ -17,9 +17,12 @@ import { sortNewest } from './order'
 import { doneText } from './time'
 import { importPlan, isFinished, isStoredStep, normalize, percent, PLAN_ID, placeBar, planId, str, where } from './plan'
 import { planBandSvg, planBandText, planRows, planSvg, STATE_COLOR, stateLabel } from './plan-view'
-import { acceptedOf, acceptedOnly, cleanAfter, linkRuns, norm, taskOf, taskTag, unstarted, workerTier } from './tasks'
+import { acceptedOf, acceptedOnly, allTasksDone, cleanAfter, linkRuns, norm, shortTitle, taskOf, taskTag, unstarted, workerTier } from './tasks'
 import type { TaskLike } from './tasks'
-import { ARCHIVE_PAGE, asAgents, asCacheFacts, asCacheFold, asCacheTick, asDetails, asFlow, asLists, asMeta, asNow, asPanel, asReading, asUsage, PANEL_DEFAULT } from './shapes'
+import { ARCHIVE_PAGE, asAgents, asCacheFacts, asCacheFold, asCacheTick, asDetails, asFlow, asLists, asLive, asMeta, asNow, asPanel, asReading, asUsage, LIVE_DEFAULT, PANEL_DEFAULT } from './shapes'
+import { changeLive, endRuns, IDLE_FINISH_MS, isGone, LIVE_BEAT_MS, LIVE_STALE_MS, liveKey, readLive, without } from './live'
+import type { LiveRecord } from './live'
+import { VERSION } from './version'
 import { live, record, resetKey, resets, toWindows, usageRows, usageSvg } from './usage'
 import { cacheKey, isCardOpen, isShowable, measured, remeasured, seeded, stamped, toggledFold, viewOf } from './cache'
 import type { CacheFacts } from './cache'
@@ -43,6 +46,9 @@ const bandError = atom({ plugin: 'flowdeck', key: 'bandError' } as const, '')
 const cacheFacts = atom({ plugin: 'flowdeck', key: 'cache' } as const, null as CacheFacts | null)
 const cacheFold = atom({ plugin: 'flowdeck', key: 'cacheFold' } as const, null)
 const cacheTick = atom({ plugin: 'flowdeck', key: 'cacheTick' } as const, '')
+// The shown flow's owner session and activity (flow-live.json), and what reading or writing that file could not do.
+const liveState = atom({ plugin: 'flowdeck', key: 'live' } as const, LIVE_DEFAULT)
+const liveError = atom({ plugin: 'flowdeck', key: 'liveError' } as const, '')
 
 // A reload keeps the held values an older flowdeck wrote, in its older shape: every read goes through its normalizer
 // (shapes.ts), and every update hands its change the normalized value. A change that returns that value unchanged hands
@@ -85,6 +91,7 @@ const updateDetails = async ($: EngineInterface, change: (list: ArchiveDetail[])
 const readUsage = async ($: EngineInterface) => asUsage(await read($, usageState))
 const readReading = async ($: EngineInterface): Promise<Reading | null> => asReading(await read($, reading))
 const readNow = async ($: EngineInterface): Promise<number> => asNow(await read($, now))
+const readLiveState = async ($: EngineInterface) => asLive(await read($, liveState))
 const readCache = async ($: EngineInterface): Promise<CacheFacts | null> => asCacheFacts(await read($, cacheFacts))
 const updateCache = async ($: EngineInterface, change: (c: CacheFacts | null) => CacheFacts | null): Promise<void> => {
   await update($, cacheFacts, prev => change(asCacheFacts(prev)))
@@ -95,7 +102,10 @@ const STEP_TOOL = 'mcp__flowdeck__step'
 const PLAN_TOOL = 'mcp__flowdeck__plan'
 const TICK_MS = 5000
 const PLAN_RULE = `# Progress plans
-A task needing more than ~3 edits or commands gets a plan via ${PLAN_TOOL}: create it once with the full breakdown (2-7 stages of steps {title}, or kind: "todo" for one flat list; titles of at most 4 words, in the user's language; one id per task; the first open step becomes active). Move it with short calls: {id, next:true}, {id, done:["A"], active:"B"}, {id, failed:"B", note}, {id, state:"needs_input", note} before asking the user, {id, state:"done"} to finish. When the plan changes, resend stages under the same id. During a /flowdeck flow, report the flow's tasks with ${TOOL}, not a second plan for the same work. No edit is ever blocked for lack of a plan.`
+A task needing more than ~3 edits or commands gets a plan via ${PLAN_TOOL}: create it once with the full breakdown (2-7 stages of steps {title}, or kind: "todo" for one flat list; titles of at most 4 words, in the user's language; one id per task; the first open step becomes active). Move it with short calls: {id, next:true}, {id, done:["A"], active:"B"}, {id, failed:"B", note}, {id, state:"needs_input", note} before asking the user, {id, state:"done"} to finish. When the plan changes, resend stages under the same id. The tasks themselves always go to ${TOOL} (the flow rule), never into a second plan of the same work. No edit is ever blocked for lack of a plan.`
+// Every task goes through flowdeck: this rule is in every session's system prompt, so the mod alone sets it.
+const FLOW_RULE = `# flowdeck flows
+Every task goes through flowdeck: report it with ${TOOL} (load it with ToolSearch \`select:${TOOL}\` when it is deferred; a flowdeck worker reports only its own steps, with ${STEP_TOOL}). Send the plan once: title, \`tasks\` [{title, tier, after}] numbered from 1 (tasks that edit the same files are chained with \`after\`; independent ones get none), phase "delegate". Add each new task with \`add\`; send \`done: [numbers]\` as tasks are accepted. Begin every worker's Agent description with \`#<n> <title>\`. Never leave a task unreported. A flow finishes by itself once every task is done and no worker runs; send \`finished: true\` only when the user asks to end it.`
 const PANE = 'flowdeck-agents'
 const PHASES: readonly Phase[] = ['plan', 'design', 'delegate', 'review', 'close']
 const ACCENT = '#8f8cf4'
@@ -227,8 +237,16 @@ let lang: Lang = 'en'
 const tr = () => STRINGS[lang]
 // The session's working folder, the project an archive entry names; set the same way.
 let project = ''
-// The session the task plans are saved under; empty when the engine names none.
+// The session the task plans and the flow's record are saved under; empty when the engine names none.
 let sessionId = ''
+// The session's transcript file, when classic.SessionStart named it (kept in the flow's record).
+let transcript = ''
+// The session that ended here (session.end): its record is not written again until a new session is adopted.
+let endedSession = ''
+// When the records of other sessions that may still run are looked at again (0: none left).
+let sweepAt = 0
+// When the tick last did the lifecycle's share (tickLive).
+let liveTickAt = 0
 
 // The engine's current session id, '' when it cannot say; a /clear changes it without a new session.start.
 const currentSessionId = async ($: EngineInterface): Promise<string> => {
@@ -547,10 +565,11 @@ const rowsOf = (tasks: TaskLike[], list: AgentRun[], accepted: number[], accepte
       const doneAt = acceptedAt?.[String(t.n)] ?? fallback
       return { title: t.title, tier: t.tier ?? '', after: t.after ?? [], n: t.n, ...(doneAt === undefined ? {} : { doneAt }) }
     }),
-    running: list.filter(a => a.status === 'running').reverse(),
-    // Archived rows leave the finished list; the totals and the planned tasks still count them.
-    finished: finishedFirst(list.filter(a => a.status !== 'running' && !a.archived)),
-    archivedCount: list.filter(a => a.status !== 'running' && a.archived).length,
+    running: list.filter(isLive).reverse(),
+    // Archived rows leave the finished list; the totals and the planned tasks still count them. A run that was going when
+    // its session ended (`Running at finish`) is among the finished rows.
+    finished: finishedFirst(list.filter(a => !isLive(a) && !a.archived)),
+    archivedCount: list.filter(a => !isLive(a) && a.archived).length,
   }
 }
 
@@ -561,7 +580,7 @@ const rowsOf = (tasks: TaskLike[], list: AgentRun[], accepted: number[], accepte
 // at all, which keeps the orchestrator's own total and accepted count (a fresh plan without tasks).
 const flowProgress = (f: Flow | null, list: AgentRun[]) => {
   const r = rowsOf(f?.tasks ?? [], list, f ? acceptedOf(f) : [])
-  const archived = list.filter(a => a.status !== 'running' && a.archived)
+  const archived = list.filter(a => !isLive(a) && a.archived)
   const active = r.running.length + plannedOf(f, list).length
   const finished = r.finished.length + r.acceptedRows.length
   const done = [...r.finished, ...archived].filter(isComplete).length + r.acceptedRows.length
@@ -828,11 +847,14 @@ ${statusMark(W - 8, out ? 12 : 16, markOf(a), color)}
   )
 }
 
-// The native task name starts at the drawing's text column (x 42): an empty drawing, then the fold chevron's slot of
-// FOLD_W px right before the name (empty on a row with nothing to fold), so every name lines up.
+// The native task name starts at the drawing's text column (x 42): the fold chevron at the far left (in the crab's column),
+// at its own width, then an empty drawing of the rest of the 42 px. A Box's `width` counts character cells (about 8-9 px
+// each on the desktop), not pixels, so no Box sizes this line: 1.0.0025's 18-cell chevron slot pushed every name about
+// 160 px in. CHEVRON_W is the desktop's plain one-glyph Button as measured on a screenshot (about 20 px).
 const TITLE_INDENT = 42
-const FOLD_W = 18
-const INDENT_SVG = `<svg xmlns="http://www.w3.org/2000/svg" width="${TITLE_INDENT - FOLD_W}" height="1" viewBox="0 0 ${TITLE_INDENT - FOLD_W} 1"/>`
+const CHEVRON_W = 20
+const INDENT_W = TITLE_INDENT - CHEVRON_W
+const INDENT_SVG = `<svg xmlns="http://www.w3.org/2000/svg" width="${INDENT_W}" height="1" viewBox="0 0 ${INDENT_W} 1"/>`
 
 // A planned row: the tier and its model, what it waits for, and `ready` once that is done (the wait goes first when short).
 const plannedSvg = (W: number, p: Planned): string => {
@@ -927,8 +949,11 @@ async function refreshContext($: EngineInterface): Promise<{ tokens?: number; wi
 type TodoItem = { title: string; completed: boolean }
 
 // A linked flow takes the session task list's items as planned tasks (medium tier, display only) and counts one done when the list completes it.
+// With no open flow, a list with an item still to do starts one, named after its first item: every task goes through flowdeck.
 async function mirrorTasks($: EngineInterface, items: TodoItem[]): Promise<void> {
   if (!items.length) return
+  const shown = await readFlow($)
+  if ((!shown || shown.isFinished) && items.some(i => !i.completed)) await startFlow($, shown, items[0]!.title)
   const at = await clockAt($)
   await updateFlow($, prev => {
     if (!prev || !prev.isLinked || prev.isFinished) return prev
@@ -1195,11 +1220,12 @@ type Meta = { startedAt: number; project: string }
 const isSameMeta = (a: Meta | null, b: Meta | null): boolean => !!a && !!b && a.startedAt === b.startedAt && a.project === b.project
 
 // Saves the flow as it stands, or as `at` captured it (its record's meta and agents); returns the meta the record used, null
-// when it could not be saved. Never throws into the tool call or the turn that asked.
-async function recordFlow($: EngineInterface, f: Flow, status: 'finished' | 'open', at?: { meta: Meta | null; agents: AgentRun[] }): Promise<Meta | null> {
+// when it could not be saved. `end` dates it (its last activity), else the clock. Never throws into the tool call or the
+// turn that asked.
+async function recordFlow($: EngineInterface, f: Flow, status: 'finished' | 'open', at?: { meta: Meta | null; agents: AgentRun[] }, end?: number): Promise<Meta | null> {
   try {
     await archiving
-    const endedAt = await $.clock.now()
+    const endedAt = end ?? (await $.clock.now())
     let meta = at ? at.meta : await readMeta($)
     const isFresh = !meta
     if (!meta) {
@@ -1221,8 +1247,9 @@ async function recordFlow($: EngineInterface, f: Flow, status: 'finished' | 'ope
 
 // Ends the flow with the input's last fields: one finished record, then whatever comes next starts a new one. The flow's
 // meta and agents are taken first, so a restart meanwhile neither renames this record nor loses the new flow's meta; a
-// second finish (the button and the tool at once) finds the flow finished and records nothing.
-async function finishFlow($: EngineInterface, input: ProgressInput = {}): Promise<Flow | null> {
+// second finish (the turn's end and the tool at once) finds the flow finished and records nothing. `end` dates the record
+// (an idle flow: its last activity), else the clock.
+async function finishFlow($: EngineInterface, input: ProgressInput = {}, end?: number): Promise<Flow | null> {
   const meta = await readMeta($)
   const list = await readAgents($)
   const at = await clockAt($)
@@ -1232,16 +1259,32 @@ async function finishFlow($: EngineInterface, input: ProgressInput = {}): Promis
     return isEnding ? merge(p, { ...input, finished: true }, at) : p
   })
   if (next && isEnding) {
-    const used = (await recordFlow($, next, 'finished', { meta, agents: list })) ?? meta
+    const used = (await recordFlow($, next, 'finished', { meta, agents: list }, end)) ?? meta
     await updateMeta($, m => (isSameMeta(m, used) ? null : m))
   }
   return next
 }
 
-// The Finish buttons: only an open flow is ended, so a press on a stale row does nothing.
-async function finishOpenFlow($: EngineInterface): Promise<void> {
-  const f = await readFlow($)
-  if (f && !f.isFinished) await finishFlow($)
+// A new flow takes the panel's place: the open one goes to the archive first (a finished one is there already), the new
+// one starts its record now under this session, the finished runs leave the list (running ones stay) and the band comes
+// back. The caller then sets the new flow.
+async function beginFlow($: EngineInterface, prev: Flow | null): Promise<void> {
+  if (prev && !prev.isFinished) await recordFlow($, prev, 'finished')
+  // Without a clock the record starts when the flow is saved, as for a flow no progress call created.
+  const startedAt = await clockAt($)
+  await update($, flowMeta, () => (startedAt === null ? null : { startedAt, project }))
+  await updateAgents($, list => list.filter(isLive))
+  await update($, liveState, l => ({ ...asLive(l), owner: sessionId }))
+  await updatePanel($, p => (p.isBandHidden ? { ...p, isBandHidden: false } : p))
+}
+
+// Every task goes through flowdeck: with no open flow, a task list or a worker start opens one by itself, named after the
+// first task or the worker's description, in the delegate phase (the work is underway).
+async function startFlow($: EngineInterface, prev: Flow | null, name: string): Promise<void> {
+  await beginFlow($, prev)
+  const at = await clockAt($)
+  // One opened meanwhile (two calls at once) is kept.
+  await updateFlow($, p => (p && !p.isFinished ? p : merge(null, { title: shortTitle(taskTag(name).rest) || 'flowdeck', phase: 'delegate' }, at)))
 }
 
 type SavedPlans = Record<string, TaskPlan[]>
@@ -1374,6 +1417,225 @@ const planLine = (p: TaskPlan): string => {
   return `${p.id}: ${w.pos}/${w.total}, ${p.state}${active ? `, active "${active.title}"` : ''}`
 }
 
+// ---------------------------------------------------------------------------
+// The flow's lifecycle: it starts by itself (startFlow), finishes by itself (autoFinish, idleFinish), is kept in
+// flow-live.json while it is shown (persistLive) and is closed by the next session (adoptLive). See live.ts.
+
+// The flow shown, written to flow-live.json when it changed and at least every LIVE_BEAT_MS while one is shown (the
+// heartbeat by which another session tells this one lives); `ended` marks the session's end. A change of what the panel
+// holds is activity: the idle finish and the next session's close date the flow by it. Never throws.
+async function persistLive($: EngineInterface, ended = false): Promise<void> {
+  try {
+    if (!project || !sessionId || sessionId === endedSession) return
+    const l = await readLiveState($)
+    // A flow another session owns is that session's to keep; the next adoption closes it.
+    if (l.owner && l.owner !== sessionId) return
+    const f = await readFlow($)
+    const now = await $.clock.now()
+    if (!f) {
+      if (!l.key) return
+      const done = await changeLive(io($), project, s => without(s, [sessionId]))
+      if (done.state === 'bad') noteFault($, 'live', done.why)
+      await update($, liveState, () => ({ ...l, key: '', writtenAt: now }))
+      return
+    }
+    const list = await readAgents($)
+    const meta = await readMeta($)
+    const key = liveKey(f, list, meta)
+    const isChanged = key !== l.key
+    const activityAt = isChanged || !l.activityAt ? now : l.activityAt
+    if (!isChanged && !ended && now - l.writtenAt < LIVE_BEAT_MS) return
+    const rec: LiveRecord = { sessionId, ...(transcript ? { transcript } : {}), flow: f, agents: list, meta, lastActivityAt: activityAt, beatAt: now, ...(ended ? { endedAt: now } : {}) }
+    const done = await changeLive(io($), project, s => ({ ...s, [sessionId]: rec }))
+    if (done.state === 'bad') noteFault($, 'live', done.why)
+    // The next try waits for the next change or heartbeat; after a failed one, for LIVE_STALE_MS.
+    const next = done.state === 'ok' ? now : now + LIVE_STALE_MS - LIVE_BEAT_MS
+    await update($, liveState, () => ({ owner: sessionId, activityAt, key, writtenAt: next }))
+  } catch {
+    // A failing clock, store or fs costs this write; the next tick tries again.
+  }
+}
+
+// The id the archive gives a flow's entry (archive.ts `snapshot`): a record closed twice merges into one entry.
+const entryIdOf = (meta: Meta): string => `${meta.startedAt}-${meta.project}`
+
+// Every session id the archive and the trash index list, hidden ones too; null when the archive's index cannot be read.
+async function archivedIds($: EngineInterface): Promise<Set<string> | null> {
+  const dir = dataDir(project)
+  const ids = new Set<string>()
+  const lists = await readLists($)
+  for (const r of [...lists.records, ...lists.trash]) ids.add(r.id)
+  // Without a project folder the store's entries are all there is, and the lists hold them.
+  if (!project) return ids
+  for (const [name, mustRead] of [[INDEX_FILE, true], [`${TRASH_DIR}/${TRASH_INDEX}`, false]] as const) {
+    const got = await getFile(io($), `${dir}/${name}`)
+    const recs = got.state === 'ok' ? parseIndexFile(parseJson(got.text)) : got.state === 'missing' ? [] : null
+    if (!recs) {
+      if (mustRead) return null
+      continue
+    }
+    for (const r of recs) ids.add(r.id)
+  }
+  return ids
+}
+
+// Closes one session's flow: finished at its last activity, its running runs ended then (`Running at finish`), saved as an
+// Archive session. A flow finished in its session was saved then and is saved again only when the archive does not hold
+// it. True when the record may leave flow-live.json (archived, or nothing worth keeping); `closed` holds the entries done
+// in this pass, so none is saved twice.
+async function closeRecord($: EngineInterface, rec: LiveRecord, closed: Set<string>): Promise<boolean> {
+  const at = rec.lastActivityAt || rec.beatAt || (await clockOr($, 0))
+  const meta = rec.meta ?? { startedAt: Math.min(at, ...rec.agents.map(a => a.startedAt)), project }
+  const id = entryIdOf(meta)
+  if (closed.has(id)) return true
+  if (rec.flow.isFinished && (await archivedIds($))?.has(id)) {
+    closed.add(id)
+    return true
+  }
+  const flow = rec.flow.isFinished ? rec.flow : merge(rec.flow, { finished: true })
+  const agents = endRuns(rec.agents.filter(a => a.startedAt >= meta.startedAt), at)
+  const entry = snapshot({ flow, agents, project: meta.project, startedAt: meta.startedAt, endedAt: at, status: 'finished' })
+  const isKept = !isWorthKeeping(entry) || (await queueArchive(() => saveArchive($, entry)).catch(() => false))
+  if (isKept) closed.add(id)
+  return isKept
+}
+
+// The panel without a flow: what it showed belonged to a session that ended.
+async function clearShown($: EngineInterface): Promise<void> {
+  await update($, flow, () => null)
+  await update($, agents, () => [])
+  await update($, flowMeta, () => null)
+  await update($, liveState, () => ({ ...LIVE_DEFAULT, owner: sessionId }))
+}
+
+// This session's own record back in the panel (a resumed session in a new process): its runs that were going when the
+// process ended are `Running at finish` (the engine says nothing of agents from before), its activity as recorded.
+async function restoreLive($: EngineInterface, rec: LiveRecord): Promise<void> {
+  const list = endRuns(rec.agents, rec.lastActivityAt || rec.beatAt)
+  await update($, flow, () => rec.flow)
+  await update($, agents, () => list)
+  await update($, flowMeta, () => rec.meta)
+  await update($, liveState, () => ({ owner: sessionId, activityAt: rec.lastActivityAt, key: liveKey(rec.flow, list, rec.meta), writtenAt: 0 }))
+}
+
+// The records of flow-live.json sorted out for session `cur`: its own is restored when the panel holds no flow (a record
+// found by the session's transcript is taken over under `cur`); another session's is closed and taken out of the file once
+// that session ended or stopped writing it (isGone); one that may still run elsewhere is left and looked at again later.
+// A file that cannot be read or holds no flowdeck state is never written, and said once. `closed` as in closeRecord.
+async function sortLive($: EngineInterface, cur: string, closed: Set<string>): Promise<void> {
+  if (!project) return
+  const got = await readLive(io($), project)
+  if (got.state === 'bad') return noteFault($, 'live', got.why)
+  if (got.state === 'missing') return
+  const now = await clockOr($, 0)
+  const out: string[] = []
+  let isWaiting = false
+  for (const rec of got.records) {
+    const isMine = rec.sessionId === cur || (!!transcript && rec.transcript === transcript)
+    if (isMine) {
+      if (!(await readFlow($))) await restoreLive($, rec)
+      if (rec.sessionId !== cur) out.push(rec.sessionId)
+      continue
+    }
+    if (!isGone(rec, now)) {
+      isWaiting = true
+      continue
+    }
+    if (await closeRecord($, rec, closed)) out.push(rec.sessionId)
+  }
+  sweepAt = isWaiting ? now + LIVE_STALE_MS : 0
+  if (!out.length) return
+  const done = await changeLive(io($), project, s => without(s, out))
+  if (done.state === 'bad') noteFault($, 'live', done.why)
+}
+
+// A session starts (session.start; /clear, /resume or a fork through classic.SessionStart): the flow the panel shows,
+// when it belongs to the session that ended here, is closed and the panel starts clean; then flow-live.json is sorted
+// out. Running it twice closes nothing twice. Never throws.
+async function adoptLive($: EngineInterface, cur: string): Promise<void> {
+  try {
+    if (!cur) return
+    sessionId = cur
+    endedSession = ''
+    const closed = new Set<string>()
+    const held = await readLiveState($)
+    const f = await readFlow($)
+    if (f && held.owner && held.owner !== cur) {
+      const at = held.activityAt || (await clockOr($, 0))
+      const rec: LiveRecord = { sessionId: held.owner, flow: f, agents: await readAgents($), meta: await readMeta($), lastActivityAt: at, beatAt: at }
+      await closeRecord($, rec, closed)
+      await clearShown($)
+    } else if (!held.owner) await update($, liveState, l => ({ ...asLive(l), owner: cur }))
+    await sortLive($, cur, closed)
+  } catch {
+    // A failing clock, store or fs leaves the panel as it is; the next start sorts it out.
+  }
+}
+
+// The finished plans other sessions left (plans.json, their plans-extra files) that the archive does not hold yet are
+// archived as this session's are; running plans of other sessions are left alone, and no plans file is written.
+async function collectPlans($: EngineInterface): Promise<void> {
+  try {
+    if (!project) return
+    const known = await archivedIds($)
+    if (!known) return
+    const dir = dataDir(project)
+    const found: TaskPlan[] = []
+    const got = await getFile(io($), `${dir}/plans.json`)
+    const all = got.state === 'ok' ? parseJson(got.text) : undefined
+    if (isPlansObject(all)) for (const [sid, list] of Object.entries(parsePlans(all))) if (sid !== sessionId) found.push(...list)
+    for (const name of (await listing(io($), dir)) ?? []) {
+      if (!/^plans-extra-.+\.json$/.test(name) || name === plansSide(sessionId)) continue
+      const side = await getFile(io($), `${dir}/${name}`)
+      const raw = side.state === 'ok' ? parseJson(side.text) : undefined
+      if (Array.isArray(raw)) found.push(...(parsePlans({ side: raw }).side ?? []))
+    }
+    for (const p of found) if (p.state === 'done' && !known.has(planEntry(p, project, 0).id)) await archivePlan($, p)
+  } catch {
+    // A failing fs leaves them for the next start.
+  }
+}
+
+// A flow with at least one task, every task done (a complete run, completed in the task list, or accepted) and no run
+// going finishes by itself when the main turn ends; it stays in the panel, finished, until a new flow or session.
+async function autoFinish($: EngineInterface): Promise<void> {
+  const f = await readFlow($)
+  if (!f || f.isFinished) return
+  const list = await readAgents($)
+  if (list.some(isLive) || !allTasksDone(f.tasks, list, acceptedOf(f))) return
+  await finishFlow($)
+  await persistLive($)
+}
+
+// A flow with no run going and no task queued, idle for IDLE_FINISH_MS while the session lives, finishes itself, dated by
+// its last activity: a flow that ended without anyone closing it.
+async function idleFinish($: EngineInterface, now: number, f: Flow | null): Promise<void> {
+  const l = await readLiveState($)
+  if (!f || f.isFinished || !l.activityAt || now - l.activityAt < IDLE_FINISH_MS) return
+  const list = await readAgents($)
+  if (list.some(isLive) || plannedOf(f, list).length) return
+  await finishFlow($, {}, l.activityAt)
+  await persistLive($)
+}
+
+// The lifecycle's share of the 5-second tick: the record written when due, the idle finish, and the records of other
+// sessions left for later looked at again once they may have gone stale.
+async function tickLive($: EngineInterface): Promise<void> {
+  // Nothing shown and no other session's record waiting: nothing to do (one read a tick).
+  const f = await readFlow($)
+  if (!sweepAt && !f) return
+  const now = await $.clock.now()
+  // At most once per TICK_MS of the clock, however often the engine runs the tick.
+  if (Math.abs(now - liveTickAt) < TICK_MS) return
+  liveTickAt = now
+  await persistLive($)
+  if (f && !f.isFinished) await idleFinish($, now, f)
+  if (sweepAt && now >= sweepAt) {
+    sweepAt = 0
+    await sortLive($, sessionId, new Set())
+  }
+}
+
 // A subagent's calls in flight by tool_use_id: the tool, and whether a permission dialog for it is up.
 // Per call, since one agent may run several at once. A reload starts it empty: a request then marks
 // the agent itself, and its next call clears the mark.
@@ -1408,22 +1670,27 @@ async function showAgent($: EngineInterface, agentId: string, endedTool?: string
   shown.set(agentId, { tool, isAsked }) // an agent the panel does not list is skipped the same way
 }
 
-// The reasons the band failed with in this load: each is logged once, since a band that keeps failing redraws often (a
-// refused tree is known only after the hook returned, so a draw cannot tell it worked).
-const bandFaults = new Set<string>()
+// The reasons said in this load, per kind: each is said once, since a band that keeps failing redraws often (a refused
+// tree is known only after the hook returned, so a draw cannot tell it worked) and the tick tries flow-live.json often.
+const faults = { band: new Set<string>(), live: new Set<string>() }
+const FAULT_LOG = { band: 'the band above the prompt could not be drawn: ', live: '' }
 
-// A band that fails gives way to what is drawn below it; the reason goes to the transcript as a dim line the model does not
-// read (the debug log has it too) and to the panel's `band error` line, so a band that is missing says why. A drawing may
-// not write held values, so the panel's line is written by a timer of its own.
-function noteBandFault($: EngineInterface, why: string): void {
+// A fault is said once: a dim transcript line the model does not read (the debug log has it too), with the running
+// version, and the panel's line for its kind (`band error`, or the flow-live.json line), so what is missing says why. A
+// drawing may not write held values, so the panel's line is written by a timer of its own.
+function noteFault($: EngineInterface, kind: 'band' | 'live', why: string): void {
   const text = why.replace(/\s+/g, ' ').trim().slice(0, 300) || 'unknown error'
-  if (bandFaults.has(text) || bandFaults.size >= 20) return
-  bandFaults.add(text)
+  const seen = faults[kind]
+  if (seen.has(text) || seen.size >= 20) return
+  seen.add(text)
   try {
-    $.ui.log(`flowdeck: the band above the prompt could not be drawn: ${text}`)
-    $.clock.after(1, () => void update($, bandError, () => text).catch(() => {}))
+    $.ui.log(`flowdeck: ${FAULT_LOG[kind]}${text} (v${VERSION})`)
+    $.clock.after(1, () => {
+      const said = kind === 'band' ? update($, bandError, () => text) : update($, liveError, () => text)
+      void said.catch(() => {})
+    })
   } catch {
-    // Saying so never stands in the band's way.
+    // Saying so never stands in the band's or the flow's way.
   }
 }
 
@@ -1449,7 +1716,7 @@ async function tickCache($: EngineInterface): Promise<void> {
   if (key !== shown) await update($, cacheTick, () => key)
 }
 
-// The band's cache part, null with nothing to show yet. A part that cannot be drawn is said (noteBandFault) and left out,
+// The band's cache part, null with nothing to show yet. A part that cannot be drawn is said (noteFault) and left out,
 // so the flow row still draws.
 async function cacheBandPart($: EngineInterface, ui: CacheUi, bandW: number): Promise<CacheDrawing | null> {
   try {
@@ -1463,14 +1730,15 @@ async function cacheBandPart($: EngineInterface, ui: CacheUi, bandW: number): Pr
     }
     return cacheDrawing(ui, v, isCardOpen(asCacheFold(await read($, cacheFold)), v.mode), toggle, bandW, svg)
   } catch (err) {
-    noteBandFault($, `cache: ${err instanceof Error ? err.message : String(err)}`)
+    noteFault($, 'band', `cache: ${err instanceof Error ? err.message : String(err)}`)
     return null
   }
 }
 
-// The buttons on top of the panel. They read only the panel's own toggles, so the panel can draw them whatever else fails.
-function topToggleRow($: EngineInterface, ui: Pick<Elements['desktop'], 'Box' | 'Button'>, p: Panel): RenderChildren {
-  const { Box, Button } = ui
+// The buttons on top of the panel, and at the row's far end the dim version of the code running (version.ts). They read
+// only the panel's own toggles, so the panel can draw them whatever else fails.
+function topToggleRow($: EngineInterface, ui: Pick<Elements['desktop'], 'Box' | 'Text' | 'Button'>, p: Panel): RenderChildren {
+  const { Box, Text, Button } = ui
   const toggleContext = (
     <Button
       key="context"
@@ -1499,6 +1767,10 @@ function topToggleRow($: EngineInterface, ui: Pick<Elements['desktop'], 'Box' | 
     <Box key="top-toggles" flexDirection="row" gap={1}>
       {toggleContext}
       {toggleUsage}
+      <Box flexGrow={1} />
+      <Box flexShrink={0}>
+        <Text key="version" dimColor>{`v${VERSION}`}</Text>
+      </Box>
     </Box>
   )
 }
@@ -1577,15 +1849,18 @@ export const register: Register = (on, options) => {
       await update($, plans, () => mine)
     }
     void refreshContext($).catch(() => {})
-    // A (re)load starts with no band error: one that still happens is said again.
-    bandFaults.clear()
+    // A (re)load starts with no band or flow-live.json error: one that still happens is said again.
+    faults.band.clear()
+    faults.live.clear()
     if (await read($, bandError).catch(() => '')) await update($, bandError, () => '').catch(() => '')
+    if (await read($, liveError).catch(() => '')) await update($, liveError, () => '').catch(() => '')
     await $.tool.register({
       name: 'progress',
       description:
-        'Report /flowdeck progress to the progress bar above the prompt and the agents panel. ' +
+        'Report every task to the progress bar above the prompt and the agents panel: every task goes through flowdeck. ' +
         'Call it after presenting the plan (title, total, tasks, phase "delegate"), each time a task is accepted (done: [its number]), ' +
-        'when switching phase or re-planning (tasks), phase "close" when the current work is done, and finished: true only when the user ends the flow. ' +
+        'when switching phase or re-planning (tasks), phase "close" when the current work is done, and finished: true only when the user ends the flow ' +
+        '(a flow whose tasks are all done finishes by itself when your turn ends). ' +
         'For a new /flowdeck <task> while a flow is linked, send the new plan with restart: true: the open flow is finished first and the new one starts. Fields left out keep their previous value.',
       inputSchema: {
         type: 'object',
@@ -1713,25 +1988,34 @@ export const register: Register = (on, options) => {
       description: 'Show or hide the flowdeck panel: context window, subagents running, finished and planned, with model, cost and time',
     }).catch(() => {}) // a name Claude Code already has is refused: start anyway
 
+    // The flow shown and flow-live.json sorted into this session's and the last sessions' (closed and archived), then the
+    // finished plans other sessions left.
+    await adoptLive($, sessionId)
+    void collectPlans($)
+
     // Ticks the running agents' clocks; quiet when nothing runs. Every tick redraws the pane and gives its buttons new
     // handles, so it stays slow: a click on a handle from before the redraw is refused by the desktop app.
     $.clock.every(TICK_MS, () => {
       void tickCache($).catch(() => {}) // the band's WARM countdown and its flip to COLD
+      void tickLive($).catch(() => {}) // flow-live.json, the idle finish, other sessions' records
       void (async () => {
         const list = await readAgents($)
-        if (!list.some(a => a.status === 'running')) return
+        if (!list.some(isLive)) return
         const at = await $.clock.now()
         await update($, now, () => at)
-      })()
+      })().catch(() => {})
     })
     return started
   })
 
-  // The rule is added to whatever the engine and other mods composed; a failure below is not masked (that would replace the real prompt with ours alone).
+  // The rules are added to whatever the engine and other mods composed; a failure below is not masked (that would replace the real prompt with ours alone).
   on('prompt.compose', async ($, e, next) => {
-    const rule = { id: 'flowdeck:plan-rule', text: PLAN_RULE, scope: 'session' as const }
+    const rules = [
+      { id: 'flowdeck:plan-rule', text: PLAN_RULE, scope: 'session' as const },
+      { id: 'flowdeck:flow-rule', text: FLOW_RULE, scope: 'session' as const },
+    ]
     const result = await next(e)
-    return { sections: [...result.sections, rule] }
+    return { sections: [...result.sections, ...rules] }
   })
 
   on('command.run', { command: 'flowdeck-agents' }, async $ => {
@@ -1742,41 +2026,40 @@ export const register: Register = (on, options) => {
   on('tool.call', { tool: TOOL }, async ($, e) => {
     const input = e as unknown as ProgressInput
     let prev = await readFlow($)
-    // Finishing a flow that is already finished changes nothing; it would otherwise open a blank one.
-    if (prev?.isFinished && input.finished === true) return { result: `ok: ${label(prev)}` }
-    // A restart ends the open flow as Finish does; the rest of the input then starts the new one.
+    // Finishing a flow that is already finished changes nothing; it would otherwise open a blank one. So does a call on a
+    // finished flow that names no new work (a late `done` or phase after the flow finished by itself).
+    const isNewWork = input.title !== undefined || !!input.tasks?.length || !!input.add?.length || input.restart === true
+    if (prev?.isFinished && (input.finished === true || !isNewWork)) return { result: `ok: ${label(prev)}` }
+    // A restart ends the open flow as finished: true does; the rest of the input then starts the new one.
     if (input.restart === true && prev && !prev.isFinished) prev = await finishFlow($)
-    if (isNewFlow(prev, input)) {
-      // The flow being replaced goes to the archive first, with its own agents; a finished one is there already.
-      if (prev && !prev.isFinished) await recordFlow($, prev, 'finished')
-      // Without a clock the record starts when the flow is saved, as for a flow no progress call created.
-      const startedAt: number | null = await Promise.resolve()
-        .then(() => $.clock.now())
-        .catch(() => null)
-      await update($, flowMeta, () => (startedAt === null ? null : { startedAt, project }))
-      // A new flow starts with a clean list; agents still running stay.
-      await updateAgents($, list => list.filter(a => a.status === 'running'))
-    }
+    // The flow being replaced goes to the archive first, with its own agents; a finished one is there already.
+    if (isNewFlow(prev, input)) await beginFlow($, prev)
     const at = await clockAt($)
     const next = input.finished === true ? await finishFlow($, input) : await updateFlow($, p => merge(p, input, at))
-    if (isNewFlow(prev, input)) {
-      await updatePanel($, p => ({ ...p, isBandHidden: false })) // a new flow brings the band back
-    }
     if (next && (input.tasks?.length || input.add?.length)) await autoOpen($, next.title)
+    await persistLive($)
     return { result: `ok: ${label(next ?? blank())}` }
   })
 
-  // A linked flow takes every task the session adds: the model's task list items are mirrored as planned tasks.
+  // Every task the session adds goes into the flow: the model's task list items are mirrored as planned tasks, and a list
+  // with no open flow starts one.
   on('tool.call', { tool: 'TodoWrite' }, async ($, e, next) => {
     const result = await next(e)
-    if (!e.agentId) await mirrorTasks($, todoItems((e as unknown as { todos?: unknown }).todos)).catch(() => {}) // a worker's own steps are not session tasks
+    if (!e.agentId) {
+      // a worker's own steps are not session tasks
+      await mirrorTasks($, todoItems((e as unknown as { todos?: unknown }).todos)).catch(() => {})
+      await persistLive($)
+    }
     return result
   })
   on('tool.call', { tool: 'TaskCreate' }, async ($, e, next) => {
     const result = await next(e)
     const input = e as unknown as { subject?: unknown; title?: unknown }
     const title = typeof input.subject === 'string' ? input.subject.trim() : typeof input.title === 'string' ? input.title.trim() : ''
-    if (!e.agentId && title) await mirrorTasks($, [{ title, completed: false }]).catch(() => {})
+    if (!e.agentId && title) {
+      await mirrorTasks($, [{ title, completed: false }]).catch(() => {})
+      await persistLive($)
+    }
     return result
   })
 
@@ -1954,15 +2237,23 @@ export const register: Register = (on, options) => {
     return next(e)
   })
 
-  // Safety net: worker launches move the faint layer even if the orchestrator forgets to report.
+  // A worker launch with no open flow starts one, named after its description; every launch moves the faint layer even if
+  // the orchestrator forgets to report.
   on('tool.call', { tool: 'Agent' }, async ($, e, next) => {
     const type = String(e.subagent_type ?? '')
     if (!isWorker(type)) return next(e)
 
-    await updateFlow($, prev => {
-      const base = prev && !prev.isFinished ? { ...blank(), ...prev } : blank()
-      return { ...base, running: base.running + 1, phase: base.phase === 'plan' ? 'delegate' : base.phase }
-    })
+    try {
+      const shown = await readFlow($)
+      if (!shown || shown.isFinished) await startFlow($, shown, String(e.description ?? '') || type)
+      await updateFlow($, prev => {
+        const base = prev && !prev.isFinished ? { ...blank(), ...prev } : blank()
+        return { ...base, running: base.running + 1, phase: base.phase === 'plan' ? 'delegate' : base.phase }
+      })
+      await persistLive($)
+    } catch {
+      // A failing store or clock costs the flow's start, not the launch.
+    }
     try {
       return await next(e)
     } finally {
@@ -2086,6 +2377,7 @@ export const register: Register = (on, options) => {
       if (at !== null) await updateCache($, c => measured(c, at, e.durationMs, context, e.usage?.model)).catch(() => {})
     }
     if (!agentId) await closeFinishedPlans($).catch(() => {})
+    if (!agentId) await autoFinish($).catch(() => {}) // the main turn ended: a flow whose tasks are all done finishes
     return result
   })
 
@@ -2117,6 +2409,13 @@ export const register: Register = (on, options) => {
         })
         .catch(() => {}) // the band never holds up a session's start
     }
+    // A new session in this process (/clear, /resume, a fork) gets no session.start: its flow is sorted out here. A
+    // /compact keeps the session; a startup is session.start's.
+    if (typeof e.transcript_path === 'string' && e.transcript_path) transcript = e.transcript_path
+    if (e.source === 'clear' || e.source === 'resume' || e.source === 'fork') {
+      const cur = typeof e.session_id === 'string' && e.session_id ? e.session_id : await currentSessionId($)
+      await adoptLive($, cur)
+    }
     return result
   })
 
@@ -2126,10 +2425,18 @@ export const register: Register = (on, options) => {
     return result
   })
 
-  // A flow still open when the session ends is kept as open; finishing it later updates the same entry.
+  // The session ends: its record in flow-live.json is marked ended first (so the next session closes it at once), then a
+  // flow still open is kept as open in the archive, dated by its last activity; the next session's close or a finish
+  // later replaces the same entry.
   on('session.end', async ($, e, next) => {
-    const f = await readFlow($).catch(() => null)
-    if (f && !f.isFinished) await recordFlow($, f, 'open')
+    try {
+      await persistLive($, true)
+      endedSession = sessionId
+      const f = await readFlow($)
+      if (f && !f.isFinished) await recordFlow($, f, 'open', undefined, (await readLiveState($)).activityAt || undefined)
+    } catch {
+      // The session ends whatever fails here.
+    }
     return next(e)
   })
 
@@ -2151,10 +2458,13 @@ export const register: Register = (on, options) => {
         return failed(label)
       }
     }
-    const topToggles = topToggleRow($, { Box, Button }, p)
+    const topToggles = topToggleRow($, { Box, Text, Button }, p)
     // Why the band above the prompt failed in this load, under the buttons (the Band button is among them).
     const fault: unknown = await read($, bandError).catch(() => '')
-    const bandLine = typeof fault === 'string' && fault ? <Text dimColor>{`band error: ${fault}`}</Text> : null
+    const bandLine = typeof fault === 'string' && fault ? <Text dimColor>{`band error: ${fault} (v${VERSION})`}</Text> : null
+    // What flow-live.json could not do in this load (an unreadable file is never written over).
+    const liveFault: unknown = await read($, liveError).catch(() => '')
+    const liveLine = typeof liveFault === 'string' && liveFault ? <Text dimColor>{liveFault}</Text> : null
     // An agent that reported its steps folds them out under its row; open only in this session.
     // `fp` prefixes an archive group's fold state (`<entryId>:<agentId>`), so folding a row there never folds the live one.
     const isUnfolded = (a: AgentRun, fp = '') => (p.openAgents ?? []).includes(fp + a.id)
@@ -2253,9 +2563,9 @@ export const register: Register = (on, options) => {
       }
       if (Svg) {
         const viewSummary = `≈${fmtCost(v.t.cost)}, ${fmtTokens(v.t.tokens)} ${s.tokensWord}, ${fmtTime(v.t.time)}`
-        // Every row: line 1 is native (a Button cannot sit inside a drawing): the indent, the fold chevron right before
-        // the task name, the archive icon after the name and when it finished at the far end; then the drawing at the
-        // full width without its title line.
+        // Every row: line 1 is native (a Button cannot sit inside a drawing): the fold chevron at the far left, the indent
+        // that puts the task name at the drawing's text column, the archive icon after the name and when it finished at
+        // the far end; then the drawing at the full width without its title line.
         const agentRow = (a: AgentRun, word: string) => {
           const alt = `${a.description}: ${modelName(a.model)}, ${word}`
           const items = timedItems(itemsOf(a.items), a)
@@ -2264,10 +2574,8 @@ export const register: Register = (on, options) => {
           return (
             <Box key={`${kp}${a.id}`} flexDirection="column">
               <Box flexDirection="row" alignItems="center">
-                <Svg source={INDENT_SVG} alt="" width={TITLE_INDENT - FOLD_W} height={1} />
-                <Box width={FOLD_W} flexShrink={0}>
-                  {foldButton(a, kp, fp, items.length > 0)}
-                </Box>
+                <Box flexShrink={0}>{foldButton(a, kp, fp, items.length > 0)}</Box>
+                <Svg source={INDENT_SVG} alt="" width={INDENT_W} height={1} />
                 <Box flexDirection="row" alignItems="center" gap={1} flexGrow={1} flexShrink={1} minWidth={0}>
                   <Box flexShrink={1} minWidth={0} overflow="hidden">
                     <Text bold wrap="truncate-end">
@@ -2672,8 +2980,8 @@ export const register: Register = (on, options) => {
       if (!f && list.length === 0) return { top: null, main: <Text dimColor>{rows === 'active' ? s.nothingQueued : s.noFinished}</Text> }
       const meta = await readMeta($)
       const at = Math.max(await readNow($), ...list.map(a => a.startedAt), 0)
-      const running = list.filter(a => a.status === 'running').reverse()
-      const finished = list.filter(a => a.status !== 'running').reverse()
+      const running = list.filter(isLive).reverse()
+      const finished = list.filter(a => !isLive(a)).reverse()
       const planned = plannedOf(f, list)
       const t = totals(list, at)
       // The pane's title says "Agents"; inside, only the flow's own name.
@@ -2686,15 +2994,8 @@ export const register: Register = (on, options) => {
           onPress={() => updatePanel($, prev => ({ ...prev, isCompact: !prev.isCompact }))}
         />
       )
-      const finishFlowButton = f && !f.isFinished ? <Button key="flow-finish" label="Finish flow" plain onPress={() => finishOpenFlow($)} /> : null
-      const toggles = finishFlowButton ? (
-        <Box key="title-controls" flexDirection="row" gap={1}>
-          {finishFlowButton}
-          {toggleCompact}
-        </Box>
-      ) : (
-        toggleCompact
-      )
+      // A flow finishes by itself (or by `finished: true`): there is no Finish button.
+      const toggles = toggleCompact
       const summary = `≈${fmtCost(t.cost)}, ${fmtTokens(t.tokens)} ${s.tokensWord}, ${fmtTime(t.time)}`
       // Only an open flow's own finished rows, and not in the compact panel.
       const archivableIds = new Set(f && !f.isFinished && !p.isCompact ? archivable(list, meta).map(a => a.id) : [])
@@ -2785,6 +3086,7 @@ export const register: Register = (on, options) => {
           {flowPart.top}
           {topToggles}
           {bandLine}
+          {liveLine}
           {contextSection}
           {usageSection}
           {group}
@@ -2795,6 +3097,7 @@ export const register: Register = (on, options) => {
       <Box flexDirection="column">
         {topToggles}
         {bandLine}
+        {liveLine}
         {contextSection}
         {usageSection}
         {group}
@@ -2806,7 +3109,7 @@ export const register: Register = (on, options) => {
     const p = await readPanel($).catch(() => asPanel(null))
     return (
       <Box flexDirection="column">
-        {topToggleRow($, { Box, Button }, p)}
+        {topToggleRow($, { Box, Text, Button }, p)}
         {tabRow($, { Box, Text, Button }, p, { active: null, finished: null, plans: null, archive: null, trash: null })}
         <Text dimColor>flowdeck could not draw this panel</Text>
       </Box>
@@ -2861,13 +3164,12 @@ export const register: Register = (on, options) => {
     }
     const list = await readAgents($)
     const crew = list.length + plannedOf(f, list).length
-    const isWorking = list.some(a => a.status === 'running')
+    const isWorking = list.some(isLive)
     // X/Y, the bar and the percent come from the rows the panel's tabs count (flowProgress).
     const g = shownFlow(f, list)
     const crewButton = (
       <Button key="flowdeck-agents" label={`×${crew}`} plain onPress={() => void togglePane($)} />
     )
-    const finish = f.isFinished ? null : <Button key="flowdeck-finish" label="Finish" plain onPress={() => finishOpenFlow($)} />
     const percent = `${Math.round(ratio(g) * 100)}%`
     const dismiss = (
       <Button
@@ -2894,7 +3196,6 @@ export const register: Register = (on, options) => {
             <Svg source={rowSvg(g, width, isWorking)} alt={`${g.title}: ${label(g)}, ${percent}`} width={width} height={H} />
             {cache?.row ?? null}
             {crewButton}
-            {finish}
             {dismiss}
           </Box>
           {cache?.card ?? null}
@@ -2924,7 +3225,6 @@ export const register: Register = (on, options) => {
         ) : null}
         <Text color={CLAY}>▣</Text>
         {crewButton}
-        {finish}
         {dismiss}
       </Box>
       {cache?.card ?? null}
@@ -2933,8 +3233,8 @@ export const register: Register = (on, options) => {
       </Box>
     )
   }).catch(($, e, next) => {
-    // A throw, a timeout or a tree the surface refused: never an error in the prompt area, but said once (noteBandFault).
-    noteBandFault($, next.error?.message || next.error?.kind || '')
+    // A throw, a timeout or a tree the surface refused: never an error in the prompt area, but said once (noteFault).
+    noteFault($, 'band', next.error?.message || next.error?.kind || '')
     return next(e)
   })
 }

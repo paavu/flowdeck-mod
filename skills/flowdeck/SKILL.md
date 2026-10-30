@@ -16,9 +16,13 @@ Task from the user: $ARGUMENTS
 - **With a task** (the text above): run the flow below on that task. If a flow is already linked in this session, end it and start the new one: send the new plan with `progress` `restart: true` (`title`, `total`, `tasks`, phase `"delegate"`) instead of adding to the old flow.
 - **Without a task** (the text above is empty): adopt the work already underway in this session. Read the conversation and the session's task list, list the tasks that are open or already finished, group them into worker tasks with a tier each, and show that plan. Report it with the `progress` tool (`title`, `total`, `tasks`, and `done` for those already finished), then continue the flow from section 1 for the tasks still open. Do not redo finished work, and do not send `restart`.
 
+## Every task goes through flowdeck
+
+With the mod installed, every task of every session goes through flowdeck (its `flowdeck:flow-rule` in the system prompt says the same in every session): report it with `progress` (plan with `tasks` and `after`, `add` for a new task, `done: [numbers]` when accepted), and never leave a task unreported. A task list (TodoWrite) or a worker launch with no open flow starts one by itself; your plan then joins it.
+
 ## Linked for the whole session
 
-From the first `progress` report on, this flow stays linked to the session. A flow ends in one of three ways: the user presses Finish (on the band or in the panel; the flow ends without you), a new `/flowdeck <task>` makes you send `restart: true`, or the user tells you the flow is done. Every task that appears later (a new user request, a new item in the session's task list) goes into the same flow before you start it: call `progress` with `add: [{ title, tier }]`. Never drop an accepted task, never reset `done`, and never start a new flow beside the open one: the only way to replace it is `restart: true` for a new `/flowdeck <task>`. Send `finished: true` only when the user asks you to end the flow.
+From the first `progress` report on, this flow stays linked to the session. A flow finishes by itself: when every task is done (a complete worker run, completed in the session's task list, or accepted with `done`) and no worker run is still going, it finishes as your turn ends, and it stays in the panel's Finished tab until the next task starts a new flow. A flow with nothing running or queued that sat idle for 30 minutes finishes itself too. There is no Finish button. Otherwise a flow ends when a new `/flowdeck <task>` makes you send `restart: true`, or when the user tells you the flow is done (`finished: true`). Every task that appears while the flow is open (a new user request, a new item in the session's task list) goes into the same flow before you start it: call `progress` with `add: [{ title, tier }]`. Never drop an accepted task, never reset `done`, and never start a new flow beside the open one: the only way to replace it is `restart: true` for a new `/flowdeck <task>`. Send `finished: true` only when the user asks you to end the flow. The flow survives a restart of the session (`flow-live.json`); the next session closes and archives a flow its last session left.
 
 ## 0. Preconditions
 
@@ -27,12 +31,12 @@ From the first `progress` report on, this flow stays linked to the session. A fl
 
 ## Progress bar
 
-If the tool `mcp__flowdeck__progress` is available, keep it current; skip silently if it is not. Call it:
+Keep the tool `mcp__flowdeck__progress` current (when it is deferred, load it first with ToolSearch `select:mcp__flowdeck__progress`; skip silently only if it is absent). Call it:
 - after presenting the plan: `title` (a few words), `total` (number of worker tasks), `tasks` (`[{ title, tier, after }]` in plan order; `tier` without the `flowdeck-` prefix, `after` the numbers (from 1) of the tasks it waits for: give it to every task that depends on another, leave it out for a task that can start at once), `phase: "delegate"` (or `"design"` while in section 2);
 - each time a task is accepted in review: `done: [<its number>]` (the numbers, from 1, of the tasks accepted now; they add to those accepted before), including a task you did yourself or one a single worker run covered together with another; a task accepted without a worker run shows as `Accepted · no worker run`. A plain count still works but means the first N tasks, so name them. Switch `phase` to `"review"` while reviewing;
 - if re-planning changes the tasks: the new `tasks` and `total`;
 - when a new task appears later in the session: `add: [{ title, tier }]` (appends; keeps `done`; a title already in the flow is ignored);
-- when the current work is complete: `phase: "close"`. Set `finished: true` only when the user asks you to end the flow (a linked flow outlives a batch of work; the Finish button ends it without you);
+- when the current work is complete: `phase: "close"`. Do not send `finished: true` to close finished work: a flow whose tasks are all done finishes by itself when your turn ends. Send it only when the user asks you to end the flow;
 
 The flow's worker tasks stay on `progress`. For work outside a flow, or a checklist of your own orchestrator steps, use `mcp__flowdeck__plan`: create it once with `id`, `title` and `stages` (or `kind: "todo"`), then move it with short ops (`{id, next:true}`, `{id, done:[...], active:"..."}`, `{id, failed:"...", note}`, `{id, state:"needs_input", note}`, `{id, state:"done"}`).
 

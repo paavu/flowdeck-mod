@@ -166,13 +166,13 @@ describe('the archive of flows', () => {
     on('tool.call', () => ({ result: 'ok' }))
     on('agent.spawn', (_$: any, e: any) => ({ agentId: e.tool_use_id, model: 'opus' }))
     await start($)
-    // A worker launched without a progress report starts an unlinked flow, which a titled report replaces.
+    // A worker launched without a progress report starts a flow named after it; a restart replaces it.
     await $.tool.call({ tool: 'Agent', subagent_type: 'flowdeck-light', description: 'loose task', prompt: 'p' } as any)
     await $.agent.spawn({ subagentType: 'flowdeck-light', description: 'loose task', tool_use_id: 't1' } as any)
     clock.now = NOW + 60_000
-    await plan($, 'Next one')
+    await progress($, { restart: true, title: 'Next one', total: 1, phase: 'delegate', tasks: [{ title: 'next', tier: 'light' }] })
     expect(stored(store).length).toBe(1)
-    expect(stored(store)[0].title).toBe('flowdeck')
+    expect(stored(store)[0].title).toBe('loose task')
     expect(stored(store)[0].status).toBe('finished')
     expect(stored(store)[0].time).toBe(60_000)
   })

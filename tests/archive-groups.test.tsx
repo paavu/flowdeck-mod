@@ -456,11 +456,11 @@ describe('archive groups in the panel', () => {
     const p = await pane($, 'desktop')
     const root = await p.drawn()
     await p.unmount()
-    // line 1: the indent, the fold chevron right before the name (every row folds; dim on a row with no step list), the
-    // name, a spacer and when the row finished at the far end
+    // line 1: the fold chevron at the far left (every row folds; dim on a row with no step list), the indent that puts the
+    // name at the drawing's text column, the name, a spacer and when the row finished at the far end
     for (const [id, name, want] of [
-      ['a2', 'wire it', ['indent', 'chevron', 'title', 'spacer', 'time']],
-      ['a1', 'write tests', ['indent', 'chevron', 'title', 'spacer', 'time']],
+      ['a2', 'wire it', ['chevron', 'indent', 'title', 'spacer', 'time']],
+      ['a1', 'write tests', ['chevron', 'indent', 'title', 'spacer', 'time']],
     ] as const) {
       const r = walk(root).find(n => keyOfNode(n) === `${kp}${id}`)
       expect(r?.props?.flexDirection).toBe('column')
@@ -711,7 +711,7 @@ describe('archive groups in the panel', () => {
     await $.agent.spawn({ subagentType: 'flowdeck-careful', description: 'write tests', tool_use_id: 'w1' } as any)
     clock.now = NOW + 61_000
     await $.turn.complete({ reason: 'answer', answer: 'ok', durationMs: 1, agentId: 'w1' } as any)
-    await pressOn($, 'active', 'terminal', 'flow-finish')
+    await progress($, { finished: true })
     const saved = (store.history as any[])[0]
     expect(saved.title).toBe('Live one')
     expect(saved.agents.map((a: any) => [a.id, a.status, a.endedAt])).toEqual([['w1', 'done', NOW + 61_000]])

@@ -84,36 +84,38 @@ const shown = async ($: any) => {
 // The flow reads Done: a finish on an already finished flow is a no-op that reports its label.
 const terminalLabel = async ($: any) => String((await progress($, { finished: true })).result) === 'ok: Done'
 
-describe('the Finish button', () => {
-  test('the band shows Finish on both surfaces only while a flow is open', async ($, on) => {
+describe('no Finish button: a flow finishes by itself or by finished: true', () => {
+  test('the band and the panel draw no Finish button on either surface, with an open flow or a finished one', async ($, on) => {
     engine(on)
     await start($)
-    expect(await bandHas($, 'desktop', 'flowdeck-finish')).toBe(false)
-    await plan($)
-    for (const surface of ['desktop', 'terminal'] as const) {
-      const b = await band($, surface)
-      const finish = await b.find({ type: 'Button', key: 'flowdeck-finish' })
-      expect(finish).toBeDefined()
-      expect(JSON.stringify(finish)).toContain('Finish')
-      const json = JSON.stringify(await b.drawn())
-      const at = json.indexOf('flowdeck-finish')
-      expect(at).toBeGreaterThan(json.indexOf('flowdeck-agents'))
-      expect(at).toBeLessThan(json.indexOf('flowdeck-dismiss'))
-      await b.unmount()
+    for (const step of [() => plan($), () => progress($, { finished: true })]) {
+      await step()
+      for (const surface of ['desktop', 'terminal'] as const) {
+        expect(await bandHas($, surface, 'flowdeck-finish')).toBe(false)
+        const p = await $.ui.mount({ plugin: 'flowdeck', surface, component: 'Pane', requestId: 'flowdeck-agents', props: { bodyColumns: 80 } } as any)
+        expect(await has(p, 'flow-finish')).toBe(false)
+        expect(JSON.stringify(await p.drawn())).not.toMatch(/"Finish( flow)?"/)
+        expect(await has(p, 'compact')).toBe(true)
+        await p.unmount()
+      }
     }
-    await progress($, { finished: true })
-    expect(await bandHas($, 'desktop', 'flowdeck-finish')).toBe(false)
-    expect(await bandHas($, 'terminal', 'flowdeck-finish')).toBe(false)
   })
 
-  test('pressing Finish on the band records the flow once as finished and the flow reads Done', async ($, on) => {
+  test('the band keeps its agents button and ✕ on both surfaces', async ($, on) => {
+    engine(on)
+    await start($)
+    await plan($)
+    for (const surface of ['desktop', 'terminal'] as const) {
+      expect(await bandHas($, surface, 'flowdeck-agents')).toBe(true)
+      expect(await bandHas($, surface, 'flowdeck-dismiss')).toBe(true)
+    }
+  })
+
+  test('finished: true records the flow once as finished and the flow reads Done', async ($, on) => {
     const { files } = engine(on)
     await start($)
     await plan($)
-    const b = await band($, 'terminal')
-    await b.press({ key: 'flowdeck-finish' })
-    await settle()
-    await b.unmount()
+    await progress($, { finished: true })
     const list = entries(files)
     expect(list.length).toBe(1)
     expect(list[0].title).toBe('Ship it')
@@ -121,64 +123,28 @@ describe('the Finish button', () => {
     expect(list[0].done).toBe(1)
     expect(list[0].total).toBe(2)
     expect(await terminalLabel($)).toBe(true)
-    expect(await bandHas($, 'terminal', 'flowdeck-finish')).toBe(false)
-    expect(await bandHas($, 'desktop', 'flowdeck-finish')).toBe(false)
+    expect(entries(files).length).toBe(1)
   })
 
-  test('a second press on a stale band does nothing', async ($, on) => {
+  test('a late done or phase on a finished flow changes nothing and opens no blank flow', async ($, on) => {
     const { files } = engine(on)
     await start($)
     await plan($)
-    const b = await band($, 'desktop')
-    await b.press({ key: 'flowdeck-finish' })
-    await settle()
-    await b.press({ key: 'flowdeck-finish' }).catch(() => {})
-    await settle()
-    await b.unmount()
+    await progress($, { finished: true })
+    expect(String((await progress($, { done: [2] })).result)).toBe('ok: Done')
+    expect(String((await progress($, { phase: 'close' })).result)).toBe('ok: Done')
     expect(entries(files).length).toBe(1)
     expect(await terminalLabel($)).toBe(true)
   })
 
-  test('the panel shows Finish flow while a flow is open and pressing it finishes the flow', async ($, on) => {
-    const { files } = engine(on)
-    await start($)
-    let p = await pane($)
-    expect(await has(p, 'flow-finish')).toBe(false)
-    await p.unmount()
-    await plan($)
-    p = await pane($)
-    const finish = await p.find({ type: 'Button', key: 'flow-finish' })
-    expect(finish).toBeDefined()
-    expect(JSON.stringify(finish)).toContain('Finish flow')
-    expect(await has(p, 'compact')).toBe(true)
-    await p.press({ key: 'flow-finish' })
-    await settle()
-    await p.press({ key: 'flow-finish' }).catch(() => {})
-    await settle()
-    await p.unmount()
-    const list = entries(files)
-    expect(list.length).toBe(1)
-    expect(list[0].status).toBe('finished')
-    expect(list[0].title).toBe('Ship it')
-    expect(await terminalLabel($)).toBe(true)
-    p = await pane($)
-    expect(await has(p, 'flow-finish')).toBe(false)
-    expect(await has(p, 'compact')).toBe(true)
-    await p.unmount()
-    expect(await bandHas($, 'desktop', 'flowdeck-finish')).toBe(false)
-  })
-
-  test('a failing store, fs and clock never break the Finish button', async ($, on) => {
+  test('a failing store, fs and clock never break finished: true', async ($, on) => {
     const { fail } = engine(on)
     await start($)
     await plan($)
     fail.fs = true
     fail.store = true
     fail.clock = true
-    const b = await band($, 'terminal')
-    await b.press({ key: 'flowdeck-finish' })
-    await settle()
-    await b.unmount()
+    await progress($, { finished: true })
     expect(await terminalLabel($)).toBe(true)
   })
 })
@@ -261,7 +227,7 @@ describe('restart', () => {
     await progress($, { restart: true, title: 'Again', total: 1, tasks: [{ title: 'z', tier: 'light' }] })
     expect(entries(files).length).toBe(1)
     expect(await paneText($)).toContain('Again')
-    expect(await bandHas($, 'terminal', 'flowdeck-finish')).toBe(true)
+    expect(await bandHas($, 'terminal', 'flowdeck-agents')).toBe(true)
   })
 
   test('a failing store, fs and clock never break restart', async ($, on) => {
@@ -305,66 +271,58 @@ describe('finish races', () => {
     return state
   }
 
-  test('the Finish button and finished: true at once record one entry with the flow’s own content', async ($, on) => {
+  test('the main turn\'s own finish and finished: true at once record one entry with the flow’s own content', async ($, on) => {
     const { files, fs } = engine(on)
     workers(on)
     await start($)
-    await plan($)
+    await progress($, { title: 'Ship it', total: 2, done: [1, 2], phase: 'delegate', tasks: [{ title: 'write tests', tier: 'careful' }, { title: 'wire it', tier: 'medium' }] })
     // a run with spend, so a second, blank snapshot of the flow would be worth keeping and show up
     await spawn($, 'w1', 'write tests')
     await $.turn.complete({ reason: 'answer', answer: 'ok', durationMs: 1, agentId: 'w1', usage: USAGE } as any)
-    const b = await band($, 'terminal')
     const h = holdFirst(fs)
-    const both = Promise.all([b.press({ key: 'flowdeck-finish' }), progress($, { finished: true })])
+    const both = Promise.all([$.turn.complete({ reason: 'answer', answer: 'done', durationMs: 1 } as any), progress($, { finished: true })])
     while (!h.isHeld) await settle()
     await settle()
     h.release()
     await both
-    await b.unmount()
     fs.delay = null
     const list = entries(files)
-    expect(list.map(e => [e.title, e.done, e.total, e.tasks.length, e.agents.length])).toEqual([['Ship it', 1, 2, 2, 1]])
+    expect(list.map(e => [e.title, e.done, e.total, e.tasks.length, e.agents.length])).toEqual([['Ship it', 2, 2, 2, 1]])
     expect(sessionPaths(files, DIR)).toHaveLength(1)
     expect(records(files, indexPath(DIR))?.map(r => r.title)).toEqual(['Ship it'])
     expect(await terminalLabel($)).toBe(true)
   })
 
-  test('two Finish presses at once (the band and the panel) record one entry with the flow’s own content', async ($, on) => {
+  test('two finished: true at once record one entry with the flow’s own content', async ($, on) => {
     const { files, fs } = engine(on)
     workers(on)
     await start($)
     await plan($)
     await spawn($, 'w1', 'write tests')
     await $.turn.complete({ reason: 'answer', answer: 'ok', durationMs: 1, agentId: 'w1', usage: USAGE } as any)
-    const b = await band($, 'terminal')
-    const p = await pane($)
     const h = holdFirst(fs)
-    const both = Promise.all([b.press({ key: 'flowdeck-finish' }), p.press({ key: 'flow-finish' })])
+    const both = Promise.all([progress($, { finished: true }), progress($, { finished: true })])
     while (!h.isHeld) await settle()
     await settle()
     h.release()
     await both
-    await b.unmount()
-    await p.unmount()
     fs.delay = null
     expect(entries(files).map(e => [e.title, e.done, e.total, e.tasks.length, e.agents.length])).toEqual([['Ship it', 1, 2, 2, 1]])
     expect(sessionPaths(files, DIR)).toHaveLength(1)
     expect(records(files, indexPath(DIR))?.map(r => r.title)).toEqual(['Ship it'])
   })
 
-  test('a restart while Finish is still saving keeps the new flow’s start; the old record keeps its own', async ($, on) => {
+  test('a restart while finished: true is still saving keeps the new flow’s start; the old record keeps its own', async ($, on) => {
     const { files, fs, clock } = engine(on)
     await start($)
     await plan($, 'Old work')
-    const b = await band($, 'terminal')
     const h = holdFirst(fs)
-    const pressing = b.press({ key: 'flowdeck-finish' })
+    const finishing = progress($, { finished: true })
     while (!h.isHeld) await settle()
     clock.now = NOW + 60_000
     expect(String((await progress($, { restart: true, title: 'New work', total: 1, phase: 'delegate', tasks: [{ title: 'new task', tier: 'light' }] })).result)).toBe('ok: Tasks 0/1')
     h.release()
-    await pressing
-    await b.unmount()
+    await finishing
     fs.delay = null
     clock.now = NOW + 120_000
     await progress($, { finished: true })

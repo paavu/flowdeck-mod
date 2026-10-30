@@ -14,12 +14,12 @@ const compose = ($: any) => $.prompt.compose({ model: 'm', promptModel: 'm', sur
 const ours = (r: any) => r.sections.filter((s: any) => s.id === 'flowdeck:plan-rule')
 
 describe('plan rule', () => {
-  test('adds exactly one session section after the ones already composed', async ($, on) => {
+  test('adds exactly one plan-rule session section after the ones already composed, then the flow rule', async ($, on) => {
     engine(on)
     const r = await compose($)
     expect(ours(r).length).toBe(1)
     expect(ours(r)[0].scope).toBe('session')
-    expect(r.sections.map((s: any) => s.id)).toEqual(['core', 'other:rule', 'flowdeck:plan-rule'])
+    expect(r.sections.map((s: any) => s.id)).toEqual(['core', 'other:rule', 'flowdeck:plan-rule', 'flowdeck:flow-rule'])
   })
 
   test('names the tool and the short ops, stays short and adds no gate', async ($, on) => {

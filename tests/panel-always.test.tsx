@@ -156,7 +156,8 @@ describe('a panel held from an older flowdeck', () => {
       let p = await pane($, surface)
       await hasTop(p)
       expect(await p.find({ type: 'Button', key: 'tab-active', text: 'Active (1)' })).toBeDefined()
-      expect(await p.find({ type: 'Button', key: 'flow-finish' })).toBeDefined()
+      expect(await p.find({ type: 'Button', key: 'compact' })).toBeDefined()
+      expect(await p.find({ type: 'Button', key: 'flow-finish' })).toBeUndefined() // a flow finishes by itself
       expect(await p.find({ type: 'Text', text: /wire it/ })).toBeDefined()
       expect(await p.find({ type: 'Text', text: /could not be drawn|could not draw/ })).toBeUndefined()
       await p.unmount()
@@ -221,7 +222,6 @@ describe('a panel held from an older flowdeck', () => {
     // the newest group (e1) is open by default
     ['open archive group', `archive-${keyOf('e1')}`, 'archive', p => p.find({ type: 'Button', key: `archive-${keyOf('e1')}`, text: /^▾/ }), p => p.find({ type: 'Button', key: `archive-${keyOf('e1')}`, text: /^▸/ })],
     ['folded archive group', `archive-${keyOf('e2')}`, 'archive', p => p.find({ type: 'Button', key: `archive-${keyOf('e2')}`, text: /^▸/ }), p => p.find({ type: 'Button', key: `archive-${keyOf('e2')}`, text: /^▾/ })],
-    ['finish flow', 'flow-finish', 'active', p => p.find({ type: 'Button', key: 'flow-finish' }), async p => ((await p.find({ type: 'Button', key: 'flow-finish' })) ? undefined : true)],
     ['archive item', 'archive-item-w1', 'finished', p => p.find({ type: 'Button', key: 'archive-item-w1' }), p => p.find({ type: 'Text', text: /1 archived/ })],
   ]
   for (const [name, key, tab, before, after] of presses) {
@@ -362,7 +362,8 @@ describe('the panel without a flow', () => {
     for (const surface of SURFACES) {
       let p = await pane($, surface, 'active')
       await hasTop(p)
-      expect(await p.find({ type: 'Button', key: 'flow-finish' })).toBeDefined()
+      expect(await p.find({ type: 'Button', key: 'compact' })).toBeDefined()
+      expect(await p.find({ type: 'Button', key: 'flow-finish' })).toBeUndefined()
       expect(await p.find({ type: 'Text', text: /write tests/ })).toBeDefined()
       expect(await p.find({ type: 'Text', text: /no context data yet/ })).toBeDefined()
       await p.unmount()

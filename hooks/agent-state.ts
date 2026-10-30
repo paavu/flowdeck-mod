@@ -12,6 +12,10 @@ type Shown = Pick<AgentRun, 'status'> & Partial<Pick<AgentRun, 'tool' | 'isAsked
 // A live run has no end yet; one that is running with an end was saved in the archive while it still ran.
 export const isRunningAtFinish = (a: Shown): boolean => a.status === 'running' && a.endedAt !== undefined
 
+// A run that is still going: running with no end. A run restored from flow-live.json that was running when its session
+// ended has an end and reads `Running at finish`: it no longer runs, holds up nothing and sits among the finished rows.
+export const isLive = (a: Shown): boolean => a.status === 'running' && a.endedAt === undefined
+
 // A run that ended OK with a step list it did not finish: Incomplete, never Done. Derived from the saved counts only, so
 // old saved runs and held values read the same way.
 export const isIncomplete = (a: Shown): boolean => a.status === 'done' && !!a.stepTotal && (a.stepDone ?? 0) < a.stepTotal

@@ -114,8 +114,9 @@ describe('the archive in the project folder', () => {
     expect(sessions(files, DIR)[0].project).toBe('/work/app')
     expect(sessionPaths(files, DIR)).toEqual([sessionFile(flowAt(NOW))])
     expect(titles(records(files, INDEX))).toEqual(['Ship it'])
-    // the session's own file first, the index after it
-    expect(writes).toEqual([IGNORE, sessionFile(flowAt(NOW)), INDEX])
+    // the session's own file first, the index after it (flow-live.json, the shown flow's record, is written as it changes)
+    expect(writes.filter(w => !w.endsWith('/flow-live.json'))).toEqual([IGNORE, sessionFile(flowAt(NOW)), INDEX])
+    expect(writes).toContain(`${DIR}/flow-live.json`)
     expect(files[IGNORE]).toBe('*\n')
     clock.now = NOW + 60_000
     await flow($, 'Second')
@@ -135,7 +136,7 @@ describe('the archive in the project folder', () => {
     await flow($)
     expect(files[IGNORE]).toBe('custom\n')
     expect(writes).not.toContain(IGNORE)
-    expect(writes).toEqual([sessionFile(flowAt(NOW)), INDEX])
+    expect(writes.filter(w => !w.endsWith('/flow-live.json'))).toEqual([sessionFile(flowAt(NOW)), INDEX])
   })
 
   test('two projects keep separate files and separate panel lists', async ($, on) => {

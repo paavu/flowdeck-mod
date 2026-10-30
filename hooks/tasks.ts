@@ -144,6 +144,23 @@ const doneTasks = (tasks: TaskLike[], runs: RunLike[], links: Map<string, number
   return done
 }
 
+// Every task of the flow is done (a complete run, completed in the session task list, or accepted); false for a flow
+// without tasks. An Incomplete or failed run does not make its task done.
+export function allTasksDone(tasks: TaskLike[], runs: RunLike[], accepted: number[]): boolean {
+  if (!tasks.length) return false
+  const done = doneTasks(tasks, runs, linkRuns(tasks, runs), accepted)
+  return tasks.every((_, i) => done.has(i))
+}
+
+// A flow's title from a task's text or a worker's description: one line, at most `max` characters, cut at a word.
+export function shortTitle(text: string, max = 48): string {
+  const s = text.replace(/\s+/g, ' ').trim()
+  if (s.length <= max) return s
+  const cut = s.slice(0, max - 1)
+  const at = cut.lastIndexOf(' ')
+  return `${(at > max / 2 ? cut.slice(0, at) : cut).replace(/[\s,.;:–—-]+$/, '')}…`
+}
+
 // The tasks no run was started for and not accepted, numbered in plan order; `ready` when every task it waits for is done
 // (a task that waits for nothing is ready too): those can be started now, in parallel.
 export function unstarted<T extends TaskLike>(tasks: T[], runs: RunLike[], accepted: number[] = []): Numbered<T>[] {

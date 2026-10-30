@@ -207,6 +207,12 @@ export type CacheFacts = { lastAt: number; tokens: number; window: number; model
 /** Whether the cache card is open, remembered only for the mode it was chosen in. */
 export type CacheFold = { mode: CacheMode; open: boolean }
 
+/**
+ * The shown flow's bookkeeping for `flow-live.json`: the session that owns it ('' until known), when it last changed
+ * (clock ms, 0 until known), the key of what was last seen (a change of it is activity) and when its record was last written.
+ */
+export type LiveState = { owner: string; activityAt: number; key: string; writtenAt: number }
+
 declare module 'claude-code' {
   interface PluginState {
     'flowdeck': {
@@ -230,6 +236,10 @@ declare module 'claude-code' {
       cacheFold: CacheFold | null
       /** The cache texts the band last showed (`cacheKey`): the 5-second tick writes it when they change, so the band redraws once a minute at most. */
       cacheTick: string
+      /** The shown flow's owner session and activity, for flow-live.json. */
+      live: LiveState
+      /** What the last read or write of flow-live.json could not do in this load (the panel's line), '' when nothing. */
+      liveError: string
     }
   }
 }

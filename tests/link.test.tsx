@@ -82,12 +82,21 @@ describe('linked session flow', () => {
     expect(await progress($, { phase: 'delegate' })).toMatch(/2\/3/) // the list completed it: counted once
   })
 
-  test('a task list change before any flow does not create one', async ($, on) => {
+  test('a task list with an open item and no flow starts a flow, which a later plan joins', async ($, on) => {
     engine(on)
     on('tool.call', () => ({ result: 'ok' }))
     await start($)
     await $.tool.call({ tool: 'TodoWrite', todos: [{ content: 'lonely', status: 'pending' }] } as any)
-    expect(await progress($, { title: 'S', total: 1, tasks: [A], phase: 'delegate' })).toMatch(/0\/1/)
+    expect(await progress($, {})).toBe('ok: Tasks 0/1')
+    expect(await progress($, { title: 'S', total: 1, tasks: [A], phase: 'delegate' })).toBe('ok: Tasks 0/2')
+  })
+
+  test('a task list whose items are all completed starts no flow', async ($, on) => {
+    engine(on)
+    on('tool.call', () => ({ result: 'ok' }))
+    await start($)
+    await $.tool.call({ tool: 'TodoWrite', todos: [{ content: 'old', status: 'completed' }] } as any)
+    expect(await progress($, {})).toBe('ok: Plan')
   })
 
   test('a plugin-namespaced worker (flowdeck:flowdeck-light) moves the flow to delegate', async ($, on) => {

@@ -1,7 +1,7 @@
 // The held values as the panel and the band read them. A reload keeps what an older flowdeck wrote, in its older shape,
 // so every read goes through these: defaults fill what is missing, a field of the wrong kind falls back to its default,
 // fields no longer used are dropped, and entries that are no entry at all are left out.
-import type { AgentRun, AgentStatus, ArchiveDetail, ArchiveEntry, ArchiveLists, CacheFacts, CacheFold, Flow, Panel, PanelTab, Phase, PlannedTask, Reading, Sample, Samples, UsageWindow } from '../types'
+import type { AgentRun, AgentStatus, ArchiveDetail, ArchiveEntry, ArchiveLists, CacheFacts, CacheFold, Flow, LiveState, Panel, PanelTab, Phase, PlannedTask, Reading, Sample, Samples, UsageWindow } from '../types'
 import { parseArchive, stampsOf } from './archive'
 import { parseRecords } from './archive-index'
 
@@ -210,3 +210,11 @@ export const asCacheFold = (v: unknown): CacheFold | null =>
   isObj(v) && (v.mode === 'warm' || v.mode === 'cold') && typeof v.open === 'boolean' ? { mode: v.mode, open: v.open } : null
 
 export const asCacheTick = (v: unknown): string => text(v, '')
+
+export const LIVE_DEFAULT: LiveState = { owner: '', activityAt: 0, key: '', writtenAt: 0 }
+
+// The flow's own bookkeeping for flow-live.json; a value held from before 1.0.0028 (none) reads as the default.
+export const asLive = (v: unknown): LiveState => {
+  const o = isObj(v) ? v : {}
+  return { owner: text(o.owner, ''), activityAt: Math.max(0, num(o.activityAt) ?? 0), key: text(o.key, ''), writtenAt: Math.max(0, num(o.writtenAt) ?? 0) }
+}
