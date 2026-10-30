@@ -4,6 +4,7 @@ import { snapshot } from '../hooks/archive'
 import { STATE_COLOR } from '../hooks/plan-view'
 import { cleanAfter, linkRuns, taskOf, unstarted } from '../hooks/tasks'
 import type { AgentRun } from '../types'
+import { showTab } from './tabs'
 
 const NOW = Date.UTC(2026, 9, 29, 11, 0)
 
@@ -222,6 +223,7 @@ describe('task numbers and waits on the rows', () => {
     engine(on, { store: { historyShown: true, history: [entry] } })
     await start($)
     await settle()
+    await showTab($, 'archive')
     const t = (await terminal($)).text
     expect(t).toMatch(/^2\. Wire it$/m)
     expect(t).toMatch(/medium · Opus 5\.5 · medium · after 1 · ctx/)

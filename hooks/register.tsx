@@ -1,7 +1,7 @@
 import { atom, read, update } from 'claude-code'
 import type { Elements, EngineInterface, Register, RenderChildren } from 'claude-code'
 
-import type { AgentRun, ArchiveEntry, ArchiveVolume, Flow, Panel, Phase, PlannedTask, PlanStage, Reading, Samples, TaskPlan, UsageWindow } from '../types'
+import type { AgentRun, ArchiveEntry, ArchiveVolume, Flow, Panel, PanelTab, Phase, PlannedTask, PlanStage, Reading, Samples, TaskPlan, UsageWindow } from '../types'
 import { derive, finishItems, hasItemOps, ITEM_H, itemAlt, itemLine, itemsOf, itemSvg, stepItems } from './agent-items'
 import type { StepInput } from './agent-items'
 import { agentState, HOUSEKEEPING, isIncomplete, isSettled, markOf, progressOf, splitHead, stateText } from './agent-state'
@@ -9,7 +9,7 @@ import { contextRows, contextSvg, toReading } from './context'
 import { EXTRA_FILE, isWorthKeeping, keyOf, planEntry, snapshot, VOLUME_MAX } from './archive'
 import { dataDir, getFile, loadLatest, parseJson, readVolume, saveToProject, saveToStore, writeData } from './archive-store'
 import type { Io, Latest } from './archive-store'
-import { ARCHIVE_PAGE, archiveSection, UNREADABLE } from './archive-view'
+import { ARCHIVE_PAGE, archiveSection, archiveTotal, UNREADABLE } from './archive-view'
 import type { FlowDrawing, FlowView, Planned } from './archive-view'
 import { importPlan, isFinished, isStoredStep, normalize, percent, PLAN_ID, placeBar, planId, str, where } from './plan'
 import { planBandSvg, planBandText, planRows, planSvg, STATE_COLOR, stateLabel } from './plan-view'
@@ -109,9 +109,6 @@ const STRINGS = {
     time: 'Time',
     collapse: 'Collapse',
     expand: 'Expand',
-    running: 'Running',
-    finished: 'Finished',
-    planned: 'Planned',
     empty: 'No subagents yet.',
     round: 'round',
     failed: 'error',
@@ -133,6 +130,9 @@ const STRINGS = {
     acceptedRow: 'Accepted',
     noRun: 'no worker run',
     acceptedTag: 'accepted',
+    nothingQueued: 'Nothing running or queued',
+    noFinished: 'No finished items yet',
+    noPlans: 'No plans',
   },
   ru: {
     pane: 'flowdeck',
@@ -141,9 +141,6 @@ const STRINGS = {
     time: 'Время',
     collapse: 'Свернуть',
     expand: 'Развернуть',
-    running: 'Работают',
-    finished: 'Завершены',
-    planned: 'Запланированы',
     empty: 'Субагентов пока нет.',
     round: 'раунд',
     failed: 'ошибка',
@@ -165,6 +162,9 @@ const STRINGS = {
     acceptedRow: 'Принята',
     noRun: 'без запуска исполнителя',
     acceptedTag: 'принята',
+    nothingQueued: 'Ничего не выполняется и не ждёт запуска',
+    noFinished: 'Завершённых пока нет',
+    noPlans: 'Планов нет',
   },
 } as const
 
@@ -474,6 +474,26 @@ const fmtTime = (ms: number): string => {
 const elapsed = (a: AgentRun, at: number): number => (a.endedAt ?? Math.max(at, a.startedAt)) - a.startedAt
 
 const plannedOf = (f: Flow | null, list: AgentRun[]): Planned[] => (!f || f.isFinished ? [] : unstarted(f.tasks ?? [], list, acceptedOf(f)))
+
+// One flow's rows as the panel draws and counts them, live or from the archive.
+const rowsOf = (tasks: TaskLike[], list: AgentRun[], accepted: number[]) => {
+  const links = linkRuns(tasks, list)
+  return {
+    links,
+    // An accepted task no run belongs to is an Accepted row of its own, after the finished rows.
+    acceptedRows: acceptedOnly(tasks, links, accepted).map((t): Planned => ({ title: t.title, tier: t.tier ?? '', after: t.after ?? [], n: t.n })),
+    running: list.filter(a => a.status === 'running').reverse(),
+    // Archived rows leave the finished list; the totals and the planned tasks still count them.
+    finished: list.filter(a => a.status !== 'running' && !a.archived).reverse(),
+    archivedCount: list.filter(a => a.status !== 'running' && a.archived).length,
+  }
+}
+
+// The live flow's Active and Finished counts: the rows those lists draw.
+const flowCounts = (f: Flow | null, list: AgentRun[]): { active: number; finished: number } => {
+  const r = rowsOf(f?.tasks ?? [], list, f ? acceptedOf(f) : [])
+  return { active: r.running.length + plannedOf(f, list).length, finished: r.finished.length + r.acceptedRows.length }
+}
 
 const totals = (list: AgentRun[], at: number) => {
   const cost = list.reduce((s, a) => s + a.costUsd, 0)
@@ -885,7 +905,11 @@ const io = ($: EngineInterface): Io => ({
 // history.json, its side file or the shared store.
 async function saveArchive($: EngineInterface, entry: ArchiveEntry): Promise<boolean> {
   if (!isWorthKeeping(entry)) return false
-  const isLatest = async (): Promise<boolean> => (await readPanel($)).archiveVolume == null
+  // A volume being shown keeps its entries; the Archive tab's count still takes the latest part's.
+  const showLatest = async (latest: ArchiveEntry[]): Promise<void> => {
+    if ((await readPanel($)).archiveVolume == null) await update($, archive, () => latest)
+    else await updatePanel($, prev => ({ ...prev, archiveLatestCount: latest.length }))
+  }
   // The same calls, watched: a side file or the store taking the entry counts as kept.
   const base = io($)
   let isKept = false
@@ -905,13 +929,13 @@ async function saveArchive($: EngineInterface, entry: ArchiveEntry): Promise<boo
     if (vols) await update($, volumes, () => vols)
     if (saved) await updatePanel($, prev => ({ ...prev, archiveWarning: saved.isUnreadable ? UNREADABLE : '' }))
     if (saved?.isSaved) {
-      if (await isLatest()) await update($, archive, () => saved.latest)
+      await showLatest(saved.latest)
       return true
     }
     view = saved?.latest ?? null
   }
   const next = await saveToStore(watched, entry, () => readArchive($))
-  if (await isLatest()) await update($, archive, () => view ?? next)
+  await showLatest(view ?? next)
   return isKept
 }
 
@@ -1244,48 +1268,52 @@ function topToggleRow($: EngineInterface, ui: Pick<Elements['desktop'], 'Box' | 
       }}
     />
   )
-  const togglePlans = (
-    <Button
-      key="plans"
-      label={`${p.isPlansShown ? '▾' : '▸'} Plans`}
-      plain
-      onPress={async () => {
-        const shown = !p.isPlansShown
-        await updatePanel($, prev => ({ ...prev, isPlansShown: shown }))
-        await $.store.set('plansShown', shown).catch(() => {})
-      }}
-    />
+  return (
+    <Box key="top-toggles" flexDirection="row" gap={1}>
+      {toggleContext}
+      {toggleUsage}
+    </Box>
   )
+}
+
+const TABS: readonly PanelTab[] = ['active', 'finished', 'plans', 'archive']
+const TAB_LABEL: Record<PanelTab, string> = { active: 'Active', finished: 'Finished', plans: 'Plans', archive: 'Archive' }
+
+// The flowdeck group's tabs, one list shown at a time, each with its count (left out when it could not be read), then the
+// Band button. The selected tab is bold in the accent and underlined; pressing it changes nothing.
+function tabRow($: EngineInterface, ui: Pick<Elements['desktop'], 'Box' | 'Text' | 'Button'>, p: Panel, counts: Record<PanelTab, number | null>): RenderChildren {
+  const { Box, Text, Button } = ui
+  const tabs = TABS.map(tab => {
+    const n = counts[tab]
+    const text = n === null ? TAB_LABEL[tab] : `${TAB_LABEL[tab]} (${n})`
+    const select = () => updatePanel($, prev => (prev.tab === tab ? prev : { ...prev, tab }))
+    return tab === p.tab ? (
+      <Button key={`tab-${tab}`} plain onPress={() => undefined}>
+        <Text bold underline color={ACCENT}>
+          {text}
+        </Text>
+      </Button>
+    ) : (
+      <Button key={`tab-${tab}`} label={text} plain dimColor onPress={select} />
+    )
+  })
   const toggleBand = (
     <Button
       key="band"
       label={`${p.isBandHidden ? '▸' : '▾'} Band`}
       plain
+      dimColor
       onPress={async () => {
         const hidden = !p.isBandHidden
         await updatePanel($, prev => ({ ...prev, isBandHidden: hidden }))
       }}
     />
   )
-  const toggleArchive = (
-    <Button
-      key="archive"
-      label={`${p.isArchiveShown ? '▾' : '▸'} Archive`}
-      plain
-      onPress={async () => {
-        const shown = !p.isArchiveShown
-        await updatePanel($, prev => ({ ...prev, isArchiveShown: shown }))
-        await $.store.set('historyShown', shown).catch(() => {}) // the store key keeps its name from before the rename
-      }}
-    />
-  )
   return (
-    <Box key="top-toggles" flexDirection="row" gap={1}>
-      {toggleContext}
-      {toggleUsage}
-      {togglePlans}
+    <Box key="tabs" flexDirection="row" flexWrap="wrap" columnGap={2}>
+      {tabs}
+      <Box flexGrow={1} />
       {toggleBand}
-      {toggleArchive}
     </Box>
   )
 }
@@ -1898,7 +1926,8 @@ export const register: Register = (on, options) => {
       const { kp, fp, at } = v
       // The task each run belongs to: its number leads the row's name, its waits go on the model line.
       const tasks: TaskLike[] = v.tasks ?? []
-      const links = linkRuns(tasks, v.list)
+      const accepted = v.accepted ?? []
+      const { links, acceptedRows, running, finished, archivedCount } = rowsOf(tasks, v.list, accepted)
       const taskFor = (a: AgentRun) => taskOf(tasks, links, a)
       // A `#3 …` the description started with is not repeated after the number it gave.
       const nameOf = (a: AgentRun): string => {
@@ -1908,31 +1937,11 @@ export const register: Register = (on, options) => {
         const tag = taskTag(d)
         return `${t.n}. ${tag.n === t.n ? tag.rest : d}`
       }
-      // Accepted tasks: a run of one that stays Incomplete says so; one no run belongs to is an Accepted row of its own,
-      // at the end of the Finished list.
-      const accepted = v.accepted ?? []
+      // Accepted tasks: a run of one that stays Incomplete says so; one no run belongs to is an Accepted row of its own.
       const isAccepted = (a: AgentRun): boolean => {
         const t = taskFor(a)
         return !!t && accepted.includes(t.n)
       }
-      const acceptedRows: Planned[] = acceptedOnly(tasks, links, accepted).map(t => ({ title: t.title, tier: t.tier ?? '', after: t.after ?? [], n: t.n }))
-      const running = v.list.filter(a => a.status === 'running').reverse()
-      // Archived rows leave the Finished list; the totals and the planned tasks still count them.
-      const finished = v.list.filter(a => a.status !== 'running' && !a.archived).reverse()
-      const archivedCount = v.list.filter(a => a.status !== 'running' && a.archived).length
-      const isEmpty = v.list.length === 0 && v.planned.length === 0 && acceptedRows.length === 0
-      // The archive's flat list: every row newest first, with no Running heading and no Finished fold.
-      const flat = v.flat ? v.list.slice().reverse() : []
-      const doneLabel = v.flat ? '' : `${v.isDoneCollapsed ? '▸' : '▾'} ${s.finished} · ${finished.length + acceptedRows.length}`
-      const toggleDone = v.flat ? null : archivedCount > 0 ? (
-        <Button key={v.doneKey} plain onPress={v.onDone}>
-          {doneLabel}
-          <Text dimColor>{` · ${archivedCount} archived`}</Text>
-        </Button>
-      ) : (
-        <Button key={v.doneKey} label={doneLabel} plain onPress={v.onDone} />
-      )
-      const hasDone = finished.length > 0 || archivedCount > 0 || acceptedRows.length > 0
       const archiveButton = (a: AgentRun) =>
         v.archive?.can(a) ? <Button key={`archive-item-${a.id}`} label={ARCHIVE_ICON} plain dimColor onPress={() => v.archive?.press(a)} /> : null
       // A row that throws draws one dim line in its place; the other rows still draw.
@@ -1943,13 +1952,38 @@ export const register: Register = (on, options) => {
           return failed('Agent row', `${kp}${a.id}`)
         }
       }
-      if (Svg) {
-        const viewSummary = `≈${fmtCost(v.t.cost)}, ${fmtTokens(v.t.tokens)} ${s.tokensWord}, ${fmtTime(v.t.time)}`
-        const section = (key: string, text: string) => (
-          <Text key={key} dimColor>
+      // The one list `v.rows` names, drawn with the surface's own rows.
+      type RowDraw = { agent: (a: AgentRun, word: string) => RenderChildren; accepted: (pl: Planned) => RenderChildren; planned: (pl: Planned) => RenderChildren }
+      const listOf = (d: RowDraw): RenderChildren[] => {
+        const note = (key: string, text: string) => (
+          <Text key={`${kp}${key}`} dimColor>
             {text}
           </Text>
         )
+        if (v.rows === 'active') {
+          if (!running.length && !v.planned.length) return [note('empty', s.nothingQueued)]
+          return [...running.map(a => guard(a, () => d.agent(a, s.isRunning))), ...v.planned.map(d.planned)]
+        }
+        if (v.rows === 'finished') {
+          return [
+            archivedCount > 0 && note('archived', `${archivedCount} archived`),
+            !finished.length && !acceptedRows.length && note('empty', s.noFinished),
+            ...finished.map(a => guard(a, () => d.agent(a, s.isFinished))),
+            ...acceptedRows.map(d.accepted),
+          ]
+        }
+        // The archive's list: every row newest first.
+        return [
+          v.list.length === 0 && acceptedRows.length === 0 && note('empty', s.empty),
+          ...v.list
+            .slice()
+            .reverse()
+            .map(a => guard(a, () => d.agent(a, a.status === 'running' ? s.isRunning : s.isFinished))),
+          ...acceptedRows.map(d.accepted),
+        ]
+      }
+      if (Svg) {
+        const viewSummary = `≈${fmtCost(v.t.cost)}, ${fmtTokens(v.t.tokens)} ${s.tokensWord}, ${fmtTime(v.t.time)}`
         // Every row: the task name natively on line 1, the archive icon right after it and the chevron at the far
         // end (a Button cannot sit inside a drawing), then the drawing at the full width without its title line.
         const agentRow = (a: AgentRun, word: string) => {
@@ -1987,22 +2021,12 @@ export const register: Register = (on, options) => {
             <Svg source={headerSvg(W, v.title, v.t)} alt={v.title ? `${v.title}: ${viewSummary}` : viewSummary} width={W} height={headerHeight(v.title)} />,
             v.controls,
           ],
-          body: () => [
-            isEmpty && <Text dimColor>{s.empty}</Text>,
-            ...(v.flat
-              ? [flat.map(a => guard(a, () => agentRow(a, a.status === 'running' ? s.isRunning : s.isFinished))), acceptedRows.map(acceptedRow)]
-              : [
-                  running.length > 0 && section(`${kp}h-run`, `${s.running} · ${running.length}`),
-                  running.map(a => guard(a, () => agentRow(a, s.isRunning))),
-                  hasDone && toggleDone,
-                  !v.isDoneCollapsed && finished.map(a => guard(a, () => agentRow(a, s.isFinished))),
-                  !v.isDoneCollapsed && acceptedRows.map(acceptedRow),
-                ]),
-            v.planned.length > 0 && section(`${kp}h-plan`, `${s.planned} · ${v.planned.length}`),
-            v.planned.map(pl => (
-              <Svg key={`${kp}plan-${pl.n}`} source={plannedSvg(W, pl)} alt={`${pl.n}. ${pl.title}: ${s.isPlanned}`} width={W} height={46} />
-            )),
-          ],
+          body: () =>
+            listOf({
+              agent: agentRow,
+              accepted: acceptedRow,
+              planned: pl => <Svg key={`${kp}plan-${pl.n}`} source={plannedSvg(W, pl)} alt={`${pl.n}. ${pl.title}: ${s.isPlanned}`} width={W} height={46} />,
+            }),
         }
       }
       const row = (a: AgentRun) => {
@@ -2081,9 +2105,36 @@ export const register: Register = (on, options) => {
           </Box>
         )
       }
+      const plannedLine = (pl: Planned) => {
+        const tier = pl.tier in TIER_COLOR ? pl.tier : 'other'
+        const ready = pl.ready ? ` · ${s.ready}` : ''
+        const waits = pl.after.length ? ` · ${afterText(pl.after)}` : ''
+        const head = `  ${tier} · ${TIER_MODEL[tier] ?? ''}`
+        // The wait goes first when the line is short; `ready` stays.
+        const shownWaits = (head + waits + ready).length <= cols ? waits : ''
+        return (
+          <Box key={`${kp}plan-${pl.n}`} flexDirection="column" marginBottom={1}>
+            <Text dimColor wrap="truncate-end">
+              <Text color={colorOf(tier)}>▢</Text> {pl.n}. {pl.title} ◷
+            </Text>
+            <Text wrap="truncate-end">
+              <Text dimColor>
+                {head}
+                {shownWaits}
+              </Text>
+              {ready ? <Text dimColor>{' · '}</Text> : null}
+              {ready ? (
+                <Text color={STATE_COLOR.running} bold>
+                  {s.ready}
+                </Text>
+              ) : null}
+            </Text>
+          </Box>
+        )
+      }
       return {
         header: [
-          (v.title || !v.flat) && (
+          (v.title || v.rows !== 'all') && (
             <Box flexDirection="row" justifyContent="space-between">
               <Text bold wrap="truncate-end">
                 {v.title}
@@ -2095,54 +2146,7 @@ export const register: Register = (on, options) => {
             ≈{fmtCost(v.t.cost)} · {fmtTokens(v.t.tokens)} {s.tokensWord} · {fmtTime(v.t.time)}
           </Text>,
         ],
-        body: () => [
-          isEmpty && <Text dimColor>{s.empty}</Text>,
-          ...(v.flat
-            ? [flat.map(a => guard(a, () => row(a))), acceptedRows.map(acceptedLine)]
-            : [
-                running.length > 0 && (
-                  <Text dimColor>
-                    {s.running} · {running.length}
-                  </Text>
-                ),
-                running.map(a => guard(a, () => row(a))),
-                hasDone && toggleDone,
-                !v.isDoneCollapsed && finished.map(a => guard(a, () => row(a))),
-                !v.isDoneCollapsed && acceptedRows.map(acceptedLine),
-              ]),
-          v.planned.length > 0 && (
-            <Text dimColor>
-              {s.planned} · {v.planned.length}
-            </Text>
-          ),
-          v.planned.map(pl => {
-            const tier = pl.tier in TIER_COLOR ? pl.tier : 'other'
-            const ready = pl.ready ? ` · ${s.ready}` : ''
-            const waits = pl.after.length ? ` · ${afterText(pl.after)}` : ''
-            const head = `  ${tier} · ${TIER_MODEL[tier] ?? ''}`
-            // The wait goes first when the line is short; `ready` stays.
-            const shownWaits = (head + waits + ready).length <= cols ? waits : ''
-            return (
-              <Box key={`${kp}plan-${pl.n}`} flexDirection="column" marginBottom={1}>
-                <Text dimColor wrap="truncate-end">
-                  <Text color={colorOf(tier)}>▢</Text> {pl.n}. {pl.title} ◷
-                </Text>
-                <Text wrap="truncate-end">
-                  <Text dimColor>
-                    {head}
-                    {shownWaits}
-                  </Text>
-                  {ready ? <Text dimColor>{' · '}</Text> : null}
-                  {ready ? (
-                    <Text color={STATE_COLOR.running} bold>
-                      {s.ready}
-                    </Text>
-                  ) : null}
-                </Text>
-              </Box>
-            )
-          }),
-        ],
+        body: () => listOf({ agent: a => row(a), accepted: acceptedLine, planned: plannedLine }),
       }
     }
 
@@ -2154,8 +2158,10 @@ export const register: Register = (on, options) => {
         await updatePanel($, prev => ({ ...prev, archiveError: file }))
         return
       }
+      // Leaving the latest part, its count is kept for the Archive tab.
+      const latest = (await readPanel($)).archiveVolume == null ? (await readArchive($)).length : null
       await update($, archive, () => a.entries)
-      await updatePanel($, prev => ({ ...prev, archiveVolume: file, archiveListOpen: false, archiveError: '', archiveLimit: ARCHIVE_PAGE, openEntries: [], closedEntries: [] }))
+      await updatePanel($, prev => ({ ...prev, ...(latest === null ? {} : { archiveLatestCount: latest }), archiveVolume: file, archiveListOpen: false, archiveError: '', archiveLimit: ARCHIVE_PAGE, openEntries: [], closedEntries: [] }))
     }
     const backToLatest = async () => {
       const loaded = await loadLatest(io($), project).catch(() => null)
@@ -2285,11 +2291,10 @@ export const register: Register = (on, options) => {
       )
     }
 
-    // The plans take their place only when there are some.
-    const plansSection = await safe('Plans', async () => {
-      if (!p.isPlansShown) return null
+    // The Plans tab's list.
+    const plansSection = async (): Promise<RenderChildren> => {
       const planList = await readPlans($)
-      if (!planList.length) return null
+      if (!planList.length) return <Text dimColor>{s.noPlans}</Text>
       const clockNow = await $.clock.now()
       const clearPlans = planList.some(pl => pl.state === 'done') ? (
         <Button
@@ -2313,9 +2318,9 @@ export const register: Register = (on, options) => {
           {clearPlans}
         </Box>
       )
-    })
+    }
 
-    const archivePart = await safe('Archive', async () =>
+    const archivePart = async (): Promise<RenderChildren> =>
       archiveSection({
         ui: { Box, Text, Button },
         Svg,
@@ -2337,15 +2342,14 @@ export const register: Register = (on, options) => {
           latest: backToLatest,
           more: () => updatePanel($, prev => ({ ...prev, archiveLimit: (prev.archiveLimit ?? ARCHIVE_PAGE) + ARCHIVE_PAGE })),
         },
-      }),
-    )
+      })
 
-    // The flow block takes its place only once there is a flow or a run: the header, the rows and the planned tasks.
+    // The Active or Finished tab: the flow's header, then its one list. Without a flow or a run only the list's empty line.
     // `top` is the compact desktop strip above the buttons, `main` the rest.
-    const drawFlow = async (): Promise<{ top: RenderChildren; main: RenderChildren }> => {
+    const drawFlow = async (rows: 'active' | 'finished'): Promise<{ top: RenderChildren; main: RenderChildren }> => {
       const list = await readAgents($)
       const f = await readFlow($)
-      if (!f && list.length === 0) return { top: null, main: null }
+      if (!f && list.length === 0) return { top: null, main: <Text dimColor>{rows === 'active' ? s.nothingQueued : s.noFinished}</Text> }
       const meta = await readMeta($)
       const at = Math.max(await readNow($), ...list.map(a => a.startedAt), 0)
       const running = list.filter(a => a.status === 'running').reverse()
@@ -2385,9 +2389,7 @@ export const register: Register = (on, options) => {
           planned,
           at,
           t,
-          isDoneCollapsed: p.isDoneCollapsed,
-          doneKey: 'done',
-          onDone: () => updatePanel($, prev => ({ ...prev, isDoneCollapsed: !prev.isDoneCollapsed })),
+          rows,
           controls: toggles,
           archive: { can: a => archivableIds.has(a.id), press: a => pressArchive($, a.id) },
         })
@@ -2424,12 +2426,35 @@ export const register: Register = (on, options) => {
         ],
       }
     }
-    let flowPart: { top: RenderChildren; main: RenderChildren }
-    try {
-      flowPart = await drawFlow()
-    } catch {
-      flowPart = { top: null, main: failed('Flow') }
+    // The flowdeck group: the tabs with their counts, then the selected tab's list alone. Each count is read on its own,
+    // so one that fails only leaves its number out.
+    const flowCount = await Promise.resolve()
+      .then(async () => flowCounts(await readFlow($), await readAgents($)))
+      .catch(() => null)
+    const counts: Record<PanelTab, number | null> = {
+      active: flowCount?.active ?? null,
+      finished: flowCount?.finished ?? null,
+      plans: await readPlans($).then(l => l.length, () => null),
+      archive: await Promise.all([readArchive($), readVolumes($)]).then(([en, vo]) => archiveTotal(p, en, vo), () => null),
     }
+    const tabs = await safe('Tabs', () => tabRow($, { Box, Text, Button }, p, counts))
+    // The compact desktop strip stays above the top buttons whatever tab is shown.
+    const isFlowTab = p.tab === 'active' || p.tab === 'finished'
+    let flowPart: { top: RenderChildren; main: RenderChildren } = { top: null, main: null }
+    if (isFlowTab || (Svg && p.isCompact)) {
+      try {
+        flowPart = await drawFlow(p.tab === 'finished' ? 'finished' : 'active')
+      } catch {
+        flowPart = { top: null, main: failed(TAB_LABEL[p.tab]) }
+      }
+    }
+    const shown = isFlowTab ? flowPart.main : await safe(TAB_LABEL[p.tab], p.tab === 'plans' ? plansSection : archivePart)
+    const group = (
+      <Box key="flowdeck-group" flexDirection="column" marginTop={1} gap={Svg && p.isCompact ? 1 : 0}>
+        {tabs}
+        {shown}
+      </Box>
+    )
 
     if (Svg && p.isCompact) {
       return (
@@ -2439,9 +2464,7 @@ export const register: Register = (on, options) => {
           {bandLine}
           {contextSection}
           {usageSection}
-          {plansSection}
-          {flowPart.main}
-          {archivePart}
+          {group}
         </Box>
       )
     }
@@ -2451,18 +2474,17 @@ export const register: Register = (on, options) => {
         {bandLine}
         {contextSection}
         {usageSection}
-        {plansSection}
-        {flowPart.main}
-        {archivePart}
+        {group}
       </Box>
     )
   }).catch(async ($, e) => {
-    // The worst case still draws the top buttons and says so: never a blank pane.
+    // The worst case still draws the top buttons and the tabs (without counts) and says so: never a blank pane.
     const { Box, Text, Button } = $.ui.resolve(e)
     const p = await readPanel($).catch(() => asPanel(null))
     return (
       <Box flexDirection="column">
         {topToggleRow($, { Box, Button }, p)}
+        {tabRow($, { Box, Text, Button }, p, { active: null, finished: null, plans: null, archive: null })}
         <Text dimColor>flowdeck could not draw this panel</Text>
       </Box>
     )

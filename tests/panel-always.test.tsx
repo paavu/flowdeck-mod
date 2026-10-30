@@ -1,6 +1,8 @@
 import { describe, expect, test } from 'claude-code/testing'
 
 import { keyOf } from '../hooks/archive'
+import { showTab } from './tabs'
+import type { Tab } from './tabs'
 
 // The panel always draws: values an older flowdeck left in the held state (a reload keeps them), a section that fails
 // and an empty session all leave the top buttons, Context, Usage and the Archive on screen.
@@ -43,8 +45,13 @@ const pinned = (on: any, key: string, value: unknown) =>
   })
 
 const start = ($: any) => $.session.start({ surface: 'terminal', isInteractive: true, cwd: '/work/app' } as any)
-const pane = ($: any, surface: 'terminal' | 'desktop', bodyColumns = 80) =>
+const mount = ($: any, surface: 'terminal' | 'desktop', bodyColumns = 80) =>
   $.ui.mount({ plugin: 'flowdeck', surface, component: 'Pane', requestId: 'flowdeck-agents', props: { bodyColumns } } as any)
+// The tab named, else the one shown.
+const pane = async ($: any, surface: 'terminal' | 'desktop', tab?: Tab) => {
+  if (tab) await showTab($, tab)
+  return mount($, surface)
+}
 const band = ($: any, surface: 'terminal' | 'desktop') =>
   $.ui.mount({ plugin: 'flowdeck', surface, component: 'AbovePrompt', props: { hasSurvey: false, isWorking: false, maxRows: 20, bodyColumns: 100 } } as any)
 const progress = ($: any, input: Record<string, unknown>) => $.tool.call({ tool: 'mcp__flowdeck__progress', ...input } as any)
@@ -126,7 +133,7 @@ const entry = (i: number) => ({
   time: 30 * 60_000,
 })
 
-const TOP = ['context', 'usage', 'plans', 'band', 'archive']
+const TOP = ['context', 'usage', 'tab-active', 'tab-finished', 'tab-plans', 'tab-archive', 'band']
 const hasTop = async (p: any) => {
   for (const key of TOP) expect(await p.find({ type: 'Button', key })).toBeDefined()
 }
@@ -142,14 +149,22 @@ describe('a panel held from an older flowdeck', () => {
     holdOld(on)
     await start($) // a reload runs session.start again
     for (const surface of SURFACES) {
-      const p = await pane($, surface)
+      let p = await pane($, surface)
       await hasTop(p)
+      expect(await p.find({ type: 'Button', key: 'tab-active', text: 'Active (1)' })).toBeDefined()
       expect(await p.find({ type: 'Button', key: 'flow-finish' })).toBeDefined()
+      expect(await p.find({ type: 'Text', text: /wire it/ })).toBeDefined()
+      expect(await p.find({ type: 'Text', text: /could not be drawn|could not draw/ })).toBeUndefined()
+      await p.unmount()
+      p = await pane($, surface, 'finished')
       expect(await p.find({ type: 'Text', text: /write tests/ })).toBeDefined()
+      await p.unmount()
+      p = await pane($, surface, 'archive')
       expect(await p.find({ type: 'Button', key: `archive-${keyOf('e2')}` })).toBeDefined()
       expect(await p.find({ type: 'Button', key: `archive-${keyOf('e1')}` })).toBeDefined()
       expect(await p.find({ type: 'Text', text: /could not be drawn|could not draw/ })).toBeUndefined()
       await p.unmount()
+      await showTab($, 'active')
     }
   })
 
@@ -158,9 +173,11 @@ describe('a panel held from an older flowdeck', () => {
     holdOld(on)
     held(on, 'archive', [entry(2), entry(1)])
     for (const surface of SURFACES) {
-      const p = await pane($, surface)
+      let p = await pane($, surface, 'finished')
       await hasTop(p)
       expect(await p.find({ type: 'Text', text: /write tests/ })).toBeDefined()
+      await p.unmount()
+      p = await pane($, surface, 'archive')
       expect(await p.find({ type: 'Button', key: `archive-${keyOf('e1')}` })).toBeDefined()
       expect(await p.find({ type: 'Text', text: /could not be drawn|could not draw/ })).toBeUndefined()
       await p.unmount()
@@ -186,27 +203,29 @@ describe('a panel held from an older flowdeck', () => {
   })
 
   // Each press reads the old-shaped panel itself: nothing has written the key before it.
-  const presses: [string, string, (p: any) => Promise<unknown>, (p: any) => Promise<unknown>][] = [
-    ['context', 'context', p => p.find({ type: 'Button', key: 'context', text: /▾ Context/ }), p => p.find({ type: 'Button', key: 'context', text: /▸ Context/ })],
-    ['usage', 'usage', p => p.find({ type: 'Button', key: 'usage', text: /▾ Usage/ }), p => p.find({ type: 'Button', key: 'usage', text: /▸ Usage/ })],
-    ['plans', 'plans', p => p.find({ type: 'Button', key: 'plans', text: /▾ Plans/ }), p => p.find({ type: 'Button', key: 'plans', text: /▸ Plans/ })],
-    ['band', 'band', p => p.find({ type: 'Button', key: 'band', text: /▾ Band/ }), p => p.find({ type: 'Button', key: 'band', text: /▸ Band/ })],
-    ['archive', 'archive', p => p.find({ type: 'Button', key: 'archive', text: /▾ Archive/ }), p => p.find({ type: 'Button', key: 'archive', text: /▸ Archive/ })],
-    ['compact', 'compact', p => p.find({ type: 'Button', key: 'compact', text: /Collapse/ }), p => p.find({ type: 'Button', key: 'compact', text: /Expand/ })],
-    ['done', 'done', p => p.find({ type: 'Button', key: 'done', text: /▾ Finished/ }), p => p.find({ type: 'Button', key: 'done', text: /▸ Finished/ })],
-    ['agent fold', 'agent-fold-w1', p => p.find({ type: 'Button', key: 'agent-fold-w1', text: '▸' }), p => p.find({ type: 'Button', key: 'agent-fold-w1', text: '▾' })],
-    ['open archive group', `archive-${keyOf('e2')}`, p => p.find({ type: 'Button', key: `archive-${keyOf('e2')}`, text: /^▾/ }), p => p.find({ type: 'Button', key: `archive-${keyOf('e2')}`, text: /^▸/ })],
-    ['folded archive group', `archive-${keyOf('e1')}`, p => p.find({ type: 'Button', key: `archive-${keyOf('e1')}`, text: /^▸/ }), p => p.find({ type: 'Button', key: `archive-${keyOf('e1')}`, text: /^▾/ })],
-    ['finish flow', 'flow-finish', p => p.find({ type: 'Button', key: 'flow-finish' }), async p => ((await p.find({ type: 'Button', key: 'flow-finish' })) ? undefined : true)],
-    ['archive item', 'archive-item-w1', p => p.find({ type: 'Button', key: 'archive-item-w1' }), p => p.find({ type: 'Text', text: /1 archived/ })],
+  // The selected tab's label is the underlined Text.
+  const selected = async (p: any, text: string) => ((await p.find({ type: 'Text', text }))?.props.underline === true ? true : undefined)
+  const presses: [string, string, Tab | undefined, (p: any) => Promise<unknown>, (p: any) => Promise<unknown>][] = [
+    ['context', 'context', undefined, p => p.find({ type: 'Button', key: 'context', text: /▾ Context/ }), p => p.find({ type: 'Button', key: 'context', text: /▸ Context/ })],
+    ['usage', 'usage', undefined, p => p.find({ type: 'Button', key: 'usage', text: /▾ Usage/ }), p => p.find({ type: 'Button', key: 'usage', text: /▸ Usage/ })],
+    ['band', 'band', undefined, p => p.find({ type: 'Button', key: 'band', text: /▾ Band/ }), p => p.find({ type: 'Button', key: 'band', text: /▸ Band/ })],
+    ['finished tab', 'tab-finished', undefined, p => selected(p, 'Active (1)'), p => selected(p, 'Finished (1)')],
+    ['plans tab', 'tab-plans', undefined, p => selected(p, 'Active (1)'), p => selected(p, 'Plans (0)')],
+    ['archive tab', 'tab-archive', undefined, p => selected(p, 'Active (1)'), p => p.find({ type: 'Button', key: `archive-${keyOf('e2')}` })],
+    ['compact', 'compact', 'active', p => p.find({ type: 'Button', key: 'compact', text: /Collapse/ }), p => p.find({ type: 'Button', key: 'compact', text: /Expand/ })],
+    ['agent fold', 'agent-fold-w1', 'finished', p => p.find({ type: 'Button', key: 'agent-fold-w1', text: '▸' }), p => p.find({ type: 'Button', key: 'agent-fold-w1', text: '▾' })],
+    ['open archive group', `archive-${keyOf('e2')}`, 'archive', p => p.find({ type: 'Button', key: `archive-${keyOf('e2')}`, text: /^▾/ }), p => p.find({ type: 'Button', key: `archive-${keyOf('e2')}`, text: /^▸/ })],
+    ['folded archive group', `archive-${keyOf('e1')}`, 'archive', p => p.find({ type: 'Button', key: `archive-${keyOf('e1')}`, text: /^▸/ }), p => p.find({ type: 'Button', key: `archive-${keyOf('e1')}`, text: /^▾/ })],
+    ['finish flow', 'flow-finish', 'active', p => p.find({ type: 'Button', key: 'flow-finish' }), async p => ((await p.find({ type: 'Button', key: 'flow-finish' })) ? undefined : true)],
+    ['archive item', 'archive-item-w1', 'finished', p => p.find({ type: 'Button', key: 'archive-item-w1' }), p => p.find({ type: 'Text', text: /1 archived/ })],
   ]
-  for (const [name, key, before, after] of presses) {
+  for (const [name, key, tab, before, after] of presses) {
     for (const surface of SURFACES) {
       test(`the ${name} press works on it (${surface})`, async ($, on) => {
         engine(on)
         holdOld(on)
         held(on, 'archive', [entry(2), entry(1)])
-        const p = await pane($, surface)
+        const p = await pane($, surface, tab)
         expect(await before(p)).toBeDefined()
         await p.press({ key })
         expect(await after(p)).toBeDefined()
@@ -223,7 +242,7 @@ describe('a failing part leaves the rest drawn', () => {
     on('state.get', { plugin: 'flowdeck', key: 'reading' }, () => ({ deny: 'reading down' })) // the read itself fails
     await start($)
     for (const surface of SURFACES) {
-      const p = await pane($, surface)
+      const p = await pane($, surface, 'archive')
       expect(await p.find({ type: 'Text', text: 'Context could not be drawn' })).toBeDefined()
       await hasTop(p)
       expect(await p.find({ type: 'Text', text: /no usage data yet/ })).toBeDefined()
@@ -232,11 +251,34 @@ describe('a failing part leaves the rest drawn', () => {
     }
   })
 
+  test('the selected list that throws draws one dim line; the tabs, Context and Usage still draw', async ($, on) => {
+    engine(on)
+    holdOld(on)
+    // the reads themselves fail: the flow's start (only the Active list reads it) and the plans (the Plans list and count)
+    on('state.get', { plugin: 'flowdeck', key: 'flowMeta' }, () => ({ deny: 'meta down' }))
+    on('state.get', { plugin: 'flowdeck', key: 'plans' }, () => ({ deny: 'plans down' }))
+    for (const surface of SURFACES) {
+      let p = await pane($, surface, 'active')
+      expect(await p.find({ type: 'Text', text: 'Active could not be drawn' })).toBeDefined()
+      await hasTop(p)
+      // the count that could not be read is left out, the others stay
+      expect(await p.find({ type: 'Button', key: 'tab-active', text: 'Active (1)' })).toBeDefined()
+      expect(await p.find({ type: 'Button', key: 'tab-plans', text: 'Plans' })).toBeDefined()
+      expect(await p.find({ type: 'Text', text: /no context data yet/ })).toBeDefined()
+      await p.unmount()
+      p = await pane($, surface, 'plans')
+      expect(await p.find({ type: 'Text', text: 'Plans could not be drawn' })).toBeDefined()
+      await hasTop(p)
+      await p.unmount()
+      await showTab($, 'active')
+    }
+  })
+
   test('an archive group that throws draws one dim line, and the other groups draw', async ($, on) => {
     engine(on)
     pinned(on, 'archive', [entry(2), { ...entry(1), tasks: [null] }])
     for (const surface of SURFACES) {
-      const p = await pane($, surface)
+      const p = await pane($, surface, 'archive')
       expect((await p.findAll({ type: 'Text', text: 'Archive group could not be drawn' })).length).toBe(1)
       expect(await p.find({ type: 'Button', key: `archive-${keyOf('e2')}` })).toBeDefined()
       await hasTop(p)
@@ -268,47 +310,56 @@ describe('a failing part leaves the rest drawn', () => {
 })
 
 describe('the panel without a flow', () => {
-  test('draws the top buttons, Context, Usage and the Archive (shown by default), and no flow block', async ($, on) => {
+  test('draws the top buttons, Context, Usage and the tabs; Active says nothing runs, and the Archive is a tab away', async ($, on) => {
     engine(on)
     await start($)
     for (const surface of SURFACES) {
-      const p = await pane($, surface)
+      let p = await pane($, surface)
       await hasTop(p)
-      expect(await p.find({ type: 'Button', key: 'archive', text: /▾ Archive/ })).toBeDefined()
+      for (const label of ['Active (0)', 'Finished (0)', 'Plans (0)', 'Archive (0)']) expect(await p.find({ type: 'Button', text: label })).toBeDefined()
       expect(await p.find({ type: 'Text', text: /no context data yet/ })).toBeDefined()
       expect(await p.find({ type: 'Text', text: /no usage data yet/ })).toBeDefined()
-      expect(await p.find({ type: 'Text', text: /no archive yet/ })).toBeDefined()
-      expect(await p.find({ type: 'Text', text: /No subagents yet|no plans yet/ })).toBeUndefined()
+      expect(await p.find({ type: 'Text', text: 'Nothing running or queued' })).toBeDefined()
+      expect(await p.find({ type: 'Text', text: /no archive yet|No subagents yet/ })).toBeUndefined()
       expect(await p.find({ type: 'Button', key: 'flow-finish' })).toBeUndefined()
       expect(await p.find({ type: 'Button', key: 'compact' })).toBeUndefined()
       await p.unmount()
+      p = await pane($, surface, 'finished')
+      expect(await p.find({ type: 'Text', text: 'No finished items yet' })).toBeDefined()
+      await p.unmount()
+      p = await pane($, surface, 'archive')
+      expect(await p.find({ type: 'Text', text: /no archive yet/ })).toBeDefined()
+      await p.unmount()
+      await showTab($, 'active')
     }
   })
 
-  test('a stored hidden Archive choice still hides it', async ($, on) => {
+  test('a stored hidden Archive choice from before hides nothing: the Archive tab lists the entries', async ($, on) => {
     engine(on, { store: { historyShown: false, history: [entry(1)] } })
     await start($)
     for (const surface of SURFACES) {
-      const p = await pane($, surface)
-      expect(await p.find({ type: 'Button', key: 'archive', text: /▸ Archive/ })).toBeDefined()
-      expect(await p.find({ type: 'Button', key: `archive-${keyOf('e1')}` })).toBeUndefined()
-      expect(await p.find({ type: 'Text', text: /no archive yet/ })).toBeUndefined()
+      const p = await pane($, surface, 'archive')
+      expect(await p.find({ type: 'Button', key: 'archive' })).toBeUndefined()
+      expect(await p.find({ type: 'Button', key: 'tab-archive', text: 'Archive (1)' })).toBeDefined()
+      expect(await p.find({ type: 'Button', key: `archive-${keyOf('e1')}` })).toBeDefined()
       await p.unmount()
     }
   })
 
-  test('a running flow adds the flow block beside Context, Usage and the Archive', async ($, on) => {
+  test('a running flow fills the Active tab; Context, Usage and the Archive tab stay', async ($, on) => {
     engine(on)
     on('agent.spawn', (_$: any, e: any) => ({ agentId: e.tool_use_id, model: 'claude-opus-5-5' }))
     await start($)
     await plan($)
     await $.agent.spawn({ subagentType: 'flowdeck-careful', description: 'write tests', tool_use_id: 'w1' } as any)
     for (const surface of SURFACES) {
-      const p = await pane($, surface)
+      let p = await pane($, surface, 'active')
       await hasTop(p)
       expect(await p.find({ type: 'Button', key: 'flow-finish' })).toBeDefined()
       expect(await p.find({ type: 'Text', text: /write tests/ })).toBeDefined()
       expect(await p.find({ type: 'Text', text: /no context data yet/ })).toBeDefined()
+      await p.unmount()
+      p = await pane($, surface, 'archive')
       expect(await p.find({ type: 'Text', text: /no archive yet/ })).toBeDefined()
       await p.unmount()
     }

@@ -3,6 +3,7 @@ import { describe, expect, test } from 'claude-code/testing'
 import { keyOf } from '../hooks/archive'
 import { fakeFs } from './fake-fs'
 import type { Fail } from './fake-fs'
+import { showTab } from './tabs'
 
 const NOW = Date.UTC(2026, 9, 26, 12, 40)
 const HOUR = 3_600_000
@@ -63,7 +64,11 @@ const flow = async ($: any, title = 'Ship it') => {
 }
 const planTool = async ($: any, input: Record<string, unknown>) => String((await $.tool.call({ tool: 'mcp__flowdeck__plan', ...input } as any)).result)
 const STAGES = [{ name: 'Build', steps: [{ title: 'write tests' }, { title: 'wire tool' }] }]
-const pane = ($: any) => $.ui.mount({ plugin: 'flowdeck', surface: 'terminal', component: 'Pane', requestId: 'flowdeck-agents', props: { bodyColumns: 80 } } as any)
+// The Archive tab.
+const pane = async ($: any) => {
+  await showTab($, 'archive')
+  return $.ui.mount({ plugin: 'flowdeck', surface: 'terminal', component: 'Pane', requestId: 'flowdeck-agents', props: { bodyColumns: 80 } } as any)
+}
 const archiveButtons = async ($: any): Promise<string[]> => {
   const p = await pane($)
   const all = await p.findAll({ type: 'Button' })

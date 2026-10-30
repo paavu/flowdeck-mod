@@ -16,8 +16,9 @@ export type Planned = PlannedTask & { n: number; ready?: boolean }
 export type Totals = { cost: number; tokens: number; time: number }
 
 // One flow as the panel draws it, live or from the archive: the header (title and the three tiles, then
-// `controls`) and, on demand, the body (running, the `Finished · N` fold, planned; `flat`, the archive's: every row
-// newest first, then planned). `at` is the clock the rows count to.
+// `controls`) and, on demand, the body, one flat list of `rows`: `active` (the running rows newest first, then the planned
+// tasks in plan order), `finished` (the finished rows not archived, newest first, then the accepted ones) or `all`, the
+// archive's (every row newest first, then the accepted ones). `at` is the clock the rows count to.
 export type FlowView = {
   kp: string
   fp: string
@@ -33,7 +34,8 @@ export type FlowView = {
   controls: RenderChildren
   /** The live flow only: which finished rows get an Archive button, and its press. */
   archive?: { can: (a: AgentRun) => boolean; press: (a: AgentRun) => unknown }
-} & ({ flat?: false; isDoneCollapsed: boolean; doneKey: string; onDone: () => unknown } | { flat: true })
+  rows: 'active' | 'finished' | 'all'
+}
 export type FlowDrawing = { header: RenderChildren; body: () => RenderChildren }
 
 export type ArchiveView = {
@@ -94,7 +96,7 @@ function archiveGroup(v: ArchiveView, entry: ArchiveEntry, i: number): RenderChi
         planned: [],
         at: entry.endedAt,
         t: { cost: entry.cost, tokens: entry.tokens, time: entry.time },
-        flat: true,
+        rows: 'all',
         controls: null,
       })
   const body = !isOpen
@@ -136,11 +138,15 @@ function safeGroup(v: ArchiveView, entry: ArchiveEntry, i: number): RenderChildr
   }
 }
 
-// The Archive section, null while it is hidden.
+// The saved sessions the Archive tab counts: the latest part's entries (remembered while a volume is shown) and every
+// volume's, as the index lists them.
+export const archiveTotal = (p: Panel, entries: ArchiveEntry[], volumes: ArchiveVolume[]): number =>
+  (p.archiveVolume == null ? entries.length : p.archiveLatestCount) + volumes.reduce((n, sg) => n + sg.count, 0)
+
+// The Archive tab's list.
 export function archiveSection(v: ArchiveView): RenderChildren {
   const { Box, Text, Button } = v.ui
   const { p, entries, volumes, fmt } = v
-  if (!p.isArchiveShown) return null
   const shown = entries.slice(0, p.archiveLimit ?? ARCHIVE_PAGE)
   const span = spanOf(entries)
   return (

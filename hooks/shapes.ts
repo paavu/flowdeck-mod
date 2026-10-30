@@ -1,12 +1,11 @@
 // The held values as the panel and the band read them. A reload keeps what an older flowdeck wrote, in its older shape,
 // so every read goes through these: defaults fill what is missing, a field of the wrong kind falls back to its default,
 // fields no longer used are dropped, and entries that are no entry at all are left out.
-import type { AgentRun, AgentStatus, ArchiveEntry, ArchiveVolume, Flow, Panel, Phase, PlannedTask, Reading, Sample, Samples, UsageWindow } from '../types'
+import type { AgentRun, AgentStatus, ArchiveEntry, ArchiveVolume, Flow, Panel, PanelTab, Phase, PlannedTask, Reading, Sample, Samples, UsageWindow } from '../types'
 import { parseArchive, parseIndex } from './archive'
 
 export const PANEL_DEFAULT: Panel = {
   isCompact: false,
-  isDoneCollapsed: false,
   isContextShown: true,
   isUsageShown: true,
   // The reset lines count down to the reset unless the user switched to the exact time (the store key `usageRemaining` wins at session start).
@@ -24,7 +23,11 @@ export const PANEL_DEFAULT: Panel = {
   archiveError: '',
   archiveWarning: '',
   autoOpenedFor: '',
+  tab: 'active',
+  archiveLatestCount: 0,
 }
+
+const TABS: readonly PanelTab[] = ['active', 'finished', 'plans', 'archive']
 
 type Obj = Record<string, unknown>
 const isObj = (v: unknown): v is Obj => !!v && typeof v === 'object' && !Array.isArray(v)
@@ -38,7 +41,6 @@ export function asPanel(v: unknown): Panel {
   const d = PANEL_DEFAULT
   return {
     isCompact: bool(o.isCompact, d.isCompact),
-    isDoneCollapsed: bool(o.isDoneCollapsed, d.isDoneCollapsed),
     isContextShown: bool(o.isContextShown, d.isContextShown),
     isUsageShown: bool(o.isUsageShown, d.isUsageShown),
     isUsageRemaining: bool(o.isUsageRemaining, d.isUsageRemaining),
@@ -54,6 +56,8 @@ export function asPanel(v: unknown): Panel {
     archiveError: text(o.archiveError, d.archiveError),
     archiveWarning: text(o.archiveWarning, ''),
     autoOpenedFor: text(o.autoOpenedFor, d.autoOpenedFor),
+    tab: TABS.includes(o.tab as PanelTab) ? (o.tab as PanelTab) : d.tab,
+    archiveLatestCount: Math.max(0, Math.round(num(o.archiveLatestCount) ?? d.archiveLatestCount)),
   }
 }
 

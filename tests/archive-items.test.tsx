@@ -1,6 +1,8 @@
 import { describe, expect, test } from 'claude-code/testing'
 
 import { fakeFs } from './fake-fs'
+import { showTab } from './tabs'
+import type { Tab } from './tabs'
 
 const NOW = Date.UTC(2026, 9, 26, 12, 40)
 const DIR = '/work/app/.claude/flowdeck'
@@ -49,8 +51,11 @@ const settle = () => new Promise(done => (globalThis as any).setTimeout(done, 30
 const progress = ($: any, input: Record<string, unknown>) => $.tool.call({ tool: 'mcp__flowdeck__progress', ...input } as any)
 const plan = ($: any) =>
   progress($, { title: 'Ship it', total: 3, done: 1, phase: 'delegate', tasks: [{ title: 'task 1', tier: 'light' }, { title: 'never started', tier: 'medium' }, { title: 'task 2', tier: 'light' }] })
-const pane = ($: any, surface: 'terminal' | 'desktop' = 'terminal', bodyColumns = 80) =>
-  $.ui.mount({ plugin: 'flowdeck', surface, component: 'Pane', requestId: 'flowdeck-agents', props: { bodyColumns } } as any)
+// The Finished tab, unless another is named.
+const pane = async ($: any, surface: 'terminal' | 'desktop' = 'terminal', bodyColumns = 80, tab: Tab = 'finished') => {
+  await showTab($, tab)
+  return $.ui.mount({ plugin: 'flowdeck', surface, component: 'Pane', requestId: 'flowdeck-agents', props: { bodyColumns } } as any)
+}
 const spawn = ($: any, id: string, description: string) => $.agent.spawn({ subagentType: 'flowdeck-light', description, tool_use_id: id } as any)
 const turnStep = async ($: any, agentId: string) => {
   const s = $.turn.step({ agentId, model: 'claude-opus-5-5', turnId: 't', index: 0, messageCount: 1 } as any)
@@ -74,15 +79,15 @@ async function finishedRows($: any, clock: { now: number }, n: number, failed: n
 }
 
 const archiveKeys = (buttons: any[]) => buttons.map((b: any) => String(b.props.key)).filter(k => k.startsWith('archive-item-'))
-const terminal = async ($: any, cols = 80) => {
-  const p = await pane($, 'terminal', cols)
+const terminal = async ($: any, cols = 80, tab: Tab = 'finished') => {
+  const p = await pane($, 'terminal', cols, tab)
   const texts = await p.findAll({ type: 'Text' })
   const buttons = await p.findAll({ type: 'Button' })
   await p.unmount()
   return { text: texts.map((t: any) => t.text).join('\n'), texts, buttons }
 }
-const desktop = async ($: any, cols = 80) => {
-  const p = await pane($, 'desktop', cols)
+const desktop = async ($: any, cols = 80, tab: Tab = 'finished') => {
+  const p = await pane($, 'desktop', cols, tab)
   const svgs = await p.findAll({ type: 'Svg' })
   const buttons = await p.findAll({ type: 'Button' })
   const drawn = JSON.stringify(await p.drawn())
@@ -91,8 +96,8 @@ const desktop = async ($: any, cols = 80) => {
 }
 // The live rows the desktop draws, by description.
 const desktopRows = (d: { alts: string[] }) => d.alts.filter(a => /^task \d+: /.test(a)).map(a => a.split(':')[0])
-const press = async ($: any, key: string, surface: 'terminal' | 'desktop' = 'terminal') => {
-  const p = await pane($, surface)
+const press = async ($: any, key: string, surface: 'terminal' | 'desktop' = 'terminal', tab: Tab = 'finished') => {
+  const p = await pane($, surface, 80, tab)
   await p.press({ key })
   await settle()
   await p.unmount()
@@ -134,14 +139,16 @@ describe('archiving finished items of the live flow', () => {
     await start($)
     await plan($)
     await finishedRows($, clock, 4)
-    const p = await pane($)
+    let p = await pane($)
     await p.press({ key: 'archive-item-w1' })
     await settle()
+    await p.unmount()
     expect(desktopRows(await desktop($))).toEqual(['task 4', 'task 3', 'task 2'])
     expect(ids(entries(files)[0])).toEqual(['w1'])
     const writes = fs.writes.length
     const before = files[HISTORY]
     clock.now = NOW + 180_000
+    p = await pane($)
     await p.press({ key: 'archive-item-w1' }).catch(() => {})
     await settle()
     await p.unmount()
@@ -171,42 +178,44 @@ describe('archiving finished items of the live flow', () => {
     await spawn($, 'w9', 'still going')
     await turnStep($, 'w9')
     for (const surface of ['terminal', 'desktop'] as const) {
-      const p = await pane($, surface)
-      const keys = archiveKeys(await p.findAll({ type: 'Button' }))
-      await p.unmount()
-      expect(keys).toEqual(['archive-item-w2', 'archive-item-w1'])
+      for (const [tab, want] of [['finished', ['archive-item-w2', 'archive-item-w1']], ['active', []]] as const) {
+        const p = await pane($, surface, 80, tab)
+        const keys = archiveKeys(await p.findAll({ type: 'Button' }))
+        await p.unmount()
+        expect(keys).toEqual([...want])
+      }
     }
     await press($, 'archive-item-w2')
     expect(ids(entries(files)[0])).toEqual(['w1', 'w2'])
-    const t = await terminal($)
+    const t = await terminal($, 80, 'active')
     expect(t.text).toContain('still going')
     expect(t.text).toContain('never started')
-    expect(t.text).toMatch(/Running · 1/)
+    expect(t.buttons.find((b: any) => String(b.props.key) === 'tab-active')?.text).toBe('Active (2)')
   })
 
-  test('the Finished label counts only the rows left, with a dim · M archived', async ($, on) => {
+  test('the Finished tab counts only the rows left, with a dim M archived line', async ($, on) => {
     const { clock } = engine(on)
     await start($)
     await plan($)
     await finishedRows($, clock, 4)
+    const label = (t: { buttons: any[] }) => t.buttons.find((b: any) => String(b.props.key) === 'tab-finished')?.text
     let t = await terminal($)
-    expect(String(t.buttons.find((b: any) => String(b.props.key) === 'done')?.props.label)).toBe('▾ Finished · 4')
+    expect(label(t)).toBe('Finished (4)')
     expect(t.text).not.toContain('archived')
     await press($, 'archive-item-w2')
     for (const surface of ['terminal', 'desktop'] as const) {
       const p = await pane($, surface)
-      const done = await p.find({ type: 'Button', key: 'done' })
-      const dim = await p.find({ type: 'Text', text: /· 2 archived/ })
+      const tab = await p.find({ type: 'Button', key: 'tab-finished' })
+      const dim = await p.find({ type: 'Text', text: '2 archived' })
       await p.unmount()
-      expect(JSON.stringify(done)).toContain('▾ Finished · 2')
-      expect(JSON.stringify(done)).toContain(' · 2 archived')
+      expect(tab?.text).toBe('Finished (2)')
       expect(dim?.props.dimColor).toBe(true)
     }
     await press($, 'archive-item-w4')
     t = await terminal($)
-    const done = t.buttons.find((b: any) => String(b.props.key) === 'done')
-    expect(JSON.stringify(done)).toContain('Finished · 0')
-    expect(JSON.stringify(done)).toContain(' · 4 archived')
+    expect(label(t)).toBe('Finished (0)')
+    expect(t.text).toContain('4 archived')
+    expect(t.text).toContain('No finished items yet')
     expect(t.text).not.toMatch(/task \d/)
   })
 
@@ -225,8 +234,9 @@ describe('archiving finished items of the live flow', () => {
     expect(header(after.text)).toBe(header(before.text))
     expect(header(after.text)).toContain('≈$0.80')
     expect(d1.alts.find(a => a.startsWith('Ship it:'))).toBe(d0.alts.find(a => a.startsWith('Ship it:')))
-    expect(after.text).toContain('2. never started')
-    expect(after.text).not.toMatch(/▢ \d\. task [12]/)
+    const active = await terminal($, 80, 'active')
+    expect(active.text).toContain('2. never started')
+    expect(active.text).not.toMatch(/▢ \d\. task [12]/)
   })
 })
 
@@ -263,17 +273,20 @@ describe('the partial archive entry', () => {
     await start($)
     await plan($)
     await finishedRows($, clock, 3)
-    await press($, 'archive')
     await press($, 'archive-item-w1')
     for (const surface of ['terminal', 'desktop'] as const) {
-      const p = await pane($, surface)
-      const groups = await p.findAll({ type: 'Button', text: /^▾ .* · 1 item · running$/ })
+      let p = await pane($, surface, 80, 'archive')
+      const groups = await p.findAll({ type: 'Button', text: /^▾ .* \(1\) · running$/ })
       expect(groups.length).toBe(1)
       expect(await p.find({ type: 'Text', text: /1\/3|archived while the flow runs|ended with the session/ })).toBeUndefined()
       const buttons = await p.findAll({ type: 'Button' })
       // inside the group the archived row has no Archive button
-      expect(archiveKeys(buttons)).toEqual(['archive-item-w3', 'archive-item-w2'])
+      expect(archiveKeys(buttons)).toEqual([])
       expect(buttons.some((b: any) => String(b.props.key) === `archive-finished-${ID}`)).toBe(false)
+      await p.unmount()
+      // the live rows left keep theirs on the Finished tab
+      p = await pane($, surface)
+      expect(archiveKeys(await p.findAll({ type: 'Button' }))).toEqual(['archive-item-w3', 'archive-item-w2'])
       await p.unmount()
     }
   })
@@ -374,8 +387,7 @@ describe('the partial archive entry', () => {
     await press($, 'archive-item-w1')
     await start($)
     await settle()
-    await press($, 'archive')
-    const p = await pane($)
+    const p = await pane($, 'terminal', 80, 'archive')
     expect(await p.find({ type: 'Button', text: / · running$/ })).toBeDefined()
     await p.unmount()
   })
@@ -514,8 +526,9 @@ describe('where the Archive button shows', () => {
     await finishedRows($, clock, 2)
     await press($, 'archive-item-w1')
     await turnStep($, 'w1')
-    let t = await terminal($)
-    expect(t.text).toMatch(/Running · 1/)
+    let t = await terminal($, 80, 'active')
+    expect(t.buttons.find((b: any) => String(b.props.key) === 'tab-active')?.text).toBe('Active (2)')
+    expect(t.text).toMatch(/Running/)
     expect(t.text).toContain('task 1')
     await complete($, 'w1')
     t = await terminal($)
@@ -534,7 +547,8 @@ describe('where the Archive button shows', () => {
     expect(desktopRows(d)[8]).toBe('task 22')
     expect(entries(files)[0].agents.length).toBe(21)
     const t = await terminal($)
-    expect(JSON.stringify(t.buttons.find((b: any) => String(b.props.key) === 'done'))).toContain(' · 21 archived')
+    expect(t.text).toContain('21 archived')
+    expect(t.buttons.find((b: any) => String(b.props.key) === 'tab-finished')?.text).toBe('Finished (9)')
   })
 
   test('no NaN and no row wider than the pane at 240, 360 and 900 px and 24..80 columns', async ($, on) => {
@@ -571,14 +585,15 @@ describe('where the Archive button shows', () => {
     await start($)
     await plan($)
     await finishedRows($, clock, 4)
-    await press($, 'archive')
     await press($, 'archive-item-w2')
     for (const surface of ['terminal', 'desktop'] as const) {
-      const p = await pane($, surface)
-      const keys = (await p.findAll({ type: 'Button' })).map((b: any) => String(b.props.key))
-      await p.unmount()
-      expect(new Set(keys).size).toBe(keys.length)
-      expect(keys.filter(k => k.startsWith('archive-item-'))).toEqual(['archive-item-w4', 'archive-item-w3'])
+      for (const tab of ['active', 'finished', 'plans', 'archive'] as const) {
+        const p = await pane($, surface, 80, tab)
+        const keys = (await p.findAll({ type: 'Button' })).map((b: any) => String(b.props.key))
+        await p.unmount()
+        expect(new Set(keys).size).toBe(keys.length)
+        expect(keys.filter(k => k.startsWith('archive-item-'))).toEqual(tab === 'finished' ? ['archive-item-w4', 'archive-item-w3'] : [])
+      }
     }
   })
 })
@@ -631,18 +646,22 @@ describe('the small archive icon', () => {
       kids(line).map(c =>
         has(c, `archive-item-${id}`) ? 'icon' : has(c, `agent-fold-${id}`) ? 'chevron' : says(c, name) ? 'title' : c?.props?.flexGrow === 1 && kids(c).length === 0 ? 'spacer' : '?',
       )
-    const expected: [string, string, string[]][] = [
-      ['w2', 'task 2', ['title', 'icon', 'spacer', 'chevron']],
-      ['w1', 'task 1', ['title', 'icon', 'spacer']],
-      ['w9', 'still going', ['title', 'spacer']],
+    const expected: [string, string, string[], Tab][] = [
+      ['w2', 'task 2', ['title', 'icon', 'spacer', 'chevron'], 'finished'],
+      ['w1', 'task 1', ['title', 'icon', 'spacer'], 'finished'],
+      ['w9', 'still going', ['title', 'spacer'], 'active'],
     ]
     for (const [cols, W] of [[31, 240], [46, 360], [120, 900]] as const) {
-      const p = await pane($, 'desktop', cols)
-      const root = await p.drawn()
-      await p.unmount()
-      expect(JSON.stringify(root)).not.toContain('NaN')
-      for (const [id, name, want] of expected) {
-        const r = walk(root).find(n => keyOf(n) === id)
+      const roots: Partial<Record<Tab, any>> = {}
+      for (const tab of ['active', 'finished'] as const) {
+        const p = await pane($, 'desktop', cols, tab)
+        roots[tab] = await p.drawn()
+        await p.unmount()
+        expect(JSON.stringify(roots[tab])).not.toContain('NaN')
+      }
+      const root = roots.finished
+      for (const [id, name, want, tab] of expected) {
+        const r = walk(roots[tab]).find(n => keyOf(n) === id)
         expect(r?.props?.flexDirection).toBe('column')
         const [first, drawing] = kids(r)
         expect(first?.props?.flexDirection).toBe('row')

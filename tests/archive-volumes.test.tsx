@@ -3,6 +3,7 @@ import { describe, expect, test } from 'claude-code/testing'
 import { byteLength, keyOf, mergeEntries, parseIndex, placeByEnd, rotate, spanText, summarize, withoutCopies, WRITE_MAX } from '../hooks/archive'
 import type { ArchiveEntry } from '../types'
 import { ENGINE_MAX, fakeFs, utf8 } from './fake-fs'
+import { showTab } from './tabs'
 
 const NOW = Date.UTC(2026, 9, 26, 12, 40)
 const MIN = 60_000
@@ -179,8 +180,11 @@ const counts = (files: Record<string, string>) => {
   for (const p of [HISTORY, ...volumePaths(files)]) for (const id of idsOf(files[p])) c.set(id, (c.get(id) ?? 0) + 1)
   return c
 }
-const pane = ($: any, surface: 'terminal' | 'desktop' = 'terminal') =>
-  $.ui.mount({ plugin: 'flowdeck', surface, component: 'Pane', requestId: 'flowdeck-agents', props: { bodyColumns: 80 } } as any)
+// The Archive tab.
+const pane = async ($: any, surface: 'terminal' | 'desktop' = 'terminal') => {
+  await showTab($, 'archive')
+  return $.ui.mount({ plugin: 'flowdeck', surface, component: 'Pane', requestId: 'flowdeck-agents', props: { bodyColumns: 80 } } as any)
+}
 const view = async ($: any, surface: 'terminal' | 'desktop' = 'terminal') => {
   const p = await pane($, surface)
   const texts = await p.findAll({ type: 'Text' })
@@ -614,6 +618,10 @@ describe('browsing volumes in the panel', () => {
     const env = engine(on, { store: { historyShown: true }, files: disk() })
     await start($)
     await settle()
+    // the Archive tab counts every saved session: the latest part's and each volume's, browsing or not
+    const total = `Archive (${2 + vols().reduce((n, sg: any) => n + sg.count, 0)})`
+    const count = (w: Awaited<ReturnType<typeof view>>) => w.buttons.find((b: any) => String(b.props.key) === 'tab-archive')?.text
+    expect(count(await view($))).toBe(total)
     for (const surface of ['terminal', 'desktop'] as const) {
       await press($, surface, 'archive-older')
       const before = env.reads.length
@@ -621,6 +629,7 @@ describe('browsing volumes in the panel', () => {
       expect(env.reads.slice(before)).toEqual([vol(1)])
       let v = await view($, surface)
       expect(v.groups).toEqual(['e20', 'e21', 'e22'].map(keyOf))
+      expect(count(v)).toBe(total)
       expect(v.keys.filter((k: string) => k.startsWith('archive-'))[0]).toBe('archive-latest')
       expect(v.keys.indexOf('archive-latest')).toBeLessThan(v.keys.indexOf('archive-older'))
       expect(v.text).toContain(`Showing ${spanText(entry(22).startedAt, entry(20).endedAt)} · 3 flows`)
@@ -636,6 +645,7 @@ describe('browsing volumes in the panel', () => {
       await press($, surface, 'archive-latest')
       v = await view($, surface)
       expect(v.groups).toEqual(['e1', 'e2'].map(keyOf))
+      expect(count(v)).toBe(total)
       expect(v.keys).not.toContain('archive-latest')
       // Back to latest applies the default again
       expect(fold(v, `archive-${keyOf('e1')}`)).toBe('▾')
@@ -714,9 +724,13 @@ describe('browsing volumes in the panel', () => {
     expect(env.files[vol(2)]).toBe(volume)
     let v = await view($)
     expect(v.groups).toEqual(['e10', 'e11'].map(keyOf))
+    // the Archive count takes the new flow while the volume stays shown
+    const total = `Archive (${3 + vols().reduce((n, sg: any) => n + sg.count, 0)})`
+    expect(v.buttons.find((b: any) => String(b.props.key) === 'tab-archive')?.text).toBe(total)
     await press($, 'terminal', 'archive-latest')
     v = await view($)
     expect(v.groups).toEqual([id, 'e1', 'e2'].map(keyOf))
+    expect(v.buttons.find((b: any) => String(b.props.key) === 'tab-archive')?.text).toBe(total)
   })
 
   test('without volumes there is no Older volumes control', async ($, on) => {

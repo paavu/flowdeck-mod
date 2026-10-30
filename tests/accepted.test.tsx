@@ -5,6 +5,8 @@ import { STATE_COLOR } from '../hooks/plan-view'
 import { asFlow, asArchive } from '../hooks/shapes'
 import { acceptedOf, acceptedOnly, linkRuns, unstarted } from '../hooks/tasks'
 import type { AgentRun } from '../types'
+import { acrossTabs, showTab } from './tabs'
+import type { Tab } from './tabs'
 
 const NOW = Date.UTC(2026, 9, 29, 14, 0)
 const TICK = 'l3.5 3.5 6.5-7'
@@ -79,22 +81,21 @@ const start = ($: any) => $.session.start({ surface: 'terminal', isInteractive: 
 const settle = () => new Promise(done => (globalThis as any).setTimeout(done, 30))
 const pane = ($: any, surface: 'terminal' | 'desktop') =>
   $.ui.mount({ plugin: 'flowdeck', surface, component: 'Pane', requestId: 'flowdeck-agents', props: { bodyColumns: 80 } } as any)
+// What the Active and Finished tabs draw (or the tabs named), one after the other.
+const all = ($: any, surface: 'terminal' | 'desktop', type: string, tabs?: Tab[]) => acrossTabs($, () => pane($, surface), p => p.findAll({ type }), tabs)
+const tabLabel = (buttons: any[], tab: Tab) => buttons.find((b: any) => String(b.props.key) === `tab-${tab}`)?.text
 const progress = async ($: any, input: Record<string, unknown>) => String((await $.tool.call({ tool: 'mcp__flowdeck__progress', ...input } as any)).result)
 const spawn = ($: any, id: string, description: string) => $.agent.spawn({ subagentType: 'flowdeck-medium', description, tool_use_id: id } as any)
 const step = ($: any, agentId: string, input: Record<string, unknown>) => $.tool.call({ tool: 'mcp__flowdeck__step', agentId, ...input } as any)
 const complete = ($: any, agentId: string) => $.turn.complete({ reason: 'answer', answer: 'ok', durationMs: 1, agentId } as any)
-const terminal = async ($: any) => {
-  const p = await pane($, 'terminal')
-  const texts = await p.findAll({ type: 'Text' })
-  const buttons = await p.findAll({ type: 'Button' })
-  await p.unmount()
+const terminal = async ($: any, tabs?: Tab[]) => {
+  const texts = await all($, 'terminal', 'Text', tabs)
+  const buttons = await all($, 'terminal', 'Button', tabs)
   return { texts, text: texts.map((x: any) => x.text).join('\n'), buttons }
 }
 const desktop = async ($: any) => {
-  const p = await pane($, 'desktop')
-  const svgs = await p.findAll({ type: 'Svg' })
-  const buttons = await p.findAll({ type: 'Button' })
-  await p.unmount()
+  const svgs = await all($, 'desktop', 'Svg')
+  const buttons = await all($, 'desktop', 'Button')
   return { svgs, keys: buttons.map((b: any) => String(b.props.key)), source: (alt: RegExp) => String(svgs.find((s: any) => alt.test(String(s.props.alt)))?.props.source ?? '') }
 }
 const PLAN = [
@@ -121,10 +122,11 @@ describe('accepted tasks in the panel', () => {
     expect(await progress($, { done: 1 })).toBe('ok: Tasks 1/4')
     expect((await terminal($)).text).toMatch(/✓ 1\. Read code/)
     expect(await progress($, { done: [4] })).toBe('ok: Tasks 2/4')
-    const t = (await terminal($)).text
-    expect(t).toMatch(/1\. Read code/)
-    expect(t).toMatch(/4\. Docs/)
-    expect(t).toMatch(/Planned · 2/)
+    const t = await terminal($)
+    expect(t.text).toMatch(/1\. Read code/)
+    expect(t.text).toMatch(/4\. Docs/)
+    expect(tabLabel(t.buttons, 'active')).toBe('Active (2)')
+    expect(tabLabel(t.buttons, 'finished')).toBe('Finished (2)')
   })
 
   test('an accepted task with no worker run is an Accepted row: tick, no bar, no archive icon, counted in Finished', async ($, on) => {
@@ -143,8 +145,8 @@ describe('accepted tasks in the panel', () => {
     expect(d.source(/^3\. Polish/)).toContain('>ready</tspan>')
     const t = await terminal($)
     expect(t.text).toMatch(/Accepted · no worker run/)
-    expect(String(t.buttons.find((b: any) => String(b.props.key) === 'done')?.props.label)).toBe('▾ Finished · 1')
-    expect(t.text).toMatch(/Planned · 3/)
+    expect(tabLabel(t.buttons, 'finished')).toBe('Finished (1)')
+    expect(tabLabel(t.buttons, 'active')).toBe('Active (3)')
   })
 
   test('an accepted task with a complete run is the normal Done row, no Accepted row', async ($, on) => {
@@ -187,11 +189,12 @@ describe('accepted tasks in the panel', () => {
     engine(on, { store: { historyShown: true, history: [named, older] } })
     await start($)
     await settle()
+    await showTab($, 'archive')
     const p = await pane($, 'terminal')
     await p.press({ key: (await p.findAll({ type: 'Button' })).map((b: any) => String(b.props.key)).filter((k: string) => k.startsWith('archive-k'))[1] })
     await settle()
     await p.unmount()
-    const txt = (await terminal($)).text
+    const txt = (await terminal($, ['archive'])).text
     const [first, second] = txt.split(/▾ /).slice(1)
     expect(first).toMatch(/✓ 3\. Polish/)
     expect(first).not.toMatch(/1\. Read code/)

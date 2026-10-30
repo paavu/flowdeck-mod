@@ -1,6 +1,8 @@
 import { describe, expect, test } from 'claude-code/testing'
 
 import { keyOf } from '../hooks/archive'
+import { showTab } from './tabs'
+import type { Tab } from './tabs'
 
 const NOW = Date.UTC(2026, 9, 26, 12, 40)
 const HOUR = 3_600_000
@@ -37,8 +39,11 @@ const settle = () => new Promise(done => (globalThis as any).setTimeout(done, 30
 const progress = ($: any, input: Record<string, unknown>) => $.tool.call({ tool: 'mcp__flowdeck__progress', ...input } as any)
 const plan = ($: any, title = 'Ship it') =>
   progress($, { title, total: 2, done: 1, phase: 'delegate', tasks: [{ title: 'write tests', tier: 'careful' }, { title: 'wire it', tier: 'medium' }] })
-const pane = ($: any, surface: 'terminal' | 'desktop' = 'terminal', bodyColumns = 80) =>
-  $.ui.mount({ plugin: 'flowdeck', surface, component: 'Pane', requestId: 'flowdeck-agents', props: { bodyColumns } } as any)
+// The Archive tab, unless another is named.
+const pane = async ($: any, surface: 'terminal' | 'desktop' = 'terminal', bodyColumns = 80, tab: Tab = 'archive') => {
+  await showTab($, tab)
+  return $.ui.mount({ plugin: 'flowdeck', surface, component: 'Pane', requestId: 'flowdeck-agents', props: { bodyColumns } } as any)
+}
 
 // No fs hook answers here, so the project files cannot be read or written: these tests run on the
 // shared-store fallback (tests/project-store.test.tsx covers the files), which shows this project's entries.
@@ -239,34 +244,21 @@ describe('the archive of flows', () => {
     expect(String(r?.result ?? r)).toContain('ok')
     const done: any = await progress($, { finished: true })
     expect(String(done?.result ?? done)).toContain('ok')
-    const p = await pane($) // the Archive is shown by default
+    const p = await pane($)
     expect((await p.findAll({ type: 'Button' })).some((b: any) => /^archive-k[a-z0-9]+$/.test(String(b.props.key)))).toBe(true)
     await p.unmount()
   })
 })
 
 describe('archive section in the panel', () => {
-  test('is on by default, the Archive button hides and shows it and the choice is stored', async ($, on) => {
-    const { store } = engine(on, { store: { history: [entry(1)] } })
+  test('the Archive tab lists the saved sessions with their count; there is no hide toggle', async ($, on) => {
+    engine(on, { store: { history: [entry(1)] } })
     await start($)
     await settle()
-    let p = await pane($)
-    expect(await p.find({ type: 'Button', text: /▾ Archive/ })).toBeDefined()
-    expect(await p.find({ type: 'Button', key: `archive-${keyOf('e1')}` })).toBeDefined()
-    await p.press({ key: 'archive' })
-    await settle()
-    expect(store.historyShown).toBe(false)
-    await p.unmount()
-    p = await pane($)
-    expect(await p.find({ type: 'Button', text: /▸ Archive/ })).toBeDefined()
-    expect(await p.find({ type: 'Button', key: `archive-${keyOf('e1')}` })).toBeUndefined()
-    await p.press({ key: 'archive' })
-    await settle()
-    expect(store.historyShown).toBe(true)
-    await p.unmount()
-    p = await pane($)
-    expect(await p.find({ type: 'Button', text: /▾ Archive/ })).toBeDefined()
-    expect(await p.find({ type: 'Button', text: /^▾ .* · 2 items$/ })).toBeDefined()
+    const p = await pane($)
+    expect(await p.find({ type: 'Button', key: 'archive' })).toBeUndefined()
+    expect(await p.find({ type: 'Button', key: 'tab-archive', text: 'Archive (1)' })).toBeDefined()
+    expect(await p.find({ type: 'Button', key: `archive-${keyOf('e1')}`, text: /^▾ .* \(2\)$/ })).toBeDefined()
     expect(await p.find({ type: 'Text', text: /Old flow 1|1\/2|finished/ })).toBeUndefined()
     expect(await p.find({ type: 'Text', text: /≈\$1\.50 · 12k tokens · 30:00/ })).toBeDefined()
     await p.unmount()
@@ -289,12 +281,12 @@ describe('archive section in the panel', () => {
     await start($)
     await settle()
     const p = await pane($)
-    expect(await p.find({ type: 'Button', text: /^▾ .* · 2 items$/ })).toBeDefined()
+    expect(await p.find({ type: 'Button', text: /^▾ .* \(2\)$/ })).toBeDefined()
     expect(await p.find({ type: 'Text', text: /✓ write tests \(careful\)/ })).toBeDefined()
     expect(await p.find({ type: 'Text', text: /○ wire it \(medium\)/ })).toBeDefined()
     await p.press({ key: `archive-${keyOf('e1')}` })
     await settle()
-    expect(await p.find({ type: 'Button', text: /^▸ .* · 2 items$/ })).toBeDefined()
+    expect(await p.find({ type: 'Button', text: /^▸ .* \(2\)$/ })).toBeDefined()
     expect(await p.find({ type: 'Text', text: /write tests \(careful\)/ })).toBeUndefined()
     await p.press({ key: `archive-${keyOf('e1')}` })
     await settle()
@@ -308,10 +300,14 @@ describe('archive section in the panel', () => {
     await settle()
     await plan($) // Collapse belongs to the flow block
     for (const surface of ['terminal', 'desktop'] as const) {
-      const p = await pane($, surface)
+      let p = await pane($, surface, 80, 'active')
       await p.press({ key: 'compact' })
       await settle()
+      await p.unmount()
+      p = await pane($, surface)
       expect(await p.find({ type: 'Button', key: `archive-${keyOf('e1')}` })).toBeDefined()
+      await p.unmount()
+      p = await pane($, surface, 80, 'active')
       await p.press({ key: 'compact' })
       await settle()
       await p.unmount()
@@ -333,7 +329,7 @@ describe('archive section in the panel', () => {
     await plan($)
     await progress($, { finished: true })
     const p = await pane($)
-    expect(await p.find({ type: 'Button', text: /^▾ .* · 2 items$/ })).toBeDefined()
+    expect(await p.find({ type: 'Button', text: /^▾ .* \(2\)$/ })).toBeDefined()
     expect(await p.find({ type: 'Text', text: /Ship it|1\/2|finished/ })).toBeUndefined()
     await p.unmount()
   })

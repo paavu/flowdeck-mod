@@ -132,6 +132,8 @@ const terminal = async ($: any) => {
   await p.unmount()
   return texts.map((x: any) => x.text).join('\n')
 }
+// The Active tab's queued rows (each ends in ◷) and its count.
+const queued = (t: string) => (t.match(/ ◷$/gm) ?? []).length
 
 describe('linking in the panel', () => {
   test('a worker started with other words still takes its task off the planned list, and its end makes the next ready', async ($, on) => {
@@ -142,7 +144,8 @@ describe('linking in the panel', () => {
     let t = await terminal($)
     expect(t).toMatch(/^1\. Build history panel$/m)
     expect(t).not.toContain('History module')
-    expect(t).toMatch(/Planned · 1/)
+    expect(queued(t)).toBe(1)
+    expect(t).toMatch(/^Active \(2\)$/m)
     expect(t).not.toMatch(/ready/)
     clock.now = NOW + 10_000
     await complete($, 'w1')
@@ -158,7 +161,8 @@ describe('linking in the panel', () => {
     const t = await terminal($)
     expect(t).toMatch(/^2\. wire up the tool$/m)
     expect(t).not.toContain('#2')
-    expect(t).toMatch(/Planned · 2/)
+    expect(queued(t)).toBe(2)
+    expect(t).toMatch(/^Active \(3\)$/m)
     expect(t).toContain('3. Polish')
   })
 
@@ -169,6 +173,7 @@ describe('linking in the panel', () => {
     await spawn($, 'w9', 'Unrelated chore', 'flowdeck-careful')
     const t = await terminal($)
     expect(t).toMatch(/^Unrelated chore$/m)
-    expect(t).toMatch(/Planned · 2/)
+    expect(queued(t)).toBe(2)
+    expect(t).toMatch(/^Active \(3\)$/m)
   })
 })

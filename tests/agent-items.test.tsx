@@ -2,6 +2,7 @@ import { describe, expect, test } from 'claude-code/testing'
 
 import { applyItemOps, derive, finishItems, ITEM_COLOR, itemElapsed, itemLine, itemsOf, itemSvg, MAX_ITEMS, parseSteps, stepItems } from '../hooks/agent-items'
 import { STATE_COLOR } from '../hooks/plan-view'
+import { showTab } from './tabs'
 
 const NOW = Date.UTC(2026, 9, 26, 12, 40)
 const fit = (s: string, _size: number, maxW: number) => (s.length * 6 > maxW ? s.slice(0, Math.max(1, Math.floor(maxW / 6) - 1)) + '…' : s)
@@ -321,6 +322,7 @@ describe('agent items through the step tool', () => {
     clock.now = NOW + 7000
     await $.turn.complete({ reason: 'answer', answer: 'ok', durationMs: 1, agentId: 'w1' } as any)
     await $.turn.complete({ reason: 'error', answer: '', durationMs: 1, agentId: 'w2' } as any)
+    await showTab($, 'finished') // both runs ended
     await fold($, 'w1')
     await fold($, 'w2')
     const t = await terminal($)

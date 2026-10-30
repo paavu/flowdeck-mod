@@ -122,7 +122,6 @@ export type ArchiveVolume = {
 
 export type Panel = {
   isCompact: boolean
-  isDoneCollapsed: boolean
   isContextShown: boolean
   isUsageShown: boolean
   /** The usage reset lines say the time left (true) or the exact 24-hour time (false); one global choice, stored under the engine-store key `usageRemaining`. */
@@ -148,7 +147,13 @@ export type Panel = {
   /** Why the latest view shows only recovered entries ('' when history.json was read); this session only. */
   archiveWarning?: string
   autoOpenedFor: string
+  /** The list the panel's flowdeck group shows under its tabs; this session only. */
+  tab: PanelTab
+  /** How many entries the latest part (history.json) holds while a volume is shown, for the Archive tab's count; this session only. */
+  archiveLatestCount: number
 }
+
+export type PanelTab = 'active' | 'finished' | 'plans' | 'archive'
 
 // The task plan, a model beside Flow for any task: stages of steps (ported from plan-progress 0.8.2).
 export type StepStatus = 'pending' | 'active' | 'done' | 'error' | 'skipped'

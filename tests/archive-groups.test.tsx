@@ -2,6 +2,8 @@ import { describe, expect, test } from 'claude-code/testing'
 
 import { addEntry, entryDate, formatEntry, groupLine, keyOf, MAX_AGENTS, MAX_ARCHIVE_BYTES, parseArchive, snapshot, splitBySize } from '../hooks/archive'
 import { STATE_COLOR } from '../hooks/plan-view'
+import { showTab } from './tabs'
+import type { Tab } from './tabs'
 import type { AgentRun, Flow, ArchiveEntry } from '../types'
 import { utf8 } from './fake-fs'
 
@@ -226,28 +228,28 @@ describe('the group date', () => {
     expect(entryDate(e(at(2026, 10, 26, 9, 0), at(2026, 10, 26, 10, 42)), 'UTC', true)).toBe('Oct 26, 2026')
   })
 
-  test('groupLine: the end date and time and the item count, on one line', () => {
+  test('groupLine: the session name (end date and time) and its item count in brackets, on one line', () => {
     const x = { ...e(at(2026, 10, 26, 9, 0), at(2026, 10, 26, 10, 42)), agents: Array.from({ length: 17 }, (_, i) => run({ id: `a${i}` })) } as ArchiveEntry
-    expect(groupLine(x, 90, 'UTC')).toBe('Oct 26, 2026 · 10:42 · 17 items')
-    expect(groupLine({ ...x, agents: [run()] }, 90, 'UTC')).toBe('Oct 26, 2026 · 10:42 · 1 item')
-    expect(groupLine({ ...x, startedAt: at(2026, 10, 25, 23, 0) }, 90, 'UTC')).toBe('Oct 25 → Oct 26, 2026 · 10:42 · 17 items')
-    expect(groupLine({ ...x, partial: true }, 90, 'UTC')).toBe('Oct 26, 2026 · 10:42 · 17 items · running')
+    expect(groupLine(x, 90, 'UTC')).toBe('Oct 26, 2026 · 10:42 (17)')
+    expect(groupLine({ ...x, agents: [run()] }, 90, 'UTC')).toBe('Oct 26, 2026 · 10:42 (1)')
+    expect(groupLine({ ...x, startedAt: at(2026, 10, 25, 23, 0) }, 90, 'UTC')).toBe('Oct 25 → Oct 26, 2026 · 10:42 (17)')
+    expect(groupLine({ ...x, partial: true }, 90, 'UTC')).toBe('Oct 26, 2026 · 10:42 (17) · running')
     // an entry saved without agents counts its tasks
-    expect(groupLine({ ...x, agents: undefined }, 90, 'UTC')).toBe('Oct 26, 2026 · 10:42 · 3 items')
-    expect(groupLine({ ...x, tasks: [x.tasks[0]!], agents: undefined }, 90, 'UTC')).toBe('Oct 26, 2026 · 10:42 · 1 item')
-    for (const status of ['finished', 'open'] as const) expect(groupLine({ ...x, status }, 90, 'UTC')).not.toMatch(/finished|ended|17\/17|Ship it/)
+    expect(groupLine({ ...x, agents: undefined }, 90, 'UTC')).toBe('Oct 26, 2026 · 10:42 (3)')
+    expect(groupLine({ ...x, tasks: [x.tasks[0]!], agents: undefined }, 90, 'UTC')).toBe('Oct 26, 2026 · 10:42 (1)')
+    for (const status of ['finished', 'open'] as const) expect(groupLine({ ...x, status }, 90, 'UTC')).not.toMatch(/items|finished|ended|17\/17|Ship it/)
   })
 
-  test('groupLine narrows: the time of day goes first, then the word items; the count stays', () => {
+  test('groupLine narrows: the time of day goes first, then the running mark; the count stays', () => {
     const x = { ...e(at(2026, 10, 26, 9, 0), at(2026, 10, 26, 10, 42)), agents: Array.from({ length: 17 }, (_, i) => run({ id: `a${i}` })) } as ArchiveEntry
-    expect(groupLine(x, 38, 'UTC')).toBe('Oct 26, 2026 · 10:42 · 17 items')
-    expect(groupLine(x, 30, 'UTC')).toBe('Oct 26, 2026 · 17 items')
-    expect(groupLine(x, 22, 'UTC')).toBe('Oct 26, 2026 · 17')
-    expect(groupLine({ ...x, partial: true }, 30, 'UTC')).toBe('Oct 26, 2026 · 17 · running')
-    expect(groupLine({ ...x, partial: true }, 20, 'UTC')).toBe('Oct 26, 2026 · 17')
-    for (const w of [90, 38, 30, 22]) expect(groupLine(x, w, 'UTC').length).toBeLessThanOrEqual(w)
+    expect(groupLine(x, 25, 'UTC')).toBe('Oct 26, 2026 · 10:42 (17)')
+    expect(groupLine(x, 24, 'UTC')).toBe('Oct 26, 2026 (17)')
+    expect(groupLine({ ...x, partial: true }, 35, 'UTC')).toBe('Oct 26, 2026 · 10:42 (17) · running')
+    expect(groupLine({ ...x, partial: true }, 30, 'UTC')).toBe('Oct 26, 2026 (17) · running')
+    expect(groupLine({ ...x, partial: true }, 20, 'UTC')).toBe('Oct 26, 2026 (17)')
+    for (const w of [90, 25, 17]) expect(groupLine(x, w, 'UTC').length).toBeLessThanOrEqual(w)
     // too narrow for anything: the shortest form, truncated by the view
-    expect(groupLine(x, 5, 'UTC')).toBe('Oct 26, 2026 · 17')
+    expect(groupLine(x, 5, 'UTC')).toBe('Oct 26, 2026 (17)')
   })
 })
 
@@ -280,28 +282,34 @@ function engine(on: any, opts: { store?: Record<string, unknown> } = {}) {
 
 const start = ($: any) => $.session.start({ surface: 'terminal', isInteractive: true, cwd: '/work/app' } as any)
 const settle = () => new Promise(done => (globalThis as any).setTimeout(done, 30))
-const pane = ($: any, surface: 'terminal' | 'desktop', bodyColumns = 80) =>
-  $.ui.mount({ plugin: 'flowdeck', surface, component: 'Pane', requestId: 'flowdeck-agents', props: { bodyColumns } } as any)
+// The Archive tab, unless another is named.
+const pane = async ($: any, surface: 'terminal' | 'desktop', bodyColumns = 80, tab: Tab = 'archive') => {
+  await showTab($, tab)
+  return $.ui.mount({ plugin: 'flowdeck', surface, component: 'Pane', requestId: 'flowdeck-agents', props: { bodyColumns } } as any)
+}
 const progress = ($: any, input: Record<string, unknown>) => $.tool.call({ tool: 'mcp__flowdeck__progress', ...input } as any)
-const press = async ($: any, surface: 'terminal' | 'desktop', ...keys: string[]) => {
+const pressOn = async ($: any, tab: Tab, surface: 'terminal' | 'desktop', ...keys: string[]) => {
   for (const key of keys) {
-    const p = await pane($, surface)
+    const p = await pane($, surface, 80, tab)
     await p.press({ key })
     await settle()
     await p.unmount()
   }
 }
-const terminal = async ($: any) => {
-  const p = await pane($, 'terminal')
+const press = ($: any, surface: 'terminal' | 'desktop', ...keys: string[]) => pressOn($, 'archive', surface, ...keys)
+// The pane's own Buttons, the tabs left out.
+const own = async (p: any) => (await p.findAll({ type: 'Button' })).filter((b: any) => !/^tab-/.test(String(b.props.key)))
+const terminal = async ($: any, tab: Tab = 'archive') => {
+  const p = await pane($, 'terminal', 80, tab)
   const texts = await p.findAll({ type: 'Text' })
-  const buttons = await p.findAll({ type: 'Button' })
+  const buttons = await own(p)
   await p.unmount()
   return { text: texts.map((t: any) => t.text).join('\n'), texts, buttons, keys: buttons.map((b: any) => String(b.props.key)) }
 }
 const desktop = async ($: any) => {
   const p = await pane($, 'desktop')
   const svgs = await p.findAll({ type: 'Svg' })
-  const buttons = await p.findAll({ type: 'Button' })
+  const buttons = await own(p)
   await p.unmount()
   return { svgs, buttons, keys: buttons.map((b: any) => String(b.props.key)), alts: svgs.map((s: any) => String(s.props.alt ?? '')) }
 }
@@ -339,8 +347,8 @@ describe('archive groups in the panel', () => {
     const t = await terminal($)
     const groups = t.buttons.filter((b: any) => [`archive-${keyOf('gA')}`, `archive-${keyOf('gB')}`].includes(String(b.props.key)))
     expect(groups.map((b: any) => String(b.props.key))).toEqual([`archive-${keyOf('gA')}`, `archive-${keyOf('gB')}`])
-    expect(groups[0].text).toMatch(/^▾ .* · 2 items$/)
-    expect(groups[1].text).toMatch(/^▸ .* · 1 item$/)
+    expect(groups[0].text).toMatch(/^▾ .* \(2\)$/)
+    expect(groups[1].text).toMatch(/^▸ .* \(1\)$/)
     expect(groups[0].text).toContain(entryDate(groupA()))
     expect(t.text).toMatch(DATE)
     // no title, done/total or status words anywhere in the Archive
@@ -360,7 +368,7 @@ describe('archive groups in the panel', () => {
     expect(d.svgs.some((s: any) => /Flow [AB]/.test(String(s.props.alt)) || /Flow [AB]/.test(String(s.props.source)))).toBe(false)
     const headers = d.svgs.filter((s: any) => Number(s.props.height) === 44 && /≈\$(1\.50|0\.75)/.test(String(s.props.source)))
     expect(headers.length).toBe(2)
-    expect(d.buttons.find((b: any) => String(b.props.key) === `archive-${keyOf('gA')}`).text).toMatch(/^▾ .* · 2 items$/)
+    expect(d.buttons.find((b: any) => String(b.props.key) === `archive-${keyOf('gA')}`).text).toMatch(/^▾ .* \(2\)$/)
     // (a row's own alt may say its run finished; the group itself never does)
     expect(d.alts.filter((a: string) => /Flow [AB]|1\/3|ended with the session/.test(a))).toEqual([])
     expect(d.buttons.filter((b: any) => [`archive-${keyOf('gA')}`, `archive-${keyOf('gB')}`].includes(String(b.props.key))).some((b: any) => /finished/.test(b.text))).toBe(false)
@@ -473,28 +481,28 @@ describe('archive groups in the panel', () => {
     }
   })
 
-  test('the fold line shortens at narrow widths: the time of day, then the word items', async ($, on) => {
+  test('the fold line shortens at narrow widths: the time of day goes first, the count stays', async ($, on) => {
     const g = { ...groupA(), title: 'T'.repeat(200), status: 'open', done: 17, total: 17, startedAt: groupA().endedAt - 30 * HOUR, agents: Array.from({ length: 17 }, (_, i) => run({ id: `a${i}` })) } as ArchiveEntry
     engine(on, { store: { historyShown: true, history: [g] } })
     await start($)
     await settle()
     const date = (cols: number) => groupLine(g, cols - 2)
-    for (const [cols, time, word] of [[90, true, true], [40, false, true], [24, false, false]] as const) {
+    for (const [cols, time] of [[90, true], [30, false], [24, false]] as const) {
       const p = await pane($, 'terminal', cols)
       const texts = await p.findAll({ type: 'Text' })
       const buttons = await p.findAll({ type: 'Button' })
       await p.unmount()
       const fold = buttons.find((b: any) => String(b.props.key) === `archive-${keyOf(g.id)}`)
       expect(fold.text).toBe(`▾ ${date(cols)}`)
-      expect(fold.text).toMatch(/· 17( items)?$/)
+      expect(fold.text).toMatch(/ \(17\)$/)
       expect(/\d\d:\d\d/.test(fold.text)).toBe(time)
-      expect(fold.text.includes('items')).toBe(word)
+      expect(fold.text).not.toContain('items')
       expect(JSON.stringify(fold)).toContain('truncate-end')
       expect(texts.some((x: any) => /TTTT|17\/17|ended/.test(String(x.text)))).toBe(false)
     }
     expect(date(90)).toContain('→')
     expect(date(90)).toMatch(/\d\d:\d\d/)
-    expect(date(40)).not.toMatch(/\d\d:\d\d/)
+    expect(date(30)).not.toMatch(/\d\d:\d\d/)
   })
 
   test('with one group it is open', async ($, on) => {
@@ -556,7 +564,7 @@ describe('archive groups in the panel', () => {
     for (const surface of ['terminal', 'desktop'] as const) {
       let t = await terminal($)
       expect(t.text).not.toContain('ended with the session')
-      expect(t.text).toMatch(/^▾ .* · 2 items$/m)
+      expect(t.text).toMatch(/^▾ .* \(2\)$/m)
       expect(t.text).toContain('≈$1.50 · 12k tokens · 30:00')
       expect(t.text).toMatch(/✓ write tests \(careful\)/)
       expect(t.text).toMatch(/○ wire it \(medium\)/)
@@ -621,10 +629,14 @@ describe('archive groups in the panel', () => {
     const label = (key: string) => String(t.buttons.find((b: any) => String(b.props.key) === key)?.props.label)
     expect(label(`archive-${keyOf('gA')}-agent-fold-a2`)).toBe('▾')
     expect(label(`archive-${keyOf('gC')}-agent-fold-a2`)).toBe('▸')
-    expect(label('agent-fold-a2')).toBe('▸')
-    await press($, 'terminal', 'agent-fold-a2')
+    expect(t.keys).not.toContain('agent-fold-a2')
+    // the live row is on the Active tab, folded
+    const live = await terminal($, 'active')
+    expect(live.text).not.toMatch(/live two|patch it/)
+    expect(String(live.buttons.find((b: any) => String(b.props.key) === 'agent-fold-a2')?.props.label)).toBe('▸')
+    await pressOn($, 'active', 'terminal', 'agent-fold-a2')
+    expect((await terminal($, 'active')).text).toMatch(/live two/)
     t = await terminal($)
-    expect(t.text).toMatch(/live two/)
     expect(count(t.text, '✗ patch it')).toBe(1)
     expect(label(`archive-${keyOf('gC')}-agent-fold-a2`)).toBe('▸')
   })
@@ -659,7 +671,7 @@ describe('archive groups in the panel', () => {
     await $.agent.spawn({ subagentType: 'flowdeck-careful', description: 'write tests', tool_use_id: 'w1' } as any)
     clock.now = NOW + 61_000
     await $.turn.complete({ reason: 'answer', answer: 'ok', durationMs: 1, agentId: 'w1' } as any)
-    await press($, 'terminal', 'flow-finish')
+    await pressOn($, 'active', 'terminal', 'flow-finish')
     const saved = (store.history as any[])[0]
     expect(saved.title).toBe('Live one')
     expect(saved.agents.map((a: any) => [a.id, a.status, a.endedAt])).toEqual([['w1', 'done', NOW + 61_000]])

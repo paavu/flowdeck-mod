@@ -2,6 +2,13 @@
 
 Versions are `M.m.xxxx`; every build bumps the 4-digit build number. Details and rulings: `docs/ledger.md`, `docs/design.md`.
 
+## 1.0.0024 (2026-10-30)
+- The panel's flowdeck parts form their own group below Context and Usage: tabs `Active (n)`, `Finished (n)`, `Plans (n)`, `Archive (n)` with the dim `Band` button at the end of the row, and only the selected tab's list below them (no more stacked Flow, Plans and Archive sections). The selected tab is bold in the accent colour and underlined; Active is selected at first, and the choice holds for the session.
+- Active: the flow header, then one flat list, running runs first and then the tasks not started in plan order (`Nothing running or queued` when empty). Finished: the flow header, then the open flow's finished rows not archived yet, newest first, with their archive icons, and the `Accepted · no worker run` rows (`No finished items yet`); the `Running · N`, `Planned · N` headings and the `Finished · N` fold are gone, and `M archived` is a dim line at the top of the Finished list. Plans: the plans and `Clear finished` (`No plans`). Archive: the saved sessions.
+- Counts: Active = running runs + queued tasks; Finished = finished rows not archived + accepted rows without a run; Plans = plans in the list; Archive = the latest part's entries + every archive volume's count from the volume index (kept while a volume is shown).
+- Archive group lines read `<date> · <HH:MM> (N)`: the item count in brackets, the word `items` (and `steps` for a plan) dropped; narrow panels still drop the time first.
+- The Plans and Archive hide toggles are gone (their stored `plansShown`/`historyShown` are read but unused); the Context and Usage toggles are unchanged. The panel's fallback drawing shows the tabs too.
+
 ## 1.0.0023 (2026-10-29)
 - A band that cannot be drawn says why: one dim transcript line per reason (`flowdeck: the band above the prompt could not be drawn: <reason>`, also in the debug log) and a `band error: <reason>` line under the panel's top buttons until the next reload. It still gives way to what other mods draw there.
 - When what is drawn below the band fails, the flow row is drawn without it instead of disappearing.

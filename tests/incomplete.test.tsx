@@ -4,6 +4,8 @@ import { agentState, isComplete, isIncomplete, isSettled, markOf, progressOf, st
 import { snapshot } from '../hooks/archive'
 import { STATE_COLOR } from '../hooks/plan-view'
 import type { AgentRun } from '../types'
+import { showTab } from './tabs'
+import type { Tab } from './tabs'
 
 const NOW = Date.UTC(2026, 9, 29, 10, 0)
 const AMBER = STATE_COLOR.needs_input
@@ -75,24 +77,29 @@ function engine(on: any, opts: { store?: Record<string, unknown> } = {}) {
 
 const start = ($: any, cwd = '') => $.session.start({ surface: 'terminal', isInteractive: true, cwd } as any)
 const settle = () => new Promise(done => (globalThis as any).setTimeout(done, 30))
-const pane = ($: any, surface: 'terminal' | 'desktop') =>
+const mount = ($: any, surface: 'terminal' | 'desktop') =>
   $.ui.mount({ plugin: 'flowdeck', surface, component: 'Pane', requestId: 'flowdeck-agents', props: { bodyColumns: 80 } } as any)
+// The Finished tab, unless another is named.
+const pane = async ($: any, surface: 'terminal' | 'desktop', tab: Tab = 'finished') => {
+  await showTab($, tab)
+  return mount($, surface)
+}
 const progress = ($: any, input: Record<string, unknown>) => $.tool.call({ tool: 'mcp__flowdeck__progress', ...input } as any)
 const spawn = ($: any, id: string, description: string) => $.agent.spawn({ subagentType: 'flowdeck-careful', description, tool_use_id: id } as any)
 const step = ($: any, agentId: string, input: Record<string, unknown>) => $.tool.call({ tool: 'mcp__flowdeck__step', agentId, ...input } as any)
 const complete = ($: any, agentId: string, reason = 'answer') => $.turn.complete({ reason, answer: 'ok', durationMs: 1, agentId } as any)
 const SIX = ['read code', 'write tests', 'wire tool', 'fix types', 'run suite', 'commit']
 
-const desktop = async ($: any) => {
-  const p = await pane($, 'desktop')
+const desktop = async ($: any, tab: Tab = 'finished') => {
+  const p = await pane($, 'desktop', tab)
   const svgs = await p.findAll({ type: 'Svg' })
   const buttons = await p.findAll({ type: 'Button' })
   await p.unmount()
   const source = (name: string) => String(svgs.find((s: any) => String(s.props.alt).startsWith(`${name}:`))?.props.source ?? '')
   return { source, keys: buttons.map((b: any) => String(b.props.key)) }
 }
-const terminal = async ($: any) => {
-  const p = await pane($, 'terminal')
+const terminal = async ($: any, tab: Tab = 'finished') => {
+  const p = await pane($, 'terminal', tab)
   const texts = await p.findAll({ type: 'Text' })
   const buttons = await p.findAll({ type: 'Button' })
   await p.unmount()
@@ -158,14 +165,16 @@ describe('Incomplete rows in the live panel', () => {
     expect(marks).toEqual(['✗ red', '✓ green', '◐ ' + AMBER, '✓ green'])
   })
 
-  test('the Finished fold still lists the Incomplete row and counts it', async ($, on) => {
+  test('the Finished tab still lists the Incomplete row and counts it', async ($, on) => {
     const { clock } = engine(on)
     await start($)
     await fourRuns($, clock)
     const p = await pane($, 'terminal')
-    const done = await p.find({ type: 'Button', key: 'done' })
+    const tab = await p.find({ type: 'Button', key: 'tab-finished' })
+    const row = await p.find({ type: 'Text', text: /one of six/ })
     await p.unmount()
-    expect(String(done.props.label)).toBe('▾ Finished · 4')
+    expect(tab?.text).toBe('Finished (4)')
+    expect(row).toBeDefined()
   })
 
   test('archiving a newer row passes over the Incomplete one: it stays in the live list', async ($, on) => {
@@ -195,12 +204,12 @@ describe('Incomplete rows in an Archive group', () => {
     engine(on, { store: { historyShown: true, history: [entry] } })
     await start($)
     await settle()
-    const d = await desktop($)
+    const d = await desktop($, 'archive')
     const half = d.source('half done')
     expect(half).toContain('>Incomplete</tspan>')
     expect(half).not.toContain(TICK)
     expect(d.source('all done')).toContain(TICK)
-    const t = await terminal($)
+    const t = await terminal($, 'archive')
     expect(t.text).toMatch(/Incomplete · 1\/6/)
     expect(t.texts.some((x: any) => x.text === '◐')).toBe(true)
   })

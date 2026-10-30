@@ -3,6 +3,8 @@ import { describe, expect, test } from 'claude-code/testing'
 import { addEntry, groupLine, isWorthKeeping, keyOf, parseArchive, planEntry, rotate, snapshot } from '../hooks/archive'
 import type { AgentRun, ArchiveEntry, Flow, TaskPlan } from '../types'
 import { fakeFs } from './fake-fs'
+import { acrossTabs, showTab } from './tabs'
+import type { Tab } from './tabs'
 
 const MIN = 60_000
 const HOUR = 60 * MIN
@@ -117,17 +119,17 @@ describe('plan entries, pure', () => {
     expect(got!.plan).toEqual(e.plan)
   })
 
-  test('groupLine for a plan: the date then N steps (1 step), narrowing like a flow’s', () => {
+  test('groupLine for a plan: the date then its step count in brackets, narrowing like a flow’s', () => {
     const e = planEntry(donePlan({ startedAt: Date.UTC(2026, 9, 26, 9, 0), endedAt: Date.UTC(2026, 9, 26, 10, 42) }), PROJECT, NOW)
-    expect(groupLine(e, 40, 'UTC')).toBe('Oct 26, 2026 · 10:42 · 3 steps')
-    expect(groupLine(e, 24, 'UTC')).toBe('Oct 26, 2026 · 3 steps')
-    expect(groupLine(e, 20, 'UTC')).toBe('Oct 26, 2026 · 3')
-    expect(groupLine(e, 5, 'UTC')).toBe('Oct 26, 2026 · 3')
+    expect(groupLine(e, 40, 'UTC')).toBe('Oct 26, 2026 · 10:42 (3)')
+    expect(groupLine(e, 24, 'UTC')).toBe('Oct 26, 2026 · 10:42 (3)')
+    expect(groupLine(e, 20, 'UTC')).toBe('Oct 26, 2026 (3)')
+    expect(groupLine(e, 5, 'UTC')).toBe('Oct 26, 2026 (3)')
     const one = planEntry(donePlan({ stages: [{ name: 'S', steps: [{ title: 'a', status: 'done', substeps: [] }] }], startedAt: Date.UTC(2026, 9, 26, 9, 0), endedAt: Date.UTC(2026, 9, 26, 10, 42) }), PROJECT, NOW)
-    expect(groupLine(one, 40, 'UTC')).toBe('Oct 26, 2026 · 10:42 · 1 step')
-    expect(groupLine(one, 24, 'UTC')).toBe('Oct 26, 2026 · 1 step')
-    // a flow entry is as before
-    expect(groupLine(flowEntry(1, { endedAt: Date.UTC(2026, 9, 26, 10, 42), startedAt: Date.UTC(2026, 9, 26, 9, 0) }), 40, 'UTC')).toBe('Oct 26, 2026 · 10:42 · 1 item')
+    expect(groupLine(one, 40, 'UTC')).toBe('Oct 26, 2026 · 10:42 (1)')
+    expect(groupLine(one, 20, 'UTC')).toBe('Oct 26, 2026 (1)')
+    // a flow entry counts its rows the same way
+    expect(groupLine(flowEntry(1, { endedAt: Date.UTC(2026, 9, 26, 10, 42), startedAt: Date.UTC(2026, 9, 26, 9, 0) }), 40, 'UTC')).toBe('Oct 26, 2026 · 10:42 (1)')
   })
 
   test('addEntry puts a plan where it belongs by its end; a flow still goes first; a second save replaces the first', () => {
@@ -183,7 +185,7 @@ function engine(on: any, opts: Opts = {}) {
 
 const start = ($: any) => $.session.start({ surface: 'terminal', isInteractive: true, cwd: PROJECT } as any)
 const settle = () => new Promise(done => (globalThis as any).setTimeout(done, 30))
-const pane = ($: any, surface: 'terminal' | 'desktop', bodyColumns = 80) =>
+const mount = ($: any, surface: 'terminal' | 'desktop', bodyColumns = 80) =>
   $.ui.mount({ plugin: 'flowdeck', surface, component: 'Pane', requestId: 'flowdeck-agents', props: { bodyColumns } } as any)
 const plan = async ($: any, input: Record<string, unknown>) => String((await $.tool.call({ tool: 'mcp__flowdeck__plan', ...input } as any)).result)
 const progress = ($: any, input: Record<string, unknown>) => $.tool.call({ tool: 'mcp__flowdeck__progress', ...input } as any)
@@ -200,11 +202,10 @@ const create = ($: any, id = 'beta', title = 'Beta cleanup') => plan($, { id, ti
 const finish = ($: any, id = 'beta') => plan($, { id, done: ['write tests', 'wire tool', 'commit'] })
 const HEAD = /^Beta cleanup {2}Done$/
 
-const terminal = async ($: any, bodyColumns = 80) => {
-  const p = await pane($, 'terminal', bodyColumns)
-  const texts = await p.findAll({ type: 'Text' })
-  const buttons = await p.findAll({ type: 'Button' })
-  await p.unmount()
+// What the named tabs draw (the Archive tab unless named), one after another; the tabs' own Buttons left out.
+const terminal = async ($: any, bodyColumns = 80, tabs: Tab[] = ['archive']) => {
+  const texts = await acrossTabs($, () => mount($, 'terminal', bodyColumns), p => p.findAll({ type: 'Text' }), tabs)
+  const buttons = (await acrossTabs($, () => mount($, 'terminal', bodyColumns), p => p.findAll({ type: 'Button' }), tabs)).filter((b: any) => !/^tab-/.test(String(b.props.key)))
   const keys = buttons.map((b: any) => String(b.props.key))
   return {
     text: texts.map((t: any) => t.text).join('\n'),
@@ -215,15 +216,14 @@ const terminal = async ($: any, bodyColumns = 80) => {
     groups: keys.filter((k: string) => /^archive-k[a-z0-9]+$/.test(k)),
   }
 }
-const desktop = async ($: any) => {
-  const p = await pane($, 'desktop')
-  const svgs = await p.findAll({ type: 'Svg' })
-  const buttons = await p.findAll({ type: 'Button' })
-  await p.unmount()
+const desktop = async ($: any, tabs: Tab[] = ['archive']) => {
+  const svgs = await acrossTabs($, () => mount($, 'desktop'), p => p.findAll({ type: 'Svg' }), tabs)
+  const buttons = await acrossTabs($, () => mount($, 'desktop'), p => p.findAll({ type: 'Button' }), tabs)
   return { svgs, alts: svgs.map((s: any) => String(s.props.alt ?? '')), keys: buttons.map((b: any) => String(b.props.key)) }
 }
-const press = async ($: any, key: string) => {
-  const p = await pane($, 'terminal')
+const press = async ($: any, key: string, tab: Tab = 'archive') => {
+  await showTab($, tab)
+  const p = await mount($, 'terminal')
   await p.press({ key })
   await settle()
   await p.unmount()
@@ -245,15 +245,15 @@ describe('finished plans in the Archive', () => {
     expect([e.done, e.total, e.tasks.length, e.cost, e.tokens]).toEqual([3, 3, 0, 0, 0])
     expect(e.plan!.state).toBe('done')
     expect(e.plan!.stages.flatMap(s => s.steps.map(st => st.status))).toEqual(['done', 'done', 'done'])
-    const t = await terminal($)
-    expect(t.group(e.id).text).toMatch(/^▾ [A-Z][a-z]{2} \d{1,2}, \d{4} · \d{2}:\d{2} · 3 steps$/)
+    const t = await terminal($, 80, ['plans', 'archive'])
+    expect(t.group(e.id).text).toMatch(/^▾ [A-Z][a-z]{2} \d{1,2}, \d{4} · \d{2}:\d{2} \(3\)$/)
     expect(t.group(e.id).text).not.toMatch(/Beta/)
-    // the Plans section and the Archive group each draw it
+    // the Plans tab and the Archive group each draw it
     expect(t.texts.filter(x => HEAD.test(x))).toHaveLength(2)
     expect(t.texts.filter(x => /100%$/.test(x))).toHaveLength(2)
     // no tiles for a plan group
     expect(t.text).not.toMatch(/≈\$0\.00/)
-    const d = await desktop($)
+    const d = await desktop($, ['plans', 'archive'])
     expect(d.alts.filter(a => a === 'Beta cleanup: Done, 100%')).toHaveLength(2)
   })
 
@@ -308,7 +308,7 @@ describe('finished plans in the Archive', () => {
     expect(list).toHaveLength(1)
     expect(list[0]!.id).toBe(first.id)
     expect(list[0]!.endedAt).toBe(NOW + 20 * MIN)
-    await press($, 'plans-clear')
+    await press($, 'plans-clear', 'plans')
     expect(planEntries(store)).toHaveLength(1)
   })
 
@@ -331,17 +331,17 @@ describe('finished plans in the Archive', () => {
     await create($)
     await create($, 'alpha', 'Alpha rollout')
     await finish($)
-    await press($, 'plans-clear')
+    await press($, 'plans-clear', 'plans')
     expect(saved(store).map(x => x.id)).toEqual(['alpha'])
     expect(planEntries(store)).toHaveLength(1)
-    const t = await terminal($)
+    const t = await terminal($, 80, ['plans', 'archive'])
     expect(t.keys).not.toContain('plans-clear')
     expect(t.texts.filter(x => HEAD.test(x))).toHaveLength(1)
     expect(t.group(planEntries(store)[0]!.id)).toBeDefined()
     // folded, the group keeps its fold line only
     await press($, `archive-${keyOf(planEntries(store)[0]!.id)}`)
-    const folded = await terminal($)
-    expect(folded.group(planEntries(store)[0]!.id).text).toMatch(/^▸ .* · 3 steps$/)
+    const folded = await terminal($, 80, ['plans', 'archive'])
+    expect(folded.group(planEntries(store)[0]!.id).text).toMatch(/^▸ .* \(3\)$/)
     expect(folded.texts.filter(x => HEAD.test(x))).toHaveLength(0)
   })
 
@@ -351,9 +351,9 @@ describe('finished plans in the Archive', () => {
     await create($)
     expect(await finish($)).toMatch(/^beta: 3\/3, done/)
     expect(store.history).toBeUndefined()
-    await press($, 'plans-clear')
+    await press($, 'plans-clear', 'plans')
     expect(saved(store).map(x => x.id)).toEqual(['beta'])
-    const t = await terminal($)
+    const t = await terminal($, 80, ['plans'])
     expect(t.keys).toContain('plans-clear')
     expect(t.texts.filter(x => HEAD.test(x)).length).toBeGreaterThanOrEqual(1)
   })
@@ -366,7 +366,7 @@ describe('finished plans in the Archive', () => {
     await finish($)
     expect(store.history).toBeUndefined()
     opts.failHistory = false
-    await press($, 'plans-clear')
+    await press($, 'plans-clear', 'plans')
     expect(saved(store)).toEqual([])
     expect(planEntries(store)).toHaveLength(1)
   })
@@ -390,14 +390,14 @@ describe('finished plans in the Archive', () => {
     expect(history(store).map(e => e.id).indexOf(id)).toBe(2)
   })
 
-  test('the fold line says 1 step, and narrows with the panel', async ($, on) => {
+  test('the fold line counts 1 step as (1), and narrows with the panel', async ($, on) => {
     const { store } = engine(on)
     await start($)
     await plan($, { id: 'solo', title: 'Solo', stages: [{ name: 'S', steps: [{ title: 'a' }] }] })
     await plan($, { id: 'solo', done: ['a'] })
     const id = planEntries(store)[0]!.id
-    expect((await terminal($, 40)).group(id).text).toMatch(/^▾ .* · \d{2}:\d{2} · 1 step$/)
-    expect((await terminal($, 24)).group(id).text).toMatch(/^▾ [A-Z][a-z]{2} \d{1,2}, \d{4} · 1 step$/)
+    expect((await terminal($, 40)).group(id).text).toMatch(/^▾ .* · \d{2}:\d{2} \(1\)$/)
+    expect((await terminal($, 24)).group(id).text).toMatch(/^▾ [A-Z][a-z]{2} \d{1,2}, \d{4} \(1\)$/)
   })
 
   test('old entries without a plan are drawn as before', async ($, on) => {
@@ -405,20 +405,21 @@ describe('finished plans in the Archive', () => {
     const { store } = engine(on, { store: { historyShown: true, history: [old] } })
     await start($)
     const t = await terminal($)
-    expect(t.group('old').text).toMatch(/^▾ .* · 2 items$/)
+    expect(t.group('old').text).toMatch(/^▾ .* \(2\)$/)
     expect(t.text).toMatch(/✓ a \(light\)/)
     expect(t.text).toMatch(/○ b \(light\)/)
     expect(parseArchive(store.history)).toEqual([old as ArchiveEntry])
   })
 
-  test('the live panel is unchanged: the open flow keeps its Planned block, plans their section', async ($, on) => {
+  test('the live panel: the Active tab lists the open flow’s queued tasks, the Plans tab the plans', async ($, on) => {
     engine(on)
     await start($)
     await progress($, { title: 'Live', total: 3, done: 0, phase: 'delegate', tasks: [{ title: 'one', tier: 'light' }, { title: 'two', tier: 'light' }, { title: 'three', tier: 'light' }] })
     await create($)
-    const t = await terminal($)
-    expect(t.text).toMatch(/Planned · 3/)
-    expect(t.text).toMatch(/Beta cleanup {2}Running/)
+    const t = await terminal($, 80, ['active'])
+    for (const row of [/1\. one ◷/, /2\. two ◷/, /3\. three ◷/]) expect(t.text).toMatch(row)
+    expect(t.text).not.toMatch(/Planned ·|Beta cleanup/)
+    expect((await terminal($, 80, ['plans'])).text).toMatch(/Beta cleanup {2}Running/)
   })
 })
 
