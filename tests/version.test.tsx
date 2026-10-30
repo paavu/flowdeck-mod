@@ -39,7 +39,7 @@ describe('the running version', () => {
   })
 
   for (const surface of ['desktop', 'terminal'] as const) {
-    test(`a dim v<version> at the far end of the top row, after Context and Usage (${surface})`, async ($, on) => {
+    test(`a dim v<version> at the far end of the top row, after Context, Usage and Band (${surface})`, async ($, on) => {
       engine(on)
       await $.session.start({ surface: 'terminal', isInteractive: true, cwd: '/work/app' } as any)
       const p = await pane($, surface)
@@ -47,13 +47,13 @@ describe('the running version', () => {
       await p.unmount()
       const row = walk(root).find(n => n?.props?.key === 'top-toggles')
       const kids: any[] = row.children
-      expect(kids.findIndex(c => c?.props?.key === 'context')).toBe(0)
-      expect(kids.findIndex(c => c?.props?.key === 'usage')).toBe(1)
-      expect(kids[2]?.props?.flexGrow).toBe(1)
-      const label = walk(kids[3]).find(n => n?.type === 'Text')
+      const buttons: any[] = kids[0]?.children ?? []
+      expect(buttons.map(c => c?.props?.key)).toEqual(['context', 'usage', 'band'])
+      expect(kids[1]?.props?.flexGrow).toBe(1)
+      const label = walk(kids[2]).find(n => n?.type === 'Text')
       expect(textOf(label)).toBe(`v${VERSION}`)
       expect(label.props.dimColor).toBe(true)
-      expect(kids[3]?.props?.flexShrink).toBe(0)
+      expect(kids[2]?.props?.flexShrink).toBe(0)
     })
   }
 

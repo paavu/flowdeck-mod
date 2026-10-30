@@ -4,7 +4,7 @@ import type { Elements, EngineInterface, Register, RenderChildren } from 'claude
 import type { AgentRun, ArchiveDetail, ArchiveEntry, ArchiveLists, ArchiveRecord, Flow, Panel, PanelTab, Phase, PlannedTask, PlanStage, Reading, Samples, TaskPlan, UsageWindow } from '../types'
 import { derive, finishItems, hasItemOps, ITEM_H, itemAlt, itemLine, itemsOf, itemSvg, noteSvg, stepItems, timedItems } from './agent-items'
 import type { StepInput } from './agent-items'
-import { agentState, HOUSEKEEPING, isComplete, isIncomplete, isLive, isSettled, markOf, progressOf, splitHead, stateText } from './agent-state'
+import { agentState, HOUSEKEEPING, isComplete, isIncomplete, isLive, isSettled, markOf, progressOf, splitHead, stateText, stepCount } from './agent-state'
 import { contextRows, contextSvg, toReading } from './context'
 import { isWorthKeeping, keyOf, planEntry, snapshot, VOLUME_MAX } from './archive'
 import { INDEX_FILE, parseIndexFile, recordOf, TRASH_DIR, TRASH_INDEX } from './archive-index'
@@ -42,7 +42,7 @@ const flowMeta = atom({ plugin: 'flowdeck', key: 'flowMeta' } as const, null as 
 const plans = atom({ plugin: 'flowdeck', key: 'plans' } as const, [] as TaskPlan[])
 // Why the band above the prompt last failed in this load, '' when it has not; the panel shows it, the band never reads it.
 const bandError = atom({ plugin: 'flowdeck', key: 'bandError' } as const, '')
-// The prompt cache (cache.ts): its facts, the card's Show/Hide choice, and the texts last shown (the band's minute tick).
+// The prompt cache (cache.ts): its facts, the card's open-or-folded choice, and the texts last shown (the band's minute tick).
 const cacheFacts = atom({ plugin: 'flowdeck', key: 'cache' } as const, null as CacheFacts | null)
 const cacheFold = atom({ plugin: 'flowdeck', key: 'cacheFold' } as const, null)
 const cacheTick = atom({ plugin: 'flowdeck', key: 'cacheTick' } as const, '')
@@ -135,14 +135,11 @@ const STRINGS = {
     cost: 'Cost',
     tokens: 'Tokens',
     time: 'Time',
-    collapse: 'Collapse',
-    expand: 'Expand',
     empty: 'No subagents yet.',
     round: 'round',
     failed: 'error',
     after: 'after',
     tokensWord: 'tokens',
-    agentsCount: 'agents',
     isRunning: 'running',
     isFinished: 'finished',
     isPlanned: 'planned',
@@ -185,14 +182,11 @@ const STRINGS = {
     cost: 'Стоимость',
     tokens: 'Токены',
     time: 'Время',
-    collapse: 'Свернуть',
-    expand: 'Развернуть',
     empty: 'Субагентов пока нет.',
     round: 'раунд',
     failed: 'ошибка',
     after: 'после',
     tokensWord: 'токенов',
-    agentsCount: 'агентов',
     isRunning: 'работает',
     isFinished: 'завершён',
     isPlanned: 'запланирована',
@@ -340,12 +334,15 @@ const merge = (prev: Flow | null, input: ProgressInput, at: number | null = null
   }
 }
 
-const label = (f: Flow): string => {
+// `isAt` (the band): while a task runs, X is where the flow is, the running task's number (done + 1, at most the total);
+// idle, the done count. The bar, percent and colour still say what is done.
+const label = (f: Flow, isAt = false): string => {
   const s = tr()
   if (f.isFinished) return s.done
   if (f.phase === 'plan') return s.plan
   if (f.phase === 'design') return s.design
-  const count = f.total ? `${f.done}/${f.total}` : `${f.running} ${s.busy}`
+  const x = isAt && f.running > 0 ? Math.min(f.total, f.done + 1) : f.done
+  const count = f.total ? `${x}/${f.total}` : `${f.running} ${s.busy}`
   return `${f.phase === 'review' ? s.review : s.tasks} ${count}`
 }
 
@@ -389,9 +386,12 @@ const fitText = (s: string, size: number, maxW: number): string => {
   return out + '…'
 }
 
-const rowSvg = (f: Flow, W: number, isWorking: boolean): string => {
+// The band's title when no task names where the flow is: never the flow's own title (named after the first request).
+const BAND_LABEL = 'FlowDeck'
+
+const rowSvg = (f: Flow, W: number, isWorking: boolean, name: string): string => {
   // The title takes what it needs, up to 40% of the row; the bar takes the rest.
-  const title = fitText(f.title, 13, Math.max(60, W * 0.4))
+  const title = fitText(name, 13, Math.max(60, W * 0.4))
   const BAR_X = Math.round(16 + textWidth(title, 13) + 12)
   const BAR_W = Math.max(60, W - BAR_X - 46 - CRAB_W)
   const color = f.isFinished ? DONE : ACCENT
@@ -423,7 +423,7 @@ const rowSvg = (f: Flow, W: number, isWorking: boolean): string => {
     if (x > fillW + 4) ticks.push(`<rect x="${x}" y="${BAR_H / 2 - 4}" width="1.5" height="8" rx="0.75"/>`)
   }
 
-  const text = label(f)
+  const text = label(f, true)
   const pillW = Math.round(18 + text.length * 6.6)
   const pillX = Math.max(0, Math.min(BAR_W - pillW, fillW - pillW))
   const percent = `${Math.round(ratio(f) * 100)}%`
@@ -593,6 +593,26 @@ const flowCounts = (f: Flow | null, list: AgentRun[]): { active: number; finishe
   return { active, finished }
 }
 
+// The band's title, where the flow is: the running task (its task's title, else the run's description without its `#n`;
+// with several running, the lowest-numbered one and ` +N` for the others), else the next ready task (else the next
+// queued one), else `FlowDeck`. Never the flow's own title.
+const bandTitle = (f: Flow, list: AgentRun[]): string => {
+  if (f.isFinished) return BAND_LABEL
+  const tasks = f.tasks ?? []
+  const links = linkRuns(tasks, list)
+  const running = list
+    .filter(isLive)
+    .map(a => {
+      const t = taskOf(tasks, links, a)
+      return { n: t?.n ?? Infinity, at: a.startedAt, title: ((t && tasks[t.n - 1]?.title) || taskTag(a.description || '').rest).trim() }
+    })
+    .filter(r => r.title)
+    .sort((x, y) => x.n - y.n || x.at - y.at)
+  if (running.length) return `${running[0]!.title}${running.length > 1 ? ` +${running.length - 1}` : ''}`
+  const queued = plannedOf(f, list)
+  return (queued.find(p => p.ready) ?? queued[0])?.title.trim() || BAND_LABEL
+}
+
 // The flow as the band draws it (label, bar, percent, ticks): its done/total/running from flowProgress.
 const shownFlow = (f: Flow, list: AgentRun[]): Flow => {
   const g = flowProgress(f, list)
@@ -752,25 +772,18 @@ const svg = (W: number, H: number, body: string): string =>
 // A plan row's alt text in the band; the band's handler has its own `percent`.
 const planAlt = (pl: TaskPlan): string => `${pl.title}: ${stateLabel(pl)}, ${percent(pl, where(pl))}%`
 
-// The pane's own title already says "Agents": the header names the flow, if any.
-const headerSvg = (W: number, title: string, t: ReturnType<typeof totals>): string => {
+// The flow's header: the three tiles only. The flow's title is never shown in the panel (it is named after the first request).
+const HEADER_H = 44
+const headerSvg = (W: number, t: ReturnType<typeof totals>): string => {
   const s = tr()
   const gap = 6
   const tw = (W - gap * 2) / 3
-  const top = title ? 28 : 0
   const tile = (i: number, k: string, v: string) =>
-    `<rect class="tile" x="${i * (tw + gap)}" y="${top}" width="${tw}" height="40" rx="8"/>
-<text class="s" x="${i * (tw + gap) + 9}" y="${top + 16}" font-family="${FONT}" font-size="11">${k}</text>
-<text class="t" x="${i * (tw + gap) + 9}" y="${top + 33}" font-family="${FONT}" font-size="15" font-weight="600" font-variant-numeric="tabular-nums">${v}</text>`
-  return svg(
-    W,
-    headerHeight(title),
-    `${title ? `<text class="t" x="0" y="15" font-family="${FONT}" font-size="14" font-weight="600">${xml(fitText(title, 14, W))}</text>` : ''}
-${tile(0, s.cost, '≈' + fmtCost(t.cost))}${tile(1, s.tokens, fmtTokens(t.tokens))}${tile(2, s.time, fmtTime(t.time))}`,
-  )
+    `<rect class="tile" x="${i * (tw + gap)}" y="0" width="${tw}" height="40" rx="8"/>
+<text class="s" x="${i * (tw + gap) + 9}" y="16" font-family="${FONT}" font-size="11">${k}</text>
+<text class="t" x="${i * (tw + gap) + 9}" y="33" font-family="${FONT}" font-size="15" font-weight="600" font-variant-numeric="tabular-nums">${v}</text>`
+  return svg(W, HEADER_H, `${tile(0, s.cost, '≈' + fmtCost(t.cost))}${tile(1, s.tokens, fmtTokens(t.tokens))}${tile(2, s.time, fmtTime(t.time))}`)
 }
-
-const headerHeight = (title: string): number => (title ? 72 : 44)
 
 // The archive icon: one single-width glyph, never an emoji.
 const ARCHIVE_ICON = '⤓'
@@ -824,7 +837,7 @@ const agentSvg = (W: number, a: AgentRun, at: number, opts: { titleOutside?: boo
   const waits = afterText(opts.after)
   const withWaits = [model, waits, ...tail]
   const meta = waits && metaW(withWaits) + (stats ? textWidth(stats, 11) + 12 : 0) <= barW ? withWaits : bare
-  const steps = a.stepTotal ? `${a.stepDone ?? 0}/${a.stepTotal}${a.stepNote ? ' · ' + a.stepNote : ''}` : ''
+  const steps = a.stepTotal ? `${stepCount(a)}${a.stepNote ? ' · ' + a.stepNote : ''}` : ''
   const stepsW = barW
   // The state leads the line in its colour; the reported steps follow it.
   const state = agentState(a)
@@ -896,27 +909,6 @@ ${done ? `<text class="s" x="${42 + textW}" y="18" text-anchor="end" font-family
 <text x="42" y="34" font-family="${FONT}" font-size="11"><tspan fill="${colorOf(tier)}">${xml(tier)}</tspan><tspan fill="${STATE_COLOR.done}">  ${xml(fitText(word, 11, Math.max(0, textW - textWidth(`${tier}  `, 11))))}</tspan></text>
 ${statusMark(W - 8, 16, 'done', colorOf(tier))}
 <line class="ln" x1="0" y1="${ACCEPTED_H - 0.5}" x2="${W}" y2="${ACCEPTED_H - 0.5}"/>`,
-  )
-}
-
-const compactSvg = (W: number, list: AgentRun[], planned: Planned[], t: ReturnType<typeof totals>): string => {
-  const icons = [
-    ...list.filter(a => a.status === 'running').map(a => ({ k: costumeOf(a.type), c: colorOf(tierOf(a.type)), s: 'running', dim: false })),
-    ...list.filter(a => a.status !== 'running').map(a => ({ k: costumeOf(a.type), c: colorOf(tierOf(a.type)), s: a.status, dim: false })),
-    ...planned.map(p => ({ k: p.tier in TIER_COLOR ? p.tier : 'other', c: colorOf(p.tier), s: 'planned', dim: true })),
-  ]
-  const fit = Math.max(1, Math.floor((W - 150) / 36))
-  const shown = icons.slice(0, fit)
-  const more = icons.length - shown.length
-  const body = shown
-    .map((ic, i) => crab(i * 36, 0, ic.k, ic.dim, ic.s === 'running') + (ic.s === 'running' ? `<circle class="live" cx="${i * 36 + 32}" cy="4" r="3" fill="${ic.c}"/>` : ''))
-    .join('')
-  const x = shown.length * 36 + (more ? 4 : 0)
-  return svg(
-    W,
-    32,
-    `${body}${more ? `<text class="s" x="${x}" y="21" font-family="${FONT}" font-size="12">+${more}</text>` : ''}
-<text class="s" x="${W}" y="21" text-anchor="end" font-family="${FONT}" font-size="12" font-variant-numeric="tabular-nums">≈${fmtCost(t.cost)} · ${fmtTokens(t.tokens)} · ${fmtTime(t.time)}</text>`,
   )
 }
 
@@ -1763,10 +1755,25 @@ function topToggleRow($: EngineInterface, ui: Pick<Elements['desktop'], 'Box' | 
       }}
     />
   )
+  const toggleBand = (
+    <Button
+      key="band"
+      label={`${p.isBandHidden ? '▸' : '▾'} Band`}
+      plain
+      onPress={async () => {
+        const hidden = !p.isBandHidden
+        await updatePanel($, prev => ({ ...prev, isBandHidden: hidden }))
+      }}
+    />
+  )
+  // One line, never wrapped: the buttons keep their width and only the spacer gives way.
   return (
-    <Box key="top-toggles" flexDirection="row" gap={1}>
-      {toggleContext}
-      {toggleUsage}
+    <Box key="top-toggles" flexDirection="row" flexWrap="nowrap" gap={1}>
+      <Box flexDirection="row" flexShrink={0} gap={1}>
+        {toggleContext}
+        {toggleUsage}
+        {toggleBand}
+      </Box>
       <Box flexGrow={1} />
       <Box flexShrink={0}>
         <Text key="version" dimColor>{`v${VERSION}`}</Text>
@@ -1778,9 +1785,13 @@ function topToggleRow($: EngineInterface, ui: Pick<Elements['desktop'], 'Box' | 
 const TABS: readonly PanelTab[] = ['active', 'finished', 'plans', 'archive', 'trash']
 const TAB_LABEL: Record<PanelTab, string> = { active: 'Active', finished: 'Finished', plans: 'Plans', archive: 'Archive', trash: 'Trash' }
 
-// The flowdeck group's tabs, one list shown at a time, each with its count (left out when it could not be read), then the
-// Band button. The selected tab is bold in the accent and underlined; pressing it changes nothing.
-function tabRow($: EngineInterface, ui: Pick<Elements['desktop'], 'Box' | 'Text' | 'Button'>, p: Panel, counts: Record<PanelTab, number | null>): RenderChildren {
+// The flowdeck group's tabs, one list shown at a time, each with its count (left out when it could not be read). The
+// selected tab is bold in the accent and underlined; pressing it changes nothing.
+// Two spaces between tabs: the terminal draws a plain Button as its bare label, so 2 columns; a native (desktop) button
+// pads its own label, which is about that much already, so no gap is added there.
+const tabGap = (surface: string): number => (surface === 'terminal' ? 2 : 0)
+
+function tabRow($: EngineInterface, ui: Pick<Elements['desktop'], 'Box' | 'Text' | 'Button'>, p: Panel, counts: Record<PanelTab, number | null>, gap: number): RenderChildren {
   const { Box, Text, Button } = ui
   const tabs = TABS.map(tab => {
     const n = counts[tab]
@@ -1799,23 +1810,9 @@ function tabRow($: EngineInterface, ui: Pick<Elements['desktop'], 'Box' | 'Text'
       <Button key={`tab-${tab}`} label={text} plain dimColor onPress={select} />
     )
   })
-  const toggleBand = (
-    <Button
-      key="band"
-      label={`${p.isBandHidden ? '▸' : '▾'} Band`}
-      plain
-      dimColor
-      onPress={async () => {
-        const hidden = !p.isBandHidden
-        await updatePanel($, prev => ({ ...prev, isBandHidden: hidden }))
-      }}
-    />
-  )
   return (
-    <Box key="tabs" flexDirection="row" flexWrap="wrap" columnGap={2}>
+    <Box key="tabs" flexDirection="row" flexWrap="wrap" columnGap={gap}>
       {tabs}
-      <Box flexGrow={1} />
-      {toggleBand}
     </Box>
   )
 }
@@ -2608,10 +2605,7 @@ export const register: Register = (on, options) => {
           <Svg key={`${kp}accepted-${pl.n}`} source={acceptedSvg(W, pl, acceptedDone(pl))} alt={`${pl.n}. ${pl.title}: ${s.acceptedRow} · ${s.noRun}`} width={W} height={ACCEPTED_H} />
         )
         return {
-          header: [
-            <Svg source={headerSvg(W, v.title, v.t)} alt={v.title ? `${v.title}: ${viewSummary}` : viewSummary} width={W} height={headerHeight(v.title)} />,
-            v.controls,
-          ],
+          header: <Svg source={headerSvg(W, v.t)} alt={viewSummary} width={W} height={HEADER_H} />,
           body: () =>
             listOf({
               agent: agentRow,
@@ -2626,7 +2620,7 @@ export const register: Register = (on, options) => {
         const ctx = ctxOf(a)
         const progress = progressOf(a)
         const model = a.effort ? `${modelName(a.model)} · ${a.effort}` : modelName(a.model)
-        const steps = a.stepTotal ? `${a.stepDone ?? 0}/${a.stepTotal}${a.stepNote ? ' ' + a.stepNote : ''}` : ''
+        const steps = a.stepTotal ? `${stepCount(a)}${a.stepNote ? ' ' + a.stepNote : ''}` : ''
         const tierWord = tier === 'other' ? a.type : tier
         const round = a.round > 1 ? ` · ${s.round} ${a.round}` : ''
         const bareLine = `  ${tierWord} · ${model}${round}`
@@ -2749,19 +2743,11 @@ export const register: Register = (on, options) => {
         )
       }
       return {
-        header: [
-          (v.title || v.rows !== 'all') && (
-            <Box flexDirection="row" justifyContent="space-between">
-              <Text bold wrap="truncate-end">
-                {v.title}
-              </Text>
-              {v.controls}
-            </Box>
-          ),
+        header: (
           <Text dimColor>
             ≈{fmtCost(v.t.cost)} · {fmtTokens(v.t.tokens)} {s.tokensWord} · {fmtTime(v.t.time)}
-          </Text>,
-        ],
+          </Text>
+        ),
         body: () => listOf({ agent: a => row(a), accepted: acceptedLine, planned: plannedLine }),
       }
     }
@@ -2972,81 +2958,38 @@ export const register: Register = (on, options) => {
       })
     }
 
-    // The Active or Finished tab: the flow's header, then its one list. Without a flow or a run only the list's empty line.
-    // `top` is the compact desktop strip above the buttons, `main` the rest.
-    const drawFlow = async (rows: 'active' | 'finished'): Promise<{ top: RenderChildren; main: RenderChildren }> => {
+    // The Active or Finished tab: the flow's header (its totals; never its title), then its one list, always in full.
+    // Without a flow or a run only the list's empty line.
+    const drawFlow = async (rows: 'active' | 'finished'): Promise<RenderChildren> => {
       const list = await readAgents($)
       const f = await readFlow($)
-      if (!f && list.length === 0) return { top: null, main: <Text dimColor>{rows === 'active' ? s.nothingQueued : s.noFinished}</Text> }
+      if (!f && list.length === 0) return <Text dimColor>{rows === 'active' ? s.nothingQueued : s.noFinished}</Text>
       const meta = await readMeta($)
       const at = Math.max(await readNow($), ...list.map(a => a.startedAt), 0)
-      const running = list.filter(isLive).reverse()
-      const finished = list.filter(a => !isLive(a)).reverse()
       const planned = plannedOf(f, list)
       const t = totals(list, at)
-      // The pane's title says "Agents"; inside, only the flow's own name.
-      const title = f && !f.isFinished ? f.title : ''
-      const toggleCompact = (
-        <Button
-          key="compact"
-          label={p.isCompact ? s.expand : s.collapse}
-          plain
-          onPress={() => updatePanel($, prev => ({ ...prev, isCompact: !prev.isCompact }))}
-        />
-      )
-      // A flow finishes by itself (or by `finished: true`): there is no Finish button.
-      const toggles = toggleCompact
-      const summary = `≈${fmtCost(t.cost)}, ${fmtTokens(t.tokens)} ${s.tokensWord}, ${fmtTime(t.time)}`
-      // Only an open flow's own finished rows, and not in the compact panel.
-      const archivableIds = new Set(f && !f.isFinished && !p.isCompact ? archivable(list, meta).map(a => a.id) : [])
-      const live = (): ReturnType<typeof flowView> =>
-        flowView({
-          kp: '',
-          fp: '',
-          title,
-          list,
-          tasks: f?.tasks ?? [],
-          accepted: f ? acceptedOf(f) : [],
-          acceptedAt: f?.acceptedAt,
-          planned,
-          at,
-          t,
-          rows,
-          controls: toggles,
-          archive: { can: a => archivableIds.has(a.id), press: a => pressArchive($, a.id) },
-        })
-      if (Svg) {
-        if (p.isCompact) {
-          return { top: <Svg source={compactSvg(W, list, planned, t)} alt={`${list.length} ${s.agentsCount}, ${summary}`} width={W} height={32} />, main: toggles }
-        }
-        const view = live()
-        return { top: null, main: [view.header, view.body()] }
-      }
-      const view = live()
-      return {
-        top: null,
-        main: [
-          view.header,
-          p.isCompact ? (
-            <Text wrap="truncate-end">
-              {[...running, ...finished].map(a => (
-                <Text key={a.id} color={colorOf(tierOf(a.type))}>
-                  {STATUS_GLYPH[markOf(a)]}{' '}
-                </Text>
-              ))}
-              {planned.map(pl => (
-                <Text key={`plan-${pl.n}`} dimColor>
-                  ◷{' '}
-                </Text>
-              ))}
-            </Text>
-          ) : (
-            <Box flexDirection="column" marginTop={1}>
-              {view.body()}
-            </Box>
-          ),
-        ],
-      }
+      // Only an open flow's own finished rows.
+      const archivableIds = new Set(f && !f.isFinished ? archivable(list, meta).map(a => a.id) : [])
+      const view = flowView({
+        kp: '',
+        fp: '',
+        list,
+        tasks: f?.tasks ?? [],
+        accepted: f ? acceptedOf(f) : [],
+        acceptedAt: f?.acceptedAt,
+        planned,
+        at,
+        t,
+        rows,
+        archive: { can: a => archivableIds.has(a.id), press: a => pressArchive($, a.id) },
+      })
+      if (Svg) return [view.header, view.body()]
+      return [
+        view.header,
+        <Box flexDirection="column" marginTop={1}>
+          {view.body()}
+        </Box>,
+      ]
     }
     // The flowdeck group: the tabs with their counts, then the selected tab's list alone. Each count is read on its own,
     // so one that fails only leaves its number out.
@@ -3061,38 +3004,18 @@ export const register: Register = (on, options) => {
       archive: await readLists($).then(l => l.records.length, () => null),
       trash: await readLists($).then(l => l.trash.length, () => null),
     }
-    const tabs = await safe('Tabs', () => tabRow($, { Box, Text, Button }, p, counts))
-    // The compact desktop strip stays above the top buttons whatever tab is shown.
+    const tabs = await safe('Tabs', () => tabRow($, { Box, Text, Button }, p, counts, tabGap(e.surface)))
     const isFlowTab = p.tab === 'active' || p.tab === 'finished'
-    let flowPart: { top: RenderChildren; main: RenderChildren } = { top: null, main: null }
-    if (isFlowTab || (Svg && p.isCompact)) {
-      try {
-        flowPart = await drawFlow(p.tab === 'finished' ? 'finished' : 'active')
-      } catch {
-        flowPart = { top: null, main: failed(TAB_LABEL[p.tab]) }
-      }
-    }
-    const shown = isFlowTab ? flowPart.main : await safe(TAB_LABEL[p.tab], p.tab === 'plans' ? plansSection : archivePart(p.tab === 'trash' ? 'trash' : 'archive'))
+    const shown = isFlowTab
+      ? await safe(TAB_LABEL[p.tab], () => drawFlow(p.tab === 'finished' ? 'finished' : 'active'))
+      : await safe(TAB_LABEL[p.tab], p.tab === 'plans' ? plansSection : archivePart(p.tab === 'trash' ? 'trash' : 'archive'))
     const group = (
-      <Box key="flowdeck-group" flexDirection="column" marginTop={1} gap={Svg && p.isCompact ? 1 : 0}>
+      <Box key="flowdeck-group" flexDirection="column" marginTop={1}>
         {tabs}
         {shown}
       </Box>
     )
 
-    if (Svg && p.isCompact) {
-      return (
-        <Box flexDirection="column" gap={1}>
-          {flowPart.top}
-          {topToggles}
-          {bandLine}
-          {liveLine}
-          {contextSection}
-          {usageSection}
-          {group}
-        </Box>
-      )
-    }
     return (
       <Box flexDirection="column">
         {topToggles}
@@ -3110,7 +3033,7 @@ export const register: Register = (on, options) => {
     return (
       <Box flexDirection="column">
         {topToggleRow($, { Box, Text, Button }, p)}
-        {tabRow($, { Box, Text, Button }, p, { active: null, finished: null, plans: null, archive: null, trash: null })}
+        {tabRow($, { Box, Text, Button }, p, { active: null, finished: null, plans: null, archive: null, trash: null }, tabGap(e.surface))}
         <Text dimColor>flowdeck could not draw this panel</Text>
       </Box>
     )
@@ -3167,6 +3090,7 @@ export const register: Register = (on, options) => {
     const isWorking = list.some(isLive)
     // X/Y, the bar and the percent come from the rows the panel's tabs count (flowProgress).
     const g = shownFlow(f, list)
+    const title = bandTitle(f, list)
     const crewButton = (
       <Button key="flowdeck-agents" label={`×${crew}`} plain onPress={() => void togglePane($)} />
     )
@@ -3193,7 +3117,7 @@ export const register: Register = (on, options) => {
       return (
         <Box flexDirection="column">
           <Box flexDirection="row" alignItems="center" gap={1} flexShrink={1} minWidth={0} overflow="hidden">
-            <Svg source={rowSvg(g, width, isWorking)} alt={`${g.title}: ${label(g)}, ${percent}`} width={width} height={H} />
+            <Svg source={rowSvg(g, width, isWorking, title)} alt={`${title}: ${label(g, true)}, ${percent}`} width={width} height={H} />
             {cache?.row ?? null}
             {crewButton}
             {dismiss}
@@ -3206,17 +3130,17 @@ export const register: Register = (on, options) => {
     }
 
     const cols = e.props.bodyColumns
-    const titleW = Math.max(8, Math.min(30, f.title.length + 2, Math.floor(cols / 3)))
+    const titleW = Math.max(8, Math.min(30, title.length + 2, Math.floor(cols / 3)))
     const width = Math.max(6, Math.min(40, cols - titleW - 32 - (cache?.size ?? 0)))
     return (
       <Box flexDirection="column">
       <Box flexDirection="row" gap={2} flexShrink={1} minWidth={0} overflow="hidden">
         <Box width={titleW} flexShrink={0}>
           <Text color={f.isFinished ? DONE : ACCENT}>● </Text>
-          <Text wrap="truncate-end">{f.title}</Text>
+          <Text wrap="truncate-end">{title}</Text>
         </Box>
         <Text color={f.isFinished ? DONE : ACCENT}>{barText(g, width)}</Text>
-        <Text bold>{label(g)}</Text>
+        <Text bold>{label(g, true)}</Text>
         <Text dimColor>{percent}</Text>
         {cache ? (
           <Box key="flowdeck-cache" flexDirection="row" gap={1} flexShrink={0}>

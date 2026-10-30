@@ -295,22 +295,17 @@ describe('archive section in the panel', () => {
     await p.unmount()
   })
 
-  test('the archive shows in the compact panel too', async ($, on) => {
+  test('the archive shows with a flow running, and no panel has a Collapse button', async ($, on) => {
     engine(on, { store: { historyShown: true, history: [entry(1)] } })
     await start($)
     await settle()
-    await plan($) // Collapse belongs to the flow block
+    await plan($)
     for (const surface of ['terminal', 'desktop'] as const) {
       let p = await pane($, surface, 80, 'active')
-      await p.press({ key: 'compact' })
-      await settle()
+      expect(await p.find({ type: 'Button', key: 'compact' })).toBeUndefined()
       await p.unmount()
       p = await pane($, surface)
       expect(await p.find({ type: 'Button', key: `archive-${keyOf('e1')}` })).toBeDefined()
-      await p.unmount()
-      p = await pane($, surface, 80, 'active')
-      await p.press({ key: 'compact' })
-      await settle()
       await p.unmount()
     }
   })

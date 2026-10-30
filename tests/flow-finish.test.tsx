@@ -95,7 +95,7 @@ describe('no Finish button: a flow finishes by itself or by finished: true', () 
         const p = await $.ui.mount({ plugin: 'flowdeck', surface, component: 'Pane', requestId: 'flowdeck-agents', props: { bodyColumns: 80 } } as any)
         expect(await has(p, 'flow-finish')).toBe(false)
         expect(JSON.stringify(await p.drawn())).not.toMatch(/"Finish( flow)?"/)
-        expect(await has(p, 'compact')).toBe(true)
+        expect(await has(p, 'compact')).toBe(false) // no Collapse either
         await p.unmount()
       }
     }
@@ -165,7 +165,7 @@ describe('restart', () => {
     expect(list[0].total).toBe(2)
     expect(list[0].endedAt).toBe(NOW + 60_000)
     const text = await paneText($)
-    expect(text).toContain('New work')
+    expect(text).not.toContain('New work') // the panel never shows the flow's title; the archive below names it
     expect(text).toContain('new task')
     expect(text).not.toContain('wire it')
     clock.now = NOW + 120_000
@@ -205,17 +205,15 @@ describe('restart', () => {
     expect(text).not.toContain('write tests')
   })
 
-  test('restart without a flow just starts one, and without a title keeps the default title', async ($, on) => {
+  test('restart without a flow just starts one, and one without a title starts another (the panel names neither)', async ($, on) => {
     const { files } = engine(on)
     await start($)
     await progress($, { restart: true, title: 'Fresh', total: 1, tasks: [{ title: 'z', tier: 'light' }] })
     expect(entries(files).length).toBe(0)
-    expect(await paneText($)).toContain('Fresh')
+    expect(await paneText($)).not.toContain('Fresh')
     await progress($, { restart: true, total: 2 })
     expect(entries(files).map(e => e.title)).toEqual(['Fresh'])
-    const text = await paneText($)
-    expect(text).toContain('flowdeck')
-    expect(text).not.toContain('Fresh')
+    expect(await paneText($)).not.toContain('Fresh')
   })
 
   test('restart after the flow was finished starts a new flow and records nothing twice', async ($, on) => {
@@ -226,8 +224,10 @@ describe('restart', () => {
     expect(entries(files).length).toBe(1)
     await progress($, { restart: true, title: 'Again', total: 1, tasks: [{ title: 'z', tier: 'light' }] })
     expect(entries(files).length).toBe(1)
-    expect(await paneText($)).toContain('Again')
+    expect(await paneText($)).toContain('1. z')
     expect(await bandHas($, 'terminal', 'flowdeck-agents')).toBe(true)
+    await progress($, { finished: true })
+    expect(entries(files).map(e => e.title)).toContain('Again') // the panel does not show it; the archive names it
   })
 
   test('a failing store, fs and clock never break restart', async ($, on) => {
@@ -249,11 +249,11 @@ describe('restart', () => {
     await progress($, { add: [{ title: 'fourth', tier: 'light' }] })
     expect(entries(files).length).toBe(0)
     const text = await paneText($)
-    expect(text).toContain('Other')
+    expect(text).not.toContain('Other')
     expect(text).toContain('fourth')
     await progress($, { finished: true })
     await progress($, { finished: true })
-    expect(entries(files).length).toBe(1)
+    expect(entries(files).map(e => e.title)).toEqual(['Other'])
   })
 })
 

@@ -9,7 +9,6 @@ import { parseRecords } from './archive-index'
 export const ARCHIVE_PAGE = 50
 
 export const PANEL_DEFAULT: Panel = {
-  isCompact: false,
   isContextShown: true,
   isUsageShown: true,
   // The reset lines count down to the reset unless the user switched to the exact time (the store key `usageRemaining` wins at session start).
@@ -40,8 +39,8 @@ const strings = (v: unknown): string[] => (Array.isArray(v) ? v.filter((x): x is
 export function asPanel(v: unknown): Panel {
   const o = isObj(v) ? v : {}
   const d = PANEL_DEFAULT
+  // `isCompact` (the Collapse button, gone in 1.0.0029) is dropped like any field no longer used.
   return {
-    isCompact: bool(o.isCompact, d.isCompact),
     isContextShown: bool(o.isContextShown, d.isContextShown),
     isUsageShown: bool(o.isUsageShown, d.isUsageShown),
     isUsageRemaining: bool(o.isUsageRemaining, d.isUsageRemaining),
@@ -205,7 +204,7 @@ export const asCacheFacts = (v: unknown): CacheFacts | null => {
   return { lastAt, tokens: Math.max(0, num(v.tokens) ?? 0), window: Math.max(0, num(v.window) ?? 0), model: typeof v.model === 'string' && v.model ? v.model : null }
 }
 
-// The cache card's Show/Hide choice; anything else is no choice (the mode's default).
+// The cache card's open-or-folded choice (the chevron beside the chip); anything else is no choice (the mode's default).
 export const asCacheFold = (v: unknown): CacheFold | null =>
   isObj(v) && (v.mode === 'warm' || v.mode === 'cold') && typeof v.open === 'boolean' ? { mode: v.mode, open: v.open } : null
 

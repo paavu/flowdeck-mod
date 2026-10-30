@@ -53,7 +53,7 @@ const band = ($: any, surface: 'desktop' | 'terminal') =>
 // What the band says on both surfaces: the desktop drawing's alt and source, the terminal's label and percent.
 async function bandSays($: any) {
   const d = await band($, 'desktop')
-  const svg = (await d.findAll({ type: 'Svg' })).find((s: any) => /^Ship: /.test(String(s.props.alt)))
+  const svg = (await d.findAll({ type: 'Svg' })).find((s: any) => /: (Tasks|Done|Plan|Design|Review)\b.*%$/.test(String(s.props.alt)))
   await d.unmount()
   const t = await band($, 'terminal')
   const texts = (await t.findAll({ type: 'Text' })).map((x: any) => String(x.text))
@@ -68,7 +68,7 @@ async function tabCounts($: any) {
 }
 const expectBand = async ($: any, count: string, percent: string) => {
   const b = await bandSays($)
-  expect(b.alt).toBe(`Ship: Tasks ${count}, ${percent}`)
+  expect(b.alt.endsWith(`: Tasks ${count}, ${percent}`)).toBe(true)
   expect(b.source).toContain(`>Tasks ${count}<`)
   expect(b.source).toContain(`>${percent}<`)
   expect(b.texts).toContain(`Tasks ${count}`)
@@ -78,7 +78,7 @@ const expectBand = async ($: any, count: string, percent: string) => {
 const SIX = ['Read code', 'Wire it', 'Polish', 'Docs', 'Tests', 'Release'].map(title => ({ title, tier: 'medium' }))
 
 describe('the band counts the rows the tabs count', () => {
-  test("the owner's flow: 2 finished, 3 running, 1 ready reads 2/6 (not the orchestrator's 1/3)", async ($, on) => {
+  test("the owner's flow: 2 finished, 3 running, 1 ready reads 3/6 (where it is; not the orchestrator's 1/3)", async ($, on) => {
     engine(on)
     await start($)
     await progress($, { title: 'Ship', phase: 'delegate', tasks: SIX.map((t, i) => (i === 5 ? { ...t, after: [1] } : t)) })
@@ -87,10 +87,113 @@ describe('the band counts the rows the tabs count', () => {
     await complete($, 'w2')
     // The orchestrator's own count lags behind: one accepted, as the live panel showed `1/3`.
     await progress($, { done: 1 })
-    await expectBand($, '2/6', '33%')
+    await expectBand($, '3/6', '33%')
     expect(await tabCounts($)).toEqual({ active: 'Active (4)', finished: 'Finished (2)' })
   })
 
+  test('while a task runs X is the running task: 0 done + 1 running of 2 reads 1/2, the bar still empty', async ($, on) => {
+    engine(on)
+    await start($)
+    await progress($, { title: 'Ship', phase: 'delegate', tasks: SIX.slice(0, 2) })
+    await expectBand($, '0/2', '0%') // nothing runs: the done count
+    await spawn($, 'w1', 'Read code')
+    await expectBand($, '1/2', '0%')
+    expect((await bandSays($)).source).toContain('#8f8cf4') // not green: nothing is done
+  })
+
+  test('3 done and the 4th running of 7 reads 4/7; idle with 3 done reads 3/7; all done reads 7/7, then Done in green', async ($, on) => {
+    engine(on)
+    await start($)
+    const SEVEN = [...SIX, { title: 'Announce', tier: 'medium' }]
+    await progress($, { title: 'Ship', phase: 'delegate', tasks: SEVEN })
+    for (const [i, t] of SEVEN.slice(0, 3).entries()) {
+      await spawn($, `w${i + 1}`, t.title)
+      await complete($, `w${i + 1}`)
+    }
+    await expectBand($, '3/7', '43%')
+    await spawn($, 'w4', 'Docs')
+    await expectBand($, '4/7', '43%')
+    await complete($, 'w4')
+    for (const [i, t] of SEVEN.slice(4).entries()) {
+      await spawn($, `w${i + 5}`, t.title)
+      await complete($, `w${i + 5}`)
+    }
+    await expectBand($, '7/7', '100%')
+    // the flow finishes: Done, in green
+    await $.turn.complete({ reason: 'answer', answer: 'ok', durationMs: 1 } as any)
+    const b = await bandSays($)
+    expect(b.alt).toBe('FlowDeck: Done, 100%')
+    expect(b.source).toContain('#5fbf8f')
+  })
+})
+
+describe('the band title says where the flow is', () => {
+  // The title as each surface shows it: the desktop alt's head and drawing, the terminal's title Text.
+  const titleOf = async ($: any) => {
+    const b = await bandSays($)
+    return { alt: b.alt.replace(/: (Tasks|Done)\b.*$/, ''), source: b.source, texts: b.texts }
+  }
+
+  test('one running: its task title, never the flow title; a description without a task loses its #n', async ($, on) => {
+    engine(on)
+    await start($)
+    await progress($, { title: 'Ship', phase: 'delegate', tasks: SIX.slice(0, 3) })
+    await spawn($, 'w2', '#2 Wire it')
+    const t = await titleOf($)
+    expect(t.alt).toBe('Wire it')
+    expect(t.source).toMatch(/<text class="t" x="16"[^>]*>Wire it<\/text>/) // the title's ink, as before
+    expect(t.source).not.toContain('Ship')
+    expect(t.texts).toContain('Wire it')
+    expect(t.texts).not.toContain('Ship')
+    await complete($, 'w2')
+    await spawn($, 'x1', '#9 Look around', 'Explore') // linked to no task
+    expect((await titleOf($)).alt).toBe('Look around')
+  })
+
+  test('two running: the lowest-numbered task and +1', async ($, on) => {
+    engine(on)
+    await start($)
+    await progress($, { title: 'Ship', phase: 'delegate', tasks: SIX.slice(0, 4) })
+    await spawn($, 'w3', 'Polish')
+    await spawn($, 'w2', 'Wire it')
+    const t = await titleOf($)
+    expect(t.alt).toBe('Wire it +1')
+    expect(t.texts).toContain('Wire it +1')
+  })
+
+  test('none running with a task queued: the next ready task; all done: FlowDeck', async ($, on) => {
+    engine(on)
+    await start($)
+    await progress($, { title: 'Ship', phase: 'delegate', tasks: [{ title: 'Read code', tier: 'medium' }, { title: 'Wire it', tier: 'medium', after: [1] }, { title: 'Docs', tier: 'medium' }] })
+    expect((await titleOf($)).alt).toBe('Read code') // ready, first in plan order
+    await spawn($, 'w1', 'Read code')
+    await complete($, 'w1')
+    expect((await titleOf($)).alt).toBe('Wire it')
+    await progress($, { done: [1, 2, 3] })
+    const t = await titleOf($)
+    expect(t.alt).toBe('FlowDeck')
+    expect(t.texts).toContain('FlowDeck')
+  })
+
+  test('a long title is cut with an ellipsis on the desktop and keeps the bar its room', async ($, on) => {
+    engine(on)
+    await start($)
+    const LONG = 'Rewrite the whole archive importer so that every legacy volume is read once and never again'
+    await progress($, { title: 'Ship', phase: 'delegate', tasks: [{ title: LONG, tier: 'medium' }] })
+    await spawn($, 'w1', LONG)
+    const t = await titleOf($)
+    expect(t.alt).toBe(LONG)
+    const drawn = /<text class="t" x="16"[^>]*>([^<]*)<\/text>/.exec(t.source)?.[1] ?? ''
+    expect(drawn.endsWith('…')).toBe(true)
+    expect(LONG.startsWith(drawn.slice(0, -1))).toBe(true)
+    // the bar starts after the shown title, inside the row's first half
+    const barX = Number(/<g transform="translate\((\d+),/.exec(t.source)?.[1])
+    const W = Number(/<svg[^>]* width="(\d+)"/.exec(t.source)?.[1])
+    expect(barX).toBeLessThan(W * 0.4 + 40)
+  })
+})
+
+describe('the band counts the rows the tabs count', () => {
   test('a run linked to no task is a row of its own', async ($, on) => {
     engine(on)
     await start($)

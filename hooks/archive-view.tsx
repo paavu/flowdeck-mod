@@ -12,14 +12,13 @@ import { acceptedOf } from './tasks'
 export type Planned = PlannedTask & { n: number; ready?: boolean; doneAt?: number }
 export type Totals = { cost: number; tokens: number; time: number }
 
-// One flow as the panel draws it, live or from the archive: the header (title and the three tiles, then
-// `controls`) and, on demand, the body, one flat list of `rows`: `active` (the running rows newest first, then the planned
+// One flow as the panel draws it, live or from the archive: the header (the three tiles; never the flow's title) and, on
+// demand, the body, one flat list of `rows`: `active` (the running rows newest first, then the planned
 // tasks in plan order), `finished` (the finished rows not archived and the accepted ones, latest completion first) or
 // `all`, the archive's (every row and the accepted ones, latest completion first). `at` is the clock the rows count to.
 export type FlowView = {
   kp: string
   fp: string
-  title: string
   list: AgentRun[]
   /** The flow's tasks in plan order: a run that belongs to one shows its number and what it waits for. */
   tasks?: { title: string; tier?: string; after?: number[] }[]
@@ -32,7 +31,6 @@ export type FlowView = {
   planned: Planned[]
   at: number
   t: Totals
-  controls: RenderChildren
   /** The live flow only: which finished rows get an Archive button, and its press. */
   archive?: { can: (a: AgentRun) => boolean; press: (a: AgentRun) => unknown }
   rows: 'active' | 'finished' | 'all'
@@ -138,8 +136,6 @@ function groupBody(v: ArchiveView, rec: ArchiveRecord, key: string): RenderChild
   const view = v.flowView({
     kp,
     fp: `${groupKey(v.list, entry.id)}:`,
-    // Archived flows are all finished: the group shows no title.
-    title: '',
     list: runs,
     tasks: entry.tasks,
     accepted: acceptedOf(entry),
@@ -149,7 +145,6 @@ function groupBody(v: ArchiveView, rec: ArchiveRecord, key: string): RenderChild
     at: entry.endedAt,
     t: { cost: entry.cost, tokens: entry.tokens, time: entry.time },
     rows: 'all',
-    controls: null,
   })
   return v.Svg ? view.body() : <Box flexDirection="column" marginTop={1}>{view.body()}</Box>
 }

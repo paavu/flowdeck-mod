@@ -2,6 +2,7 @@ import { describe, expect, test } from 'claude-code/testing'
 
 import { keyOf, parseSession } from '../hooks/archive'
 import { byNewest, recordOf } from '../hooks/archive-index'
+import { asPanel } from '../hooks/shapes'
 import { fileOf } from './archive-files'
 import { showTab } from './tabs'
 import type { Tab } from './tabs'
@@ -156,7 +157,7 @@ describe('a panel held from an older flowdeck', () => {
       let p = await pane($, surface)
       await hasTop(p)
       expect(await p.find({ type: 'Button', key: 'tab-active', text: 'Active (1)' })).toBeDefined()
-      expect(await p.find({ type: 'Button', key: 'compact' })).toBeDefined()
+      expect(await p.find({ type: 'Button', key: 'compact' })).toBeUndefined() // no Collapse
       expect(await p.find({ type: 'Button', key: 'flow-finish' })).toBeUndefined() // a flow finishes by itself
       expect(await p.find({ type: 'Text', text: /wire it/ })).toBeDefined()
       expect(await p.find({ type: 'Text', text: /could not be drawn|could not draw/ })).toBeUndefined()
@@ -168,6 +169,25 @@ describe('a panel held from an older flowdeck', () => {
       expect(await p.find({ type: 'Button', key: `archive-${keyOf('e2')}` })).toBeDefined()
       expect(await p.find({ type: 'Button', key: `archive-${keyOf('e1')}` })).toBeDefined()
       expect(await p.find({ type: 'Text', text: /could not be drawn|could not draw/ })).toBeUndefined()
+      await p.unmount()
+      await showTab($, 'active')
+    }
+  })
+
+  test('a panel held collapsed (the old Collapse) draws its lists in full; the old field is dropped', async ($, on) => {
+    engine(on)
+    held(on, 'panel', { ...OLD_PANEL, isCompact: true })
+    held(on, 'flow', OLD_FLOW)
+    held(on, 'agents', OLD_AGENTS)
+    expect('isCompact' in asPanel({ ...OLD_PANEL, isCompact: true })).toBe(false)
+    await start($)
+    for (const surface of SURFACES) {
+      let p = await pane($, surface)
+      expect(await p.find({ type: 'Button', key: 'compact' })).toBeUndefined()
+      expect(await p.find({ type: 'Text', text: /wire it/ })).toBeDefined()
+      await p.unmount()
+      p = await pane($, surface, 'finished')
+      expect(await p.find({ type: 'Text', text: /write tests/ })).toBeDefined()
       await p.unmount()
       await showTab($, 'active')
     }
@@ -217,7 +237,6 @@ describe('a panel held from an older flowdeck', () => {
     ['finished tab', 'tab-finished', undefined, p => selected(p, 'Active (1)'), p => selected(p, 'Finished (1)')],
     ['plans tab', 'tab-plans', undefined, p => selected(p, 'Active (1)'), p => selected(p, 'Plans (0)')],
     ['archive tab', 'tab-archive', undefined, p => selected(p, 'Active (1)'), p => p.find({ type: 'Button', key: `archive-${keyOf('e1')}` })],
-    ['compact', 'compact', 'active', p => p.find({ type: 'Button', key: 'compact', text: /Collapse/ }), p => p.find({ type: 'Button', key: 'compact', text: /Expand/ })],
     ['agent fold', 'agent-fold-w1', 'finished', p => p.find({ type: 'Button', key: 'agent-fold-w1', text: '▸' }), p => p.find({ type: 'Button', key: 'agent-fold-w1', text: '▾' })],
     // the newest group (e1) is open by default
     ['open archive group', `archive-${keyOf('e1')}`, 'archive', p => p.find({ type: 'Button', key: `archive-${keyOf('e1')}`, text: /^▾/ }), p => p.find({ type: 'Button', key: `archive-${keyOf('e1')}`, text: /^▸/ })],
@@ -362,7 +381,7 @@ describe('the panel without a flow', () => {
     for (const surface of SURFACES) {
       let p = await pane($, surface, 'active')
       await hasTop(p)
-      expect(await p.find({ type: 'Button', key: 'compact' })).toBeDefined()
+      expect(await p.find({ type: 'Button', key: 'compact' })).toBeUndefined() // no Collapse
       expect(await p.find({ type: 'Button', key: 'flow-finish' })).toBeUndefined()
       expect(await p.find({ type: 'Text', text: /write tests/ })).toBeDefined()
       expect(await p.find({ type: 'Text', text: /no context data yet/ })).toBeDefined()

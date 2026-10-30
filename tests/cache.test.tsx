@@ -1,11 +1,12 @@
 import { describe, expect, mock, test } from 'claude-code/testing'
 
 import { coldCost, familyOf, isCardOpen, MODELS, nextCost, summaryText, toggledFold, tokText, TTL_MS, ttlText, usd, viewOf, warmCost } from '../hooks/cache'
+import { CACHE_FOLD_PX } from '../hooks/cache-view'
 import { asCacheFacts, asCacheFold, asCacheTick } from '../hooks/shapes'
 import { idleText, minutesLeft } from '../hooks/time'
 
 // The prompt cache in the band: WARM for an hour after the main thread's last request, then COLD with the next
-// message's cost; the Show/Hide card; the facts' hooks; held values from older shapes.
+// message's cost; the card the chevron beside the chip opens and folds; the facts' hooks; held values from older shapes.
 
 const NOW = Date.UTC(2026, 9, 30, 9, 0)
 const MIN = 60_000
@@ -65,16 +66,25 @@ const progress = ($: any, input: Record<string, unknown>) => $.tool.call({ tool:
 const band = ($: any, surface: 'desktop' | 'terminal', bodyColumns = 100) =>
   $.ui.mount({ plugin: 'flowdeck', surface, component: 'AbovePrompt', props: { hasSurvey: false, isWorking: false, maxRows: 20, bodyColumns } } as any)
 
-type Look = { texts: string[]; alts: string[]; svgs: string[]; buttons: { key: string; label: string }[]; json: string; widths: number[] }
+type Look = { texts: string[]; alts: string[]; svgs: string[]; buttons: { key: string; label: string }[]; json: string; widths: number[]; chip: string; isCardOpen: boolean }
 const read = async (b: any): Promise<Look> => {
   const svgEls = await b.findAll({ type: 'Svg' })
+  const buttons = (await b.findAll({ type: 'Button' })).map((x: any) => ({ key: String(x.props.key), label: String(x.props.label ?? x.text ?? '') }))
+  const json = JSON.stringify(await b.drawn())
+  const texts = (await b.findAll({ type: 'Text' })).map((t: any) => String(t.text))
+  const alts = svgEls.map((s: any) => String(s.props.alt ?? ''))
+  // The chip's words as `WARM: 42m left`: the desktop drawing's alt, or the terminal's chip texts joined.
+  const at = texts.findIndex((t: string) => /^ (WARM|COLD) $/.test(t))
+  const term = at < 0 ? '' : `${texts[at]!.trim()}:${texts[at + 1] ?? ''}${texts[at + 2] === ' · ' ? ` · ${texts[at + 3] ?? ''}` : ''}`
   return {
-    texts: (await b.findAll({ type: 'Text' })).map((t: any) => String(t.text)),
-    alts: svgEls.map((s: any) => String(s.props.alt ?? '')),
+    texts,
+    alts,
     svgs: svgEls.map((s: any) => String(s.props.source ?? '')),
     widths: svgEls.map((s: any) => Number(s.props.width)),
-    buttons: (await b.findAll({ type: 'Button' })).map((x: any) => ({ key: String(x.props.key), label: String(x.props.label ?? x.text ?? '') })),
-    json: JSON.stringify(await b.drawn()),
+    buttons,
+    json,
+    chip: alts.find((a: string) => /^(WARM|COLD):/.test(a)) ?? term,
+    isCardOpen: json.includes('"cache-card"'),
   }
 }
 const look = async ($: any, surface: 'desktop' | 'terminal', bodyColumns = 100): Promise<Look> => {
@@ -83,10 +93,8 @@ const look = async ($: any, surface: 'desktop' | 'terminal', bodyColumns = 100):
   await b.unmount()
   return l
 }
-const foldLabel = (l: Look) => l.buttons.find(x => x.key === 'cache-fold')?.label
-// The chip's words as each surface shows them: the desktop drawing's alt, the terminal's texts.
-const chipOf = (l: Look, surface: 'desktop' | 'terminal'): string =>
-  surface === 'desktop' ? (l.alts.find(a => /^(WARM|COLD):/.test(a)) ?? '') : l.texts.filter(t => /^ (WARM|COLD) $/.test(t)).length ? l.texts.join('|') : ''
+// The chip's words, the same on both surfaces ('' with no chip).
+const chipOf = (l: Look, _surface: 'desktop' | 'terminal'): string => l.chip
 const pressFold = async ($: any, surface: 'desktop' | 'terminal') => {
   const b = await band($, surface)
   await b.press({ key: 'cache-fold' })
@@ -192,12 +200,12 @@ describe('the cache facts', () => {
     ctx.tokens = 500_000 // only a main turn measures the window
     await request($, 'w1')
     await endTurn($, 'w1')
-    expect((await look($, 'desktop')).alts).toContain('WARM: 30m left')
+    expect((await look($, 'desktop')).chip).toBe('WARM: 30m left')
     expect((await look($, 'terminal')).texts).toContain(' 30m left')
     await pressFold($, 'terminal')
     expect((await look($, 'terminal')).texts.some(t => t.startsWith('idle 30m · 770k tokens cached'))).toBe(true)
     await request($)
-    expect((await look($, 'desktop')).alts).toContain('WARM: 60m left')
+    expect((await look($, 'desktop')).chip).toBe('WARM: 60m left')
     await endTurn($)
     expect((await look($, 'terminal')).texts.some(t => t.startsWith('idle 0m · 500k tokens cached'))).toBe(true)
   })
@@ -228,7 +236,7 @@ describe('the cache facts', () => {
       }
       await mainTurn($)
       const l = await look($, 'desktop')
-      expect(l.alts).toContain('WARM: 59m left'.replace('59', '60'))
+      expect(l.chip).toBe('WARM: 60m left')
       expect(l.alts.some(a => a.startsWith('Cache warm'))).toBe(false) // the card's choice went with the old cache
     })
   }
@@ -237,7 +245,7 @@ describe('the cache facts', () => {
     engine(on)
     await start($)
     await $.classic.SessionStart({ source: 'resume', seconds_since_last_response: 18 * 60, context_tokens: TOKENS, model: 'claude-opus-5-5' } as any)
-    expect((await look($, 'desktop')).alts).toContain('WARM: 42m left')
+    expect((await look($, 'desktop')).chip).toBe('WARM: 42m left')
     expect((await look($, 'terminal')).texts).toContain(' 42m left')
   })
 
@@ -245,7 +253,7 @@ describe('the cache facts', () => {
     engine(on, { model: 'claude-sonnet-5' })
     await start($)
     await $.classic.SessionStart({ source: 'fork', seconds_since_last_response: (3 * 24 + 9) * 3600, context_tokens: TOKENS } as any)
-    expect((await look($, 'desktop')).alts).toContain('COLD: 3d 9h · $3.08')
+    expect((await look($, 'desktop')).chip).toBe('COLD: 3d 9h · $3.08')
     const t = await look($, 'terminal')
     expect(t.texts).toContain(' 3d 9h')
     expect(t.texts).toContain('$3.08')
@@ -256,7 +264,7 @@ describe('the cache facts', () => {
     await start($)
     await mainTurn($)
     await $.classic.SessionStart({ source: 'startup' } as any)
-    expect((await look($, 'desktop')).alts).toContain('WARM: 60m left')
+    expect((await look($, 'desktop')).chip).toBe('WARM: 60m left')
   })
 })
 
@@ -271,10 +279,16 @@ describe('the chip in the band', () => {
       expect(l.json).not.toMatch(/×\d/)
       expect(l.texts).toContain('band below')
       expect(l.json.indexOf('band below')).toBeGreaterThan(l.json.indexOf('cache-fold'))
-      expect(foldLabel(l)).toBe('Show')
+      expect(l.isCardOpen).toBe(false)
+      expect(l.chip).toBe('WARM: 42m left')
+      // no Show/Hide: the one control is the dim fold chevron right after the chip
+      expect(l.buttons).toEqual([{ key: 'cache-fold', label: '▸' }])
+      expect(l.json).not.toMatch(/"(Show|Hide)"/)
+      expect(l.json.indexOf('cache-chip')).toBeLessThan(l.json.indexOf('cache-fold'))
       if (surface === 'desktop') {
+        // the chip drawing as in 1.0.0028: the word on a rounded rect of its hue, the summary beside it
         expect(l.alts).toEqual(['WARM: 42m left'])
-        expect(l.svgs[0]).toContain('#cc6363')
+        expect(l.svgs[0]).toMatch(/<rect x="0" y="3" width="\d+" height="16" rx="4" fill="#cc6363"\/>/)
         expect(l.svgs[0]).toContain('>WARM<')
         expect(l.svgs[0]).toContain('42m left')
       } else {
@@ -283,6 +297,22 @@ describe('the chip in the band', () => {
         expect(l.json).toContain('#cc6363')
         expect(l.json).toContain('#1c1a16')
       }
+    })
+
+    test(`the chevron beside the chip opens and folds the card (${surface})`, async ($, on) => {
+      const { clock } = engine(on)
+      await start($)
+      await mainTurn($)
+      await clock.set(NOW + 18 * MIN)
+      await pressFold($, surface)
+      let l = await look($, surface)
+      expect(l.isCardOpen).toBe(true)
+      expect(l.buttons).toEqual([{ key: 'cache-fold', label: '▾' }])
+      expect(l.chip).toBe('WARM: 42m left') // the chip itself is unchanged
+      await pressFold($, surface)
+      l = await look($, surface)
+      expect(l.isCardOpen).toBe(false)
+      expect(l.buttons).toEqual([{ key: 'cache-fold', label: '▸' }])
     })
 
     test(`with a flow the chip sits between the progress and the buttons (${surface})`, async ($, on) => {
@@ -294,15 +324,16 @@ describe('the chip in the band', () => {
       const l = await look($, surface)
       const at = (s: string) => l.json.indexOf(s)
       expect(l.json).toMatch(/×\d/)
+      expect(l.chip).toBe('COLD: 2h 45m · $6.16')
+      expect(l.json).toContain('#6aaabd')
       if (surface === 'desktop') {
-        expect(l.alts[0]).toMatch(/^Ship it: /)
+        expect(l.alts[0]).toMatch(/: Tasks 0\/1, 0%$/)
         expect(l.alts[1]).toBe('COLD: 2h 45m · $6.16')
-        expect(l.svgs[1]).toContain('#6aaabd')
+        expect(l.svgs[1]).toMatch(/rx="4" fill="#6aaabd"/)
       } else {
         expect(at('Tasks 0/1')).toBeLessThan(at(' COLD '))
         expect(l.texts).toContain(' 2h 45m')
         expect(l.texts).toContain('$6.16')
-        expect(l.json).toContain('#6aaabd')
       }
       expect(at('"cache-fold"')).toBeLessThan(at('"flowdeck-agents"'))
       expect(at('"flowdeck-agents"')).toBeLessThan(at('"flowdeck-dismiss"'))
@@ -310,17 +341,29 @@ describe('the chip in the band', () => {
     })
   }
 
-  test('the desktop row still fits: the progress drawing gives the chip and its button their room', async ($, on) => {
+  test('the desktop row still fits: the progress drawing gives the chip and its chevron their room', async ($, on) => {
     engine(on)
     await start($)
     await progress($, { title: 'Ship it', phase: 'delegate', tasks: [{ title: 'a', tier: 'light' }] })
     await mainTurn($)
-    for (const columns of [60, 100, 200]) {
+    for (const columns of [60, 100, 200, 400]) {
       const l = await look($, 'desktop', columns)
-      const slot = Math.max(180, Math.min(1600, columns * 9 - 180))
-      expect(l.widths[0]! + l.widths[1]! + 56).toBeLessThanOrEqual(Math.max(slot, 180 + l.widths[1]! + 56))
+      const slot = Math.min(1600, columns * 9 - 180)
+      expect(l.widths[0]).toBe(Math.max(180, slot - (l.widths[1]! + CACHE_FOLD_PX)))
       expect(l.json).toContain('"overflow":"hidden"') // still shrinks and clips, never pushes a neighbour
     }
+  })
+
+  test('the terminal row gives the chip, its chevron and their gaps their columns', async ($, on) => {
+    engine(on)
+    await start($)
+    await progress($, { title: 'Ship it', phase: 'delegate', tasks: [{ title: 'a', tier: 'light' }] })
+    await mainTurn($)
+    const l = await look($, 'terminal', 120)
+    const bar = l.texts.find(t => /^[█░]+$/.test(t)) ?? ''
+    const titleW = Math.max(8, Math.min(30, 'FlowDeck'.length + 2, Math.floor(120 / 3)))
+    // ` WARM `, a space, `60m left`, the gap, `▸`, the row's gap
+    expect(bar.length).toBe(Math.max(6, Math.min(40, 120 - titleW - 32 - (' WARM '.length + 1 + '60m left'.length + 1 + 1 + 2))))
   })
 
   test('the terminal row keeps its bar within the columns', async ($, on) => {
@@ -357,11 +400,11 @@ describe('Show and Hide', () => {
       const hasCard = (l: Look) => (surface === 'desktop' ? l.alts.some(a => /^Cache (warm|cold)/.test(a)) : l.texts.includes('prices are estimates'))
       let l = await look($, surface)
       expect(hasCard(l)).toBe(false)
-      expect(foldLabel(l)).toBe('Show')
+      expect(l.isCardOpen).toBe(false)
       await pressFold($, surface)
       l = await look($, surface)
       expect(hasCard(l)).toBe(true)
-      expect(foldLabel(l)).toBe('Hide')
+      expect(l.isCardOpen).toBe(true)
       if (surface === 'desktop') {
         const alt = l.alts.find(a => a.startsWith('Cache warm'))!
         expect(alt).toBe(
@@ -387,14 +430,14 @@ describe('Show and Hide', () => {
       await pressFold($, surface) // Hide while cold
       l = await look($, surface)
       expect(hasCard(l)).toBe(false)
-      expect(foldLabel(l)).toBe('Show')
+      expect(l.isCardOpen).toBe(false)
       await clock.set(NOW + 5 * TTL_MS)
       expect(hasCard(await look($, surface))).toBe(false) // the choice holds while cold
       // A request: warm again, folded by default (the earlier warm choice does not come back).
       await mainTurn($)
       l = await look($, surface)
       expect(hasCard(l)).toBe(false)
-      expect(foldLabel(l)).toBe('Show')
+      expect(l.isCardOpen).toBe(false)
       // Cold again: open again.
       await clock.set(NOW + 7 * TTL_MS)
       expect(hasCard(await look($, surface))).toBe(true)
@@ -407,7 +450,7 @@ describe('Show and Hide', () => {
     await mainTurn($, 'claude-fable-5')
     await clock.set(NOW + 2 * TTL_MS)
     const d = await look($, 'desktop')
-    expect(d.alts).toContain('COLD: 2h 0m · $15.40')
+    expect(d.chip).toBe('COLD: 2h 0m · $15.40')
     expect(d.alts.find(a => a.startsWith('Cache cold'))).toBe(
       'Cache cold: idle 2h 0m · 770k tokens cached · cold for 1h 0m. next message, re-cache (1-hour write): Fable $15.40 (you), Opus $6.16, Sonnet $3.08, Haiku $0.77. prices are estimates.',
     )
@@ -421,7 +464,7 @@ describe('Show and Hide', () => {
     await mainTurn($, 'mystery-model')
     await clock.set(NOW + 2 * TTL_MS)
     const d = await look($, 'desktop')
-    expect(d.alts).toContain('COLD: 2h 0m')
+    expect(d.chip).toBe('COLD: 2h 0m')
     expect(d.alts.find(a => a.startsWith('Cache cold'))).not.toContain('(you)')
     const t = await look($, 'terminal')
     expect(t.texts).toContain(' 2h 0m')
@@ -502,8 +545,8 @@ describe('held values', () => {
     held(on, 'panel', { isCompact: true }) // a panel from before the tabs
     await start($)
     const d = await look($, 'desktop')
-    expect(d.alts).toContain('WARM: 55m left')
-    expect(foldLabel(d)).toBe('Show')
+    expect(d.chip).toBe('WARM: 55m left')
+    expect(d.isCardOpen).toBe(false)
     const t = await look($, 'terminal')
     expect(t.texts).toContain(' 55m left')
   })

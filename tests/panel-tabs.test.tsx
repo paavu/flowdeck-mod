@@ -184,7 +184,7 @@ describe('the tabs', () => {
     }
   })
 
-  test('the tabs and the Band button form their own row below Context and Usage, which keep theirs', async ($, on) => {
+  test('the tabs form their own row below Context, Usage and Band, which keep theirs on one line', async ($, on) => {
     engine(on)
     await start($)
     for (const surface of SURFACES) {
@@ -193,13 +193,35 @@ describe('the tabs', () => {
       await p.unmount()
       const row = (key: string) => walk(root).find(n => keyOfNode(n) === key)
       const keys = (n: any) => walk(n).map(keyOfNode).filter(Boolean)
-      expect(keys(row('top-toggles'))).toEqual(['top-toggles', 'context', 'usage'])
-      expect(keys(row('tabs'))).toEqual(['tabs', 'tab-active', 'tab-finished', 'tab-plans', 'tab-archive', 'tab-trash', 'band'])
-      // the group comes after Context and Usage
+      expect(keys(row('top-toggles'))).toEqual(['top-toggles', 'context', 'usage', 'band'])
+      expect(keys(row('tabs'))).toEqual(['tabs', 'tab-active', 'tab-finished', 'tab-plans', 'tab-archive', 'tab-trash'])
+      // the group comes after Context, Usage and Band
       const order = walk(root).map(keyOfNode)
       expect(order.indexOf('top-toggles')).toBeLessThan(order.indexOf('flowdeck-group'))
-      const band = walk(row('tabs')).find(n => keyOfNode(n) === 'band')
-      expect(band?.props?.dimColor).toBe(true)
+      // Band looks like Context and Usage: plain, not dim; the top row never wraps and its buttons never shrink
+      const top = row('top-toggles')
+      const band = walk(top).find(n => keyOfNode(n) === 'band')
+      const usage = walk(top).find(n => keyOfNode(n) === 'usage')
+      expect(band?.props?.plain).toBe(usage?.props?.plain)
+      expect(band?.props?.dimColor).toBeUndefined()
+      expect(top?.props?.flexWrap).toBe('nowrap')
+      const buttons = kidsOf(top).find((n: any) => walk(n).some(k => keyOfNode(k) === 'band'))
+      expect(buttons?.props?.flexShrink).toBe(0)
+      expect(buttons?.props?.gap).toBe(top?.props?.gap)
+    }
+  })
+
+  test('two spaces between the tabs: 2 columns in the terminal, the native button padding alone on the desktop', async ($, on) => {
+    engine(on)
+    await start($)
+    for (const [surface, gap] of [['terminal', 2], ['desktop', 0]] as const) {
+      const p = await mount($, surface)
+      const tabs = walk(await p.drawn()).find(n => keyOfNode(n) === 'tabs')
+      await p.unmount()
+      expect(tabs?.props?.columnGap).toBe(gap)
+      expect(tabs?.props?.gap).toBeUndefined()
+      // the tabs alone: no spacer or other Box adds room between them
+      expect(kidsOf(tabs).every((n: any) => /^tab-/.test(keyOfNode(n)))).toBe(true)
     }
   })
 })
@@ -260,20 +282,26 @@ describe('one list at a time', () => {
     await spawn($, 'w3', 'third')
     const p = await mount($, 'terminal')
     const text = (await p.findAll({ type: 'Text' })).map((t: any) => String(t.text)).join('\n')
-    expect(await p.find({ type: 'Button', key: 'compact' })).toBeDefined()
+    expect(await p.find({ type: 'Button', key: 'compact' })).toBeUndefined() // no Collapse: the list is always in full
     expect(await p.find({ type: 'Button', key: 'flow-finish' })).toBeUndefined()
     await p.unmount()
     const at = (s: string) => text.indexOf(s)
-    expect(at('Ship')).toBeGreaterThan(-1)
-    expect(at('Ship')).toBeLessThan(at('3. third'))
+    // the header is the flow's totals; the flow's title is never shown
+    expect(text).not.toContain('Ship')
+    expect(at('tokens · ')).toBeGreaterThan(-1)
+    expect(at('tokens · ')).toBeLessThan(at('3. third'))
     expect(at('3. third')).toBeLessThan(at('1. first'))
     expect(at('1. first')).toBeLessThan(at('2. second'))
     expect(at('2. second')).toBeLessThan(at('4. fourth'))
     expect(text).not.toMatch(/Running ·|Planned ·|Finished ·/)
     const d = await mount($, 'desktop')
-    const alts = (await d.findAll({ type: 'Svg' })).map((s: any) => String(s.props.alt ?? '')).filter((a: string) => /^\d\. /.test(a))
+    const all = (await d.findAll({ type: 'Svg' })).map((s: any) => ({ alt: String(s.props.alt ?? ''), source: String(s.props.source ?? '') }))
     await d.unmount()
-    expect(alts).toEqual(['1. first: planned', '2. second: planned', '4. fourth: planned'])
+    expect(all.filter(s => /^\d\. /.test(s.alt)).map(s => s.alt)).toEqual(['1. first: planned', '2. second: planned', '4. fourth: planned'])
+    expect(all.some(s => s.alt.includes('Ship') || s.source.includes('Ship'))).toBe(false)
+    // the desktop header: the three tiles only, at the top of its drawing
+    const header = all.find(s => /^≈\$/.test(s.alt))
+    expect(header?.source).toContain('height="44"')
   })
 
   test('Finished lists the finished rows newest first under the flow header, each with its archive icon', async ($, on) => {
@@ -291,8 +319,10 @@ describe('one list at a time', () => {
       const p = await mount($, surface)
       const keys = (await p.findAll({ type: 'Button' })).map((b: any) => String(b.props.key))
       const names = (await p.findAll({ type: 'Text' })).map((t: any) => String(t.text)).filter((t: string) => /^\d\. /.test(t))
-      expect(await p.find({ type: 'Button', key: 'compact' })).toBeDefined()
+      const drawn = JSON.stringify(await p.drawn())
+      expect(await p.find({ type: 'Button', key: 'compact' })).toBeUndefined()
       expect(await p.find({ type: 'Button', key: 'flow-finish' })).toBeUndefined()
+      expect(drawn).not.toContain('Ship')
       await p.unmount()
       expect(keys.filter((k: string) => k.startsWith('archive-item-'))).toEqual(['archive-item-w2', 'archive-item-w1'])
       expect(names).toEqual(['2. two', '1. one'])

@@ -61,7 +61,7 @@ const ended = ($: any, agentId: string) => $.turn.complete({ reason: 'answer', a
 const mainTurnEnds = ($: any) => $.turn.complete({ reason: 'answer', answer: 'ok', durationMs: 1 } as any)
 const steps = ($: any, agentId: string, titles: string[]) => $.tool.call({ tool: 'mcp__flowdeck__step', agentId, steps: titles.map(title => ({ title })) } as any)
 
-// The band's flow row as the desktop says it (`<title>: <label>, <percent>`), '' with no flow.
+// The band's flow row as the desktop says it (`<where the flow is>: <label>, <percent>`: the running or next task, else FlowDeck; never the flow's title), '' with no flow.
 const bandSays = async ($: any): Promise<string> => {
   const b = await $.ui.mount({ plugin: 'flowdeck', surface: 'desktop', component: 'AbovePrompt', props: { hasSurvey: false, isWorking: false, maxRows: 20, bodyColumns: 100 } } as any)
   const alts = (await b.findAll({ type: 'Svg' })).map((s: any) => String(s.props.alt ?? ''))
@@ -83,6 +83,11 @@ const paneHas = async ($: any, surface: 'desktop' | 'terminal', re: RegExp): Pro
   return re.test(drawn)
 }
 const live = (files: Record<string, string>): any => (LIVE in files ? JSON.parse(files[LIVE]!) : undefined)
+// The shown flow's name, as flow-live.json keeps it (the panel and the band no longer show it).
+const flowName = async (files: Record<string, string>): Promise<string | undefined> => {
+  await settle()
+  return live(files)?.sessions?.s?.flow?.title
+}
 const archived = (files: Record<string, string>): any[] => sessions(files, DIR)
 
 const FLOW = (over: Record<string, unknown> = {}) => ({
@@ -131,14 +136,15 @@ const seedLive = (recs: any[]): Record<string, string> => ({ [LIVE]: JSON.string
 
 describe('every task goes through flowdeck', () => {
   test('a task list with no flow starts one named after its first item, the items mirrored as its tasks', async ($, on) => {
-    engine(on)
+    const { files } = engine(on)
     await start($)
     expect(await bandSays($)).toBe('')
     await todo($, [
       ['Write the migration for the lifecycle that keeps every flow across restarts', 'in_progress'],
       ['Update docs', 'pending'],
     ])
-    expect(await bandSays($)).toBe('Write the migration for the lifecycle that…: Tasks 0/2, 0%')
+    expect(await bandSays($)).toBe('Write the migration for the lifecycle that keeps every flow across restarts: Tasks 0/2, 0%')
+    expect(await flowName(files)).toBe('Write the migration for the lifecycle that…')
     expect(await paneText($)).toContain('2. Update docs')
     await todo($, [
       ['Write the migration for the lifecycle that keeps every flow across restarts', 'completed'],
@@ -148,14 +154,15 @@ describe('every task goes through flowdeck', () => {
   })
 
   test('a worker started with no flow starts one named after its description, without its task number', async ($, on) => {
-    engine(on)
+    const { files } = engine(on)
     await start($)
     await launch($, 'w1', '#3 History module')
     expect(await bandSays($)).toMatch(/^History module: /)
+    expect(await flowName(files)).toBe('History module')
     expect(await paneText($)).toContain('History module')
     // a plan sent after it joins that flow: renamed, its tasks numbered from 1
     expect(await progress($, { title: 'Archive work', phase: 'delegate', tasks: [{ title: 'History module', tier: 'light' }, { title: 'Docs', tier: 'light' }] })).toBe('ok: Tasks 0/2')
-    expect(await bandSays($)).toMatch(/^Archive work: /)
+    expect(await flowName(files)).toBe('Archive work')
   })
 
   test('a worker of another kind, or a worker\'s own task list, starts no flow', async ($, on) => {
@@ -192,10 +199,10 @@ describe('a flow finishes by itself', () => {
     await progress($, { done: [2] })
     // a subagent's turn end is not the main turn's
     await ended($, 'w1')
-    expect(await bandSays($)).toMatch(/^Ship: Tasks/)
+    expect(await bandSays($)).toMatch(/^FlowDeck: Tasks/)
     clock.now = NOW + 2 * MIN
     await mainTurnEnds($)
-    expect(await bandSays($)).toBe('Ship: Done, 100%')
+    expect(await bandSays($)).toBe('FlowDeck: Done, 100%')
     const list = archived(files)
     expect(list.map(e => [e.title, e.status, e.endedAt])).toEqual([['Ship', 'finished', NOW + 2 * MIN]])
     // shown in the Finished tab for review, and saved once
@@ -224,16 +231,17 @@ describe('a flow finishes by itself', () => {
     expect(archived(files)).toEqual([])
     await progress($, { done: [1] }) // accepted: the task is done whatever its run says
     await mainTurnEnds($)
-    expect(await bandSays($)).toBe('Ship: Done, 100%')
+    expect(await bandSays($)).toBe('FlowDeck: Done, 100%')
   })
 
   test('a flow without tasks never finishes at a turn end', async ($, on) => {
-    engine(on)
+    const { files } = engine(on)
     await start($)
     await launch($, 'w1', 'loose job')
     await ended($, 'w1')
     await mainTurnEnds($)
-    expect(await bandSays($)).toMatch(/^loose job: /)
+    expect(await bandSays($)).toMatch(/^FlowDeck: /)
+    expect(await flowName(files)).toBe('loose job')
     expect(await bandSays($)).not.toMatch(/Done/)
   })
 
@@ -243,10 +251,11 @@ describe('a flow finishes by itself', () => {
     await todo($, [['first job', 'pending']])
     await todo($, [['first job', 'completed']])
     await mainTurnEnds($)
-    expect(await bandSays($)).toBe('first job: Done, 100%')
+    expect(await bandSays($)).toBe('FlowDeck: Done, 100%')
     clock.now = NOW + 10 * MIN
     await todo($, [['second job', 'pending']])
     expect(await bandSays($)).toBe('second job: Tasks 0/1, 0%')
+    expect(await flowName(files)).toBe('second job')
     expect(archived(files).map(e => e.title)).toEqual(['first job'])
     expect(await paneText($)).not.toContain('first job')
     await todo($, [['second job', 'completed']])
@@ -272,7 +281,7 @@ describe('a flow finishes by itself', () => {
     expect(await bandSays($)).not.toMatch(/Done/)
     clock.now = at + IDLE_FINISH_MS + 10_000
     await settle()
-    expect(await bandSays($)).toBe('Idle: Done, 100%')
+    expect(await bandSays($)).toBe('FlowDeck: Done, 100%')
     expect(archived(files).map(e => [e.title, e.status, e.endedAt])).toEqual([['Idle', 'finished', at]])
   })
 
@@ -331,7 +340,7 @@ describe('flow-live.json', () => {
     const { files, clock } = engine(on, { files: { ...handoff } })
     clock.now = NOW + 20 * MIN
     await start($)
-    expect(await bandSays($)).toMatch(/^Kept: /)
+    expect(await bandSays($)).toMatch(/^two: /)
     for (const surface of SURFACES) {
       await showTab($, 'finished')
       expect(await paneHas($, surface, /Running at finish/)).toBe(true)
@@ -386,8 +395,10 @@ describe('flow-live.json', () => {
     stale.sessions = { s: { ...stale.sessions.s, flow: { ...stale.sessions.s.flow, title: 'Stale' } } }
     files[LIVE] = JSON.stringify(stale)
     await start($) // /reload-plugins runs session.start again; the held values stay
-    expect(await bandSays($)).toMatch(/^Held: /)
+    expect(await bandSays($)).toMatch(/^one: /)
     expect(archived(files)).toEqual([])
+    await progress($, { finished: true })
+    expect(archived(files).map(e => e.title)).toEqual(['Held'])
   })
 
   test('starting twice archives nothing twice', async ($, on) => {
@@ -422,7 +433,7 @@ describe('flow-live.json', () => {
     expect(new Set(said).size).toBe(said.length) // each reason once
     expect(said[0]).toMatch(/^flowdeck: flow-live\.json holds no flowdeck state.*\(v\d+\.\d+\.\d{4}\)$/)
     expect(await paneText($)).toMatch(/flow-live\.json holds no flowdeck state/)
-    expect(await bandSays($)).toMatch(/^New: /) // the panel works without it
+    expect(await bandSays($)).toMatch(/^one: /) // the panel works without it
   })
 
   test('a file that cannot be read, or whose existence cannot be told, is left as it is', async ($, on) => {
@@ -479,7 +490,7 @@ describe('a new session in the same process', () => {
     await start($)
     await progress($, { title: 'Compacted', phase: 'delegate', tasks: [{ title: 'one', tier: 'light' }] })
     await $.classic.SessionStart({ source: 'compact', session_id: 's' } as any)
-    expect(await bandSays($)).toMatch(/^Compacted: /)
+    expect(await bandSays($)).toMatch(/^one: /)
     expect(archived(files)).toEqual([])
   })
 })
@@ -516,10 +527,10 @@ describe('with an empty store and no settings, as on a new machine', () => {
     clock.now = NOW + MIN
     await ended($, 'w1')
     await todo($, [['Build the thing', 'completed'], ['Check the thing', 'completed']])
-    expect(await bandSays($)).toBe('Build the thing: Tasks 2/2, 100%')
+    expect(await bandSays($)).toBe('FlowDeck: Tasks 2/2, 100%')
     clock.now = NOW + 2 * MIN
     await mainTurnEnds($)
-    expect(await bandSays($)).toBe('Build the thing: Done, 100%')
+    expect(await bandSays($)).toBe('FlowDeck: Done, 100%')
     expect(archived(files).map(e => [e.title, e.status, e.agents.length])).toEqual([['Build the thing', 'finished', 1]])
     expect(files[`${DIR}/.gitignore`]).toBe('*\n')
     expect(live(files).sessions.s.flow.isFinished).toBe(true)

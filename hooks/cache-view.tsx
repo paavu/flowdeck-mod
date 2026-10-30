@@ -1,17 +1,18 @@
-// The prompt cache in the band: the WARM / COLD chip with its summary and the Show/Hide button for the band's row, and
-// the card below the row (idle time, tokens, the TTL line, the next message's cost per model, `prices are estimates`).
+// The prompt cache in the band: the WARM / COLD chip with its summary and the fold chevron beside it for the band's row,
+// and the card below the row (idle time, tokens, the TTL line, the next message's cost per model, `prices are estimates`).
 // The desktop draws Svgs, the terminal plain text. It draws only: the view, the fold and the press come from register.tsx.
 import type { Elements, RenderChildren } from 'claude-code'
 
 import { CACHE_HUE, CACHE_INK, CACHE_WORD, costLabel, FOOTER, MODELS, nextCost, summaryText, tokText, TTL_MS, ttlText, usd } from './cache'
 import type { CacheMode, CacheView } from './cache'
+import { foldGlyph } from './fold'
 import { idleText } from './time'
 import { textWidth } from './plan-view'
 
 const FONT = "-apple-system,BlinkMacSystemFont,'SF Pro Text','Segoe UI',sans-serif"
 const ROW_H = 22 // the band row's height
-/** The room the Show/Hide button and its gaps take beside the chip on the desktop row. */
-export const CACHE_BUTTON_PX = 56
+/** The room the fold chevron and its gaps take beside the chip on the desktop row (a plain one-glyph Button is about 20 px). */
+export const CACHE_FOLD_PX = 30
 const CARD_MAX_W = 440
 const PAD = 12
 
@@ -111,7 +112,7 @@ export function cardSvg(v: CacheView, W: number, wrap: (w: number, h: number, bo
 export type CacheUi = Pick<Elements['desktop'], 'Box' | 'Text' | 'Button'> & { Svg: Elements['desktop']['Svg'] | null }
 
 export type CacheDrawing = {
-  /** The chip, its summary and the Show/Hide button, as siblings for the band's row. */
+  /** The chip with its summary, then the chevron that opens or folds the card, as siblings for the band's row. */
   row: RenderChildren[]
   /** What `row` takes: px on the desktop, columns in the terminal. */
   size: number
@@ -132,13 +133,15 @@ export function cacheDrawing(
   wrap: (w: number, h: number, body: string) => string,
 ): CacheDrawing {
   const { Box, Text, Button, Svg } = ui
-  const button = <Button key="cache-fold" label={open ? 'Hide' : 'Show'} plain dimColor onPress={() => void onToggle()} />
+  // The kit has no pressable wrapper: a Button carries only a text label (Svg or coloured Texts inside it are lost) and
+  // neither Svg nor Box takes a press. So the chip keeps its look and the one-glyph chevron beside it folds the card.
+  const fold = <Button key="cache-fold" label={foldGlyph(open)} plain dimColor onPress={() => void onToggle()} />
   if (Svg) {
     const chip = chipSvg(v, wrap)
     const card = open ? cardSvg(v, bandW, wrap) : null
     return {
-      row: [<Svg key="cache-chip" source={chip.source} alt={chip.alt} width={chip.width} height={ROW_H} />, button],
-      size: chip.width + CACHE_BUTTON_PX,
+      row: [<Svg key="cache-chip" source={chip.source} alt={chip.alt} width={chip.width} height={ROW_H} />, fold],
+      size: chip.width + CACHE_FOLD_PX,
       card: card ? (
         <Box key="cache-card" flexDirection="row" flexShrink={1} minWidth={0} overflow="hidden">
           <Svg source={card.source} alt={card.alt} width={card.width} height={card.height} />
@@ -183,6 +186,6 @@ export function cacheDrawing(
       </Text>
     </Box>
   ) : null
-  // The chip, a space, the summary, then the button and the gaps around it.
-  return { row: [chip, button], size: word.length + 1 + text.length + 2 + 4 + 2, card }
+  // The chip, a space, the summary, then the gap, the one-glyph chevron and the row's gap after it.
+  return { row: [chip, fold], size: word.length + 1 + text.length + 1 + 1 + 2, card }
 }

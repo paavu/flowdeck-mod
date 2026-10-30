@@ -90,8 +90,32 @@ describe('the band above the prompt', () => {
     expect(await b.find({ type: 'Text', text: 'band below' })).toBeDefined() // the rest stays
     await b.unmount()
     const p = await pane($)
-    expect(await p.find({ type: 'Text', text: /Ship it/ })).toBeDefined() // the flow is still there
+    expect(await p.find({ type: 'Button', key: 'tab-finished', text: 'Finished (1)' })).toBeDefined() // the flow is still there
     await p.unmount()
+  })
+
+  test('with every task done the band is titled FlowDeck, never with the flow title, in the title text colour it always had', async ($, on) => {
+    engine(on)
+    await start($)
+    await plan($)
+    const d = await band($, 'desktop', 100)
+    const row = (await d.findAll({ type: 'Svg' })).find((s: any) => /: Tasks/.test(String(s.props.alt)))
+    expect(String(row?.props.alt)).toBe('FlowDeck: Tasks 1/1, 100%')
+    const source = String(row?.props.source)
+    expect(source).toMatch(/<text class="t" x="16"[^>]*>FlowDeck<\/text>/) // class t: the ink the title had
+    expect(source).not.toContain('Ship it')
+    // the label is right before the bar
+    const barX = Number(/<g transform="translate\((\d+),/.exec(source)?.[1])
+    expect(barX).toBeGreaterThan(16)
+    expect(barX).toBeLessThan(100)
+    await d.unmount()
+    const t = await band($, 'terminal', 100)
+    const texts = (await t.findAll({ type: 'Text' })).map((x: any) => x)
+    const label = texts.find((x: any) => String(x.text) === 'FlowDeck')
+    expect(label).toBeDefined()
+    expect(label.props.color).toBeUndefined() // the default ink the title had
+    expect(texts.some((x: any) => /Ship it/.test(String(x.text)))).toBe(false)
+    await t.unmount()
   })
 
   test('the Band button in the panel brings the band back', async ($, on) => {

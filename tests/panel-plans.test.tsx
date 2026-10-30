@@ -133,14 +133,13 @@ describe('plans section in the panel', () => {
     await d.unmount()
   })
 
-  test('the section also shows in compact mode', async ($, on) => {
+  test('the section shows with a flow running; there is no compact strip or Collapse', async ($, on) => {
     engine(on)
     await start($)
     await create($, 'alpha', 'Alpha rollout')
-    await $.tool.call({ tool: 'mcp__flowdeck__progress', title: 'Ship it', total: 1, tasks: [{ title: 'a', tier: 'light' }] } as any) // Collapse belongs to the flow block
+    await $.tool.call({ tool: 'mcp__flowdeck__progress', title: 'Ship it', total: 1, tasks: [{ title: 'a', tier: 'light' }] } as any)
     let p = await pane($, 'terminal', 60, 'active')
-    await p.press({ key: 'compact' })
-    await settle()
+    expect(await p.find({ type: 'Button', key: 'compact' })).toBeUndefined()
     await p.unmount()
     p = await pane($, 'terminal')
     expect(await p.find({ type: 'Text', text: /Alpha rollout/ })).toBeDefined()
@@ -148,8 +147,7 @@ describe('plans section in the panel', () => {
     const before = await pane($, 'desktop', 80)
     const alts = (await before.findAll({ type: 'Svg' })).map((n: any) => String(n.props?.alt ?? ''))
     expect(alts).toContain('Alpha rollout: Running, 0%')
-    // the compact strip stays above the top buttons on every tab
-    expect(alts.some((a: string) => /agents/.test(a))).toBe(true)
+    expect(alts.some((a: string) => /agents/.test(a))).toBe(false)
     await before.unmount()
   })
 
@@ -247,7 +245,7 @@ describe('agent rows: live tool word and state colours', () => {
     await call($, 'mcp__flowdeck__plan', 'w1', { id: 'x' })
     await call($, 'mcp__flowdeck__progress', 'w1', {})
     expect(await words($)).toEqual([{ text: 'Running · Bash', color: RUNNING }])
-    expect(await paneText($)).toMatch(/Running · Bash · 1\/3 tests$/m)
+    expect(await paneText($)).toMatch(/Running · Bash · 2\/3 tests$/m)
   })
 
   test('the main agent’s own tool calls change nothing', async ($, on) => {
@@ -456,7 +454,7 @@ describe('agent rows: live tool word and state colours', () => {
     expect(r.meta).toContain('Opus 5.5')
     expect(r.stats).toBe(STATS[0])
     expect(r.src).toMatch(/<text class="s" x="\d+" y="16" text-anchor="end"/)
-    expect(r.state).toEqual(['Running · Bash · 4/6 · Device verification'])
+    expect(r.state).toEqual(['Running · Bash · 5/6 · Device verification'])
     expect(r.src).not.toContain('NaN')
   })
 
@@ -471,7 +469,7 @@ describe('agent rows: live tool word and state colours', () => {
     expect(r.stats).not.toMatch(/\d:\d\d/)
     expect(r.stats.startsWith('ctx 0%')).toBe(true)
     const [t = ''] = r.state
-    expect(t.startsWith('Running · Bash · 4/6 · Device verif')).toBe(true)
+    expect(t.startsWith('Running · Bash · 5/6 · Device verif')).toBe(true)
     expect(width11(t)).toBeLessThanOrEqual(r.slot)
     if (t.endsWith('…')) expect(width11(t)).toBeGreaterThan(r.slot - 12)
   })
@@ -492,7 +490,7 @@ describe('agent rows: live tool word and state colours', () => {
     const r = await rowAt($, 76)
     const [t = ''] = r.state
     expect(t.endsWith('…')).toBe(true)
-    expect(t.startsWith('Running · Bash · 4/6 · Device verification across')).toBe(true)
+    expect(t.startsWith('Running · Bash · 5/6 · Device verification across')).toBe(true)
     expect(width11(t)).toBeLessThanOrEqual(r.slot)
     expect(width11(t)).toBeGreaterThan(r.slot - 12)
     expect(r.stats).toBe(STATS[0])

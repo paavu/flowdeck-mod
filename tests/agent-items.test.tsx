@@ -226,13 +226,13 @@ const fold = async ($: any, id = 'w1', surface: 'terminal' | 'desktop' = 'termin
 }
 
 describe('agent items through the step tool', () => {
-  test('a steps list derives the 0/6 count and the active title as the note', async ($, on) => {
+  test('a steps list derives the count (the active step: 1/6) and the active title as the note', async ($, on) => {
     engine(on)
     await start($)
     await spawn($)
     expect(await step($, { steps: SIX })).toBe('ok')
-    expect((await terminal($)).text).toMatch(/0\/6 read code/)
-    expect(rowSource(await desktop($), /^wire it:/)).toContain('0/6 · read code')
+    expect((await terminal($)).text).toMatch(/1\/6 read code/)
+    expect(rowSource(await desktop($), /^wire it:/)).toContain('1/6 · read code')
   })
 
   test('next, done, active and failed move the count and the note', async ($, on) => {
@@ -241,11 +241,11 @@ describe('agent items through the step tool', () => {
     await spawn($)
     await step($, { steps: SIX })
     await step($, { next: true })
-    expect((await terminal($)).text).toMatch(/1\/6 write tests/)
+    expect((await terminal($)).text).toMatch(/2\/6 write tests/)
     await step($, { done: ['write tests', 'WIRE TOOL'] })
-    expect((await terminal($)).text).toMatch(/3\/6 fix types/)
+    expect((await terminal($)).text).toMatch(/4\/6 fix types/)
     await step($, { active: 'commit' })
-    expect((await terminal($)).text).toMatch(/4\/6 commit/)
+    expect((await terminal($)).text).toMatch(/5\/6 commit/)
     await step($, { failed: 'commit' })
     expect((await terminal($)).text).toMatch(/4\/6$/m)
   })
@@ -256,7 +256,7 @@ describe('agent items through the step tool', () => {
     await spawn($)
     await step($, { steps: SIX })
     expect(await step($, { done: ['nope'] })).toBe('ok (unknown step "nope" ignored)')
-    expect((await terminal($)).text).toMatch(/0\/6 read code/)
+    expect((await terminal($)).text).toMatch(/1\/6 read code/)
   })
 
   test('explicit done, total and note win for that call', async ($, on) => {
@@ -264,9 +264,9 @@ describe('agent items through the step tool', () => {
     await start($)
     await spawn($)
     await step($, { steps: SIX, done: 2, total: 9, note: 'my own words' })
-    expect((await terminal($)).text).toMatch(/2\/9 my own words/)
+    expect((await terminal($)).text).toMatch(/3\/9 my own words/)
     await step($, { next: true })
-    expect((await terminal($)).text).toMatch(/1\/6 write tests/)
+    expect((await terminal($)).text).toMatch(/2\/6 write tests/)
   })
 
   test('the old done/total/note calls work as before', async ($, on) => {
@@ -276,7 +276,7 @@ describe('agent items through the step tool', () => {
     expect(await step($, { done: 0, total: 3 })).toBe('ok')
     await step($, { done: 1, total: 3, note: 'tests' })
     const t = await terminal($)
-    expect(t.text).toMatch(/1\/3 tests/)
+    expect(t.text).toMatch(/2\/3 tests/)
     // No step list: the chevron is there, dim, and opens on the row's details.
     const chevron = t.buttons.find((b: any) => String(b.props.key) === 'agent-fold-w1')
     expect(String(chevron?.props.label)).toBe('▸')
@@ -300,7 +300,7 @@ describe('agent items through the step tool', () => {
     expect(await step($, { steps: SIX })).toBe('ok')
     expect(await step($, { next: true })).toBe('ok')
     broken = false
-    expect((await terminal($)).text).toMatch(/1\/6 write tests/)
+    expect((await terminal($)).text).toMatch(/2\/6 write tests/)
   })
 
   test('garbage input never throws and keeps the row', async ($, on) => {
@@ -415,7 +415,7 @@ describe('agent items in the panel', () => {
     const many = Array.from({ length: 15 }, (_, i) => ({ title: `a rather long step title number ${i + 1} that goes on and on` }))
     await step($, { steps: many })
     await fold($)
-    expect((await terminal($)).text).toMatch(/0\/12/)
+    expect((await terminal($)).text).toMatch(/1\/12/)
     const t = await terminal($, 40)
     expect(t.texts.filter((x: any) => /^ {3}● a rather long step title/.test(x.text)).length).toBe(12)
     expect(t.text).toContain('…')
@@ -425,19 +425,21 @@ describe('agent items in the panel', () => {
     expect(String(kids[0].props.source)).toContain('…')
   })
 
-  test('compact mode keeps its one-line summary', async ($, on) => {
+  test('there is no Collapse: an unfolded row always shows its steps in full', async ($, on) => {
     engine(on)
     await start($)
     await spawn($)
     await step($, { steps: SIX })
     await fold($)
-    const p = await pane($, 'terminal')
-    await p.press({ key: 'compact' })
-    await settle()
-    await p.unmount()
+    for (const surface of ['terminal', 'desktop'] as const) {
+      const p = await pane($, surface)
+      expect(await p.find({ type: 'Button', key: 'compact' })).toBeUndefined()
+      expect(JSON.stringify(await p.drawn())).not.toMatch(/"(Collapse|Expand)"/)
+      await p.unmount()
+    }
     const t = await terminal($)
-    expect(t.text).not.toMatch(/fix types/)
+    expect(t.text).toMatch(/fix types/)
     const d = await desktop($)
-    expect(d.svgs.filter((s: any) => Number(s.props.height) === 22).length).toBe(0)
+    expect(d.svgs.filter((s: any) => Number(s.props.height) === 22).length).toBe(SIX.length)
   })
 })

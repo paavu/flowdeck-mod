@@ -505,18 +505,14 @@ describe('safety of an archive press', () => {
 })
 
 describe('where the Archive button shows', () => {
-  test('not in compact mode', async ($, on) => {
+  test('on every finished row of an open flow: the list always shows in full (there is no Collapse)', async ($, on) => {
     const { clock } = engine(on)
     await start($)
     await plan($)
     await finishedRows($, clock, 2)
     for (const surface of ['terminal', 'desktop'] as const) {
       const p = await pane($, surface)
-      await p.press({ key: 'compact' })
-      await settle()
-      expect(archiveKeys(await p.findAll({ type: 'Button' }))).toEqual([])
-      await p.press({ key: 'compact' })
-      await settle()
+      expect(await p.find({ type: 'Button', key: 'compact' })).toBeUndefined()
       expect(archiveKeys(await p.findAll({ type: 'Button' })).length).toBe(2)
       await p.unmount()
     }

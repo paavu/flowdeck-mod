@@ -150,7 +150,6 @@ export type ArchiveLists = { records: ArchiveRecord[]; trash: ArchiveRecord[]; w
 export type ArchiveDetail = { list: 'archive' | 'trash'; id: string; state: 'loading' | 'ok' | 'error'; entry?: ArchiveEntry }
 
 export type Panel = {
-  isCompact: boolean
   isContextShown: boolean
   isUsageShown: boolean
   /** The usage reset lines say the time left (true) or the exact 24-hour time (false); one global choice, stored under the engine-store key `usageRemaining`. */
@@ -232,7 +231,7 @@ declare module 'claude-code' {
       bandError: string
       /** The prompt cache's facts for this session, null until the main thread made a request (or a resume seeded them). */
       cache: CacheFacts | null
-      /** The cache card's Show/Hide choice, for the mode it was made in; null for the default (warm folded, cold open). */
+      /** The cache card's open-or-folded choice (the badge's press), for the mode it was made in; null for the default (warm folded, cold open). */
       cacheFold: CacheFold | null
       /** The cache texts the band last showed (`cacheKey`): the 5-second tick writes it when they change, so the band redraws once a minute at most. */
       cacheTick: string

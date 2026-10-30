@@ -95,7 +95,7 @@ describe('plans in the band above the prompt', () => {
     const json = await drawn(b)
     expect(json).toMatch(/×\d/)
     expect(svgCount(json)).toBe(2)
-    const flowAt = json.indexOf('Ship it')
+    const flowAt = json.indexOf('FlowDeck')
     const planAt = json.indexOf('Alpha rollout')
     expect(flowAt).toBeGreaterThanOrEqual(0)
     expect(planAt).toBeGreaterThan(flowAt) // the plan sits below the flow row
@@ -108,7 +108,7 @@ describe('plans in the band above the prompt', () => {
     const t = await band($, 'terminal', 80)
     const tj = await drawn(t)
     expect(tj).toMatch(/×\d/)
-    expect(tj.indexOf('Alpha rollout')).toBeGreaterThan(tj.indexOf('Ship it'))
+    expect(tj.indexOf('Alpha rollout')).toBeGreaterThan(tj.indexOf('FlowDeck'))
     await t.unmount()
   })
 

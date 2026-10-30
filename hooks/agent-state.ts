@@ -26,6 +26,14 @@ export const isComplete = (a: Shown): boolean => a.status === 'done' && !isIncom
 // What the Archive collects: a complete run or a failed one; an Incomplete run stays in the live list.
 export const isSettled = (a: Shown): boolean => a.status === 'failed' || isComplete(a)
 
+// The row's `n/total`: a live run with an active step names that step's place (5 done of 7, the 6th active: `6/7`); any
+// other run, or one with no active step, its done count. The bar stays the done fraction (progressOf).
+export const stepCount = (a: Shown & Partial<Pick<AgentRun, 'stepNote'>>): string => {
+  const total = a.stepTotal ?? 0
+  const done = a.stepDone ?? 0
+  return `${isLive(a) && a.stepNote ? Math.min(total, done + 1) : done}/${total}`
+}
+
 // The row's status mark: its status, or `incomplete` for a run that ended OK with steps left.
 export const markOf = (a: Shown): AgentRun['status'] | 'incomplete' => (isIncomplete(a) ? 'incomplete' : a.status)
 

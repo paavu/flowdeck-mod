@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'claude-code/testing'
 
-import { agentState, HOUSEKEEPING, splitHead, stateText } from '../hooks/agent-state'
+import { agentState, HOUSEKEEPING, progressOf, splitHead, stateText, stepCount } from '../hooks/agent-state'
 import { STATE_COLOR } from '../hooks/plan-view'
 
 describe('agent state on the progress line', () => {
@@ -47,5 +47,23 @@ describe('agent state on the progress line', () => {
     expect(splitHead('Running · Bash · 2/5', 'Running · Bash')).toEqual(['Running · Bash', ' · 2/5'])
     expect(splitHead('Running · Ba…', 'Running · Bash')).toEqual(['Running · Ba…', ''])
     expect(splitHead('Running · Bash · 2…', 'Running · Bash')).toEqual(['Running · Bash', ' · 2…'])
+  })
+})
+
+describe('the step number on a row', () => {
+  test('a running run names its active step: 5 done of 7 with the 6th active reads 6/7; the bar stays 5/7', () => {
+    const a = { status: 'running' as const, stepDone: 5, stepTotal: 7, stepNote: 'run suite' }
+    expect(stepCount(a)).toBe('6/7')
+    expect(Math.abs((progressOf(a as any) ?? 0) - 5 / 7) < 1e-9).toBe(true)
+    expect(stepCount({ ...a, stepDone: 0 })).toBe('1/7')
+    expect(stepCount({ ...a, stepDone: 7 })).toBe('7/7') // never past the total
+  })
+
+  test('without an active step, or once the run ended, the done count', () => {
+    expect(stepCount({ status: 'running', stepDone: 5, stepTotal: 7 })).toBe('5/7')
+    expect(stepCount({ status: 'done', stepDone: 7, stepTotal: 7 })).toBe('7/7')
+    expect(stepCount({ status: 'done', stepDone: 5, stepTotal: 7, stepNote: 'run suite' })).toBe('5/7') // Incomplete
+    expect(stepCount({ status: 'failed', stepDone: 5, stepTotal: 7, stepNote: 'run suite' })).toBe('5/7')
+    expect(stepCount({ status: 'running', endedAt: 1, stepDone: 5, stepTotal: 7, stepNote: 'run suite' })).toBe('5/7') // Running at finish
   })
 })
