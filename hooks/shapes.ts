@@ -1,7 +1,7 @@
 // The held values as the panel and the band read them. A reload keeps what an older flowdeck wrote, in its older shape,
 // so every read goes through these: defaults fill what is missing, a field of the wrong kind falls back to its default,
 // fields no longer used are dropped, and entries that are no entry at all are left out.
-import type { AgentRun, AgentStatus, ArchiveDetail, ArchiveEntry, ArchiveLists, Flow, Panel, PanelTab, Phase, PlannedTask, Reading, Sample, Samples, UsageWindow } from '../types'
+import type { AgentRun, AgentStatus, ArchiveDetail, ArchiveEntry, ArchiveLists, CacheFacts, CacheFold, Flow, Panel, PanelTab, Phase, PlannedTask, Reading, Sample, Samples, UsageWindow } from '../types'
 import { parseArchive, stampsOf } from './archive'
 import { parseRecords } from './archive-index'
 
@@ -196,3 +196,17 @@ export const asMeta = (v: unknown): { startedAt: number; project: string } | nul
   isObj(v) && num(v.startedAt) !== undefined && typeof v.project === 'string' ? { startedAt: v.startedAt as number, project: v.project } : null
 
 export const asNow = (v: unknown): number => num(v) ?? 0
+
+// The prompt cache's facts: null without a request time; a size or window of the wrong kind reads as 0, a model as unknown.
+export const asCacheFacts = (v: unknown): CacheFacts | null => {
+  if (!isObj(v)) return null
+  const lastAt = num(v.lastAt)
+  if (lastAt === undefined) return null
+  return { lastAt, tokens: Math.max(0, num(v.tokens) ?? 0), window: Math.max(0, num(v.window) ?? 0), model: typeof v.model === 'string' && v.model ? v.model : null }
+}
+
+// The cache card's Show/Hide choice; anything else is no choice (the mode's default).
+export const asCacheFold = (v: unknown): CacheFold | null =>
+  isObj(v) && (v.mode === 'warm' || v.mode === 'cold') && typeof v.open === 'boolean' ? { mode: v.mode, open: v.open } : null
+
+export const asCacheTick = (v: unknown): string => text(v, '')

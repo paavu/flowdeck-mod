@@ -241,6 +241,8 @@ describe('task numbers and waits on the rows', () => {
     expect(tasks.description).toMatch(/after/)
     expect(tasks.description).toMatch(/ready/)
     expect(tasks.description).toMatch(/parallel/)
+    // The same rule as SKILL.md sections 1 and 4.
+    expect(tasks.description).toContain('Tasks that edit the same files must be chained with `after` (they never run in parallel); give every waiting task its `after`; independent tasks get none.')
     expect(tasks.items.properties.after.items.type).toBe('integer')
     expect(tool.inputSchema.properties.add.items.properties.after.items.type).toBe('integer')
   })

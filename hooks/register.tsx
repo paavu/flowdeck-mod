@@ -19,8 +19,12 @@ import { importPlan, isFinished, isStoredStep, normalize, percent, PLAN_ID, plac
 import { planBandSvg, planBandText, planRows, planSvg, STATE_COLOR, stateLabel } from './plan-view'
 import { acceptedOf, acceptedOnly, cleanAfter, linkRuns, norm, taskOf, taskTag, unstarted, workerTier } from './tasks'
 import type { TaskLike } from './tasks'
-import { ARCHIVE_PAGE, asAgents, asDetails, asFlow, asLists, asMeta, asNow, asPanel, asReading, asUsage, PANEL_DEFAULT } from './shapes'
+import { ARCHIVE_PAGE, asAgents, asCacheFacts, asCacheFold, asCacheTick, asDetails, asFlow, asLists, asMeta, asNow, asPanel, asReading, asUsage, PANEL_DEFAULT } from './shapes'
 import { live, record, resetKey, resets, toWindows, usageRows, usageSvg } from './usage'
+import { cacheKey, isCardOpen, isShowable, measured, remeasured, seeded, stamped, toggledFold, viewOf } from './cache'
+import type { CacheFacts } from './cache'
+import { cacheDrawing } from './cache-view'
+import type { CacheDrawing, CacheUi } from './cache-view'
 
 const flow = atom({ plugin: 'flowdeck', key: 'flow' } as const, null)
 const agents = atom({ plugin: 'flowdeck', key: 'agents' } as const, [])
@@ -35,6 +39,10 @@ const flowMeta = atom({ plugin: 'flowdeck', key: 'flowMeta' } as const, null as 
 const plans = atom({ plugin: 'flowdeck', key: 'plans' } as const, [] as TaskPlan[])
 // Why the band above the prompt last failed in this load, '' when it has not; the panel shows it, the band never reads it.
 const bandError = atom({ plugin: 'flowdeck', key: 'bandError' } as const, '')
+// The prompt cache (cache.ts): its facts, the card's Show/Hide choice, and the texts last shown (the band's minute tick).
+const cacheFacts = atom({ plugin: 'flowdeck', key: 'cache' } as const, null as CacheFacts | null)
+const cacheFold = atom({ plugin: 'flowdeck', key: 'cacheFold' } as const, null)
+const cacheTick = atom({ plugin: 'flowdeck', key: 'cacheTick' } as const, '')
 
 // A reload keeps the held values an older flowdeck wrote, in its older shape: every read goes through its normalizer
 // (shapes.ts), and every update hands its change the normalized value. A change that returns that value unchanged hands
@@ -77,6 +85,10 @@ const updateDetails = async ($: EngineInterface, change: (list: ArchiveDetail[])
 const readUsage = async ($: EngineInterface) => asUsage(await read($, usageState))
 const readReading = async ($: EngineInterface): Promise<Reading | null> => asReading(await read($, reading))
 const readNow = async ($: EngineInterface): Promise<number> => asNow(await read($, now))
+const readCache = async ($: EngineInterface): Promise<CacheFacts | null> => asCacheFacts(await read($, cacheFacts))
+const updateCache = async ($: EngineInterface, change: (c: CacheFacts | null) => CacheFacts | null): Promise<void> => {
+  await update($, cacheFacts, prev => change(asCacheFacts(prev)))
+}
 
 const TOOL = 'mcp__flowdeck__progress'
 const STEP_TOOL = 'mcp__flowdeck__step'
@@ -901,13 +913,15 @@ const glyphColor = (a: AgentRun, tierColor: string): string => {
 }
 
 // Asks the engine for /context's breakdown (estimated locally, no token-count calls) and the rate-limit windows, in one call.
-async function refreshContext($: EngineInterface): Promise<void> {
+// It answers the context's size, which the prompt cache's facts take after a main turn.
+async function refreshContext($: EngineInterface): Promise<{ tokens?: number; window?: number }> {
   const u = await $.session.usage({ breakdown: 'summary' })
   const b = u.context.breakdown
   if (b && b.rawMaxTokens > 0) await update($, reading, () => toReading(b)) // otherwise there is no window to measure against
   const windows = toWindows(Array.isArray(u.rateLimits) ? u.rateLimits : [])
   const at = await $.clock.now()
   await update($, usageState, prev => ({ windows, samples: record(asUsage(prev).samples, windows, at) }))
+  return u.context
 }
 
 type TodoItem = { title: string; completed: boolean }
@@ -1413,6 +1427,47 @@ function noteBandFault($: EngineInterface, why: string): void {
   }
 }
 
+// The prompt cache in the band (cache.ts, cache-view.tsx), held per session. Only the main thread's requests count: a
+// subagent's do not touch the session's cache.
+
+// A main request starts: the hour starts again. One after the cache went cold (or the first) drops the card's choice,
+// which holds only for the mode it was made in.
+async function stampCache($: EngineInterface, model: string): Promise<void> {
+  const at = await $.clock.now()
+  const was = viewOf(await readCache($), at)
+  await updateCache($, c => stamped(c, at, model))
+  if (was?.mode !== 'warm' && asCacheFold(await read($, cacheFold))) await update($, cacheFold, () => null)
+}
+
+// The band shows whole minutes: the tick writes the texts it would show only when they change, so the band redraws once
+// a minute at most (each redraw gives its buttons new handles).
+async function tickCache($: EngineInterface): Promise<void> {
+  const c = await readCache($)
+  const shown = asCacheTick(await read($, cacheTick))
+  if (!isShowable(c) && !shown) return
+  const key = cacheKey(viewOf(c, await $.clock.now()))
+  if (key !== shown) await update($, cacheTick, () => key)
+}
+
+// The band's cache part, null with nothing to show yet. A part that cannot be drawn is said (noteBandFault) and left out,
+// so the flow row still draws.
+async function cacheBandPart($: EngineInterface, ui: CacheUi, bandW: number): Promise<CacheDrawing | null> {
+  try {
+    await read($, cacheTick) // read so the minute tick redraws the band
+    const c = await readCache($)
+    const v = isShowable(c) ? viewOf(c, await $.clock.now()) : null
+    if (!v) return null
+    const toggle = async () => {
+      const mode = viewOf(await readCache($), await $.clock.now())?.mode
+      if (mode) await update($, cacheFold, f => toggledFold(asCacheFold(f), mode))
+    }
+    return cacheDrawing(ui, v, isCardOpen(asCacheFold(await read($, cacheFold)), v.mode), toggle, bandW, svg)
+  } catch (err) {
+    noteBandFault($, `cache: ${err instanceof Error ? err.message : String(err)}`)
+    return null
+  }
+}
+
 // The buttons on top of the panel. They read only the panel's own toggles, so the panel can draw them whatever else fails.
 function topToggleRow($: EngineInterface, ui: Pick<Elements['desktop'], 'Box' | 'Button'>, p: Panel): RenderChildren {
   const { Box, Button } = ui
@@ -1565,7 +1620,7 @@ export const register: Register = (on, options) => {
           tasks: {
             type: 'array',
             description:
-              'The planned worker tasks in order, numbered from 1. Delegate each with the Agent tool `description` `#<number> <title>` (e.g. `#3 History module`; a return round reuses it): the panel links the worker to its task by that number, else by the title. Give `after` to every task that depends on others; the panel marks a planned task `ready` once all it waits for is done, and every ready task should be launched at once, in parallel.',
+              'The planned worker tasks in order, numbered from 1. Delegate each with the Agent tool `description` `#<number> <title>` (e.g. `#3 History module`; a return round reuses it): the panel links the worker to its task by that number, else by the title. Tasks that edit the same files must be chained with `after` (they never run in parallel); give every waiting task its `after`; independent tasks get none. The panel marks a planned task `ready` once all it waits for is done, and every ready task should be launched at once, in parallel.',
             items: {
               type: 'object',
               properties: {
@@ -1661,6 +1716,7 @@ export const register: Register = (on, options) => {
     // Ticks the running agents' clocks; quiet when nothing runs. Every tick redraws the pane and gives its buttons new
     // handles, so it stays slow: a click on a handle from before the redraw is refused by the desktop app.
     $.clock.every(TICK_MS, () => {
+      void tickCache($).catch(() => {}) // the band's WARM countdown and its flip to COLD
       void (async () => {
         const list = await readAgents($)
         if (!list.some(a => a.status === 'running')) return
@@ -1946,8 +2002,9 @@ export const register: Register = (on, options) => {
     return started
   })
 
-  // Each model request of a subagent: live context, tokens and cost.
+  // Each model request of a subagent: live context, tokens and cost. A main request reads or writes the prompt cache.
   on('turn.step', async function* ($, e, next) {
+    if (!e.agentId) await stampCache($, e.model).catch(() => {})
     const result = yield* next(e)
     const agentId = e.agentId
     const usage = result.usage
@@ -2023,8 +2080,43 @@ export const register: Register = (on, options) => {
       await update($, now, () => at)
     }
     const result = await next(e)
-    if (!agentId) await refreshContext($).catch(() => {}) // a subagent's turn fills its own window, not this one
+    if (!agentId) {
+      const context = await refreshContext($).catch(() => null) // a subagent's turn fills its own window, not this one
+      const at = await $.clock.now().catch(() => null)
+      if (at !== null) await updateCache($, c => measured(c, at, e.durationMs, context, e.usage?.model)).catch(() => {})
+    }
     if (!agentId) await closeFinishedPlans($).catch(() => {})
+    return result
+  })
+
+  // The engine measured the main window again: the cache's size follows, once a request is known.
+  on('session.measure', async ($, e, next) => {
+    const result = await next(e)
+    if (e.changed.includes('context') && e.context.tokens && (await readCache($).catch(() => null))) {
+      await updateCache($, c => remeasured(c, e.context)).catch(() => {})
+    }
+    return result
+  })
+
+  // /clear and /compact start a new cache; a resumed or forked session knows how long it was away and how big it is.
+  on('classic.SessionStart', async ($, e, next) => {
+    const result = await next(e)
+    const fresh = async (): Promise<CacheFacts | null> => {
+      if (e.source === 'clear' || e.source === 'compact') return null
+      const at = await $.clock.now()
+      const window = await Promise.resolve().then(() => $.session.usage()).then(u => u.context.window || 0, () => 0)
+      const model = typeof e.model === 'string' && e.model ? e.model : await Promise.resolve().then(() => $.session.model()).catch(() => '')
+      return seeded(at, e.seconds_since_last_response ?? 0, typeof e.context_tokens === 'number' ? e.context_tokens : 0, window, model || null)
+    }
+    const isSeed = (e.source === 'resume' || e.source === 'fork') && typeof e.seconds_since_last_response === 'number'
+    if (isSeed || e.source === 'clear' || e.source === 'compact') {
+      await fresh()
+        .then(async c => {
+          await updateCache($, () => c)
+          await update($, cacheFold, () => null)
+        })
+        .catch(() => {}) // the band never holds up a session's start
+    }
     return result
   })
 
@@ -2727,14 +2819,16 @@ export const register: Register = (on, options) => {
     if (hidden || e.props.hasSurvey) return next(e)
     // the open plans, newest first, at most two rows below the flow row
     const open = [...(await readPlans($))].reverse().filter(pl => pl.state === 'running' || pl.state === 'needs_input' || pl.state === 'error').slice(0, 2)
-    if (f === null && open.length === 0) return next(e)
+    const ui = $.ui.resolve(e)
+    const { Box, Text, Button } = ui
+    const bandWidth = Math.max(180, Math.min(MAX_BAND_W, (e.props.bodyColumns || 100) * 9 - 180))
+    // The prompt cache's chip, shown once the session made a request, with or without a flow (cache-view.tsx).
+    const cache = await cacheBandPart($, { Box, Text, Button, Svg: e.surface !== 'terminal' && 'Svg' in ui ? ui.Svg : null } as CacheUi, bandWidth)
+    if (f === null && open.length === 0 && !cache) return next(e)
 
     // What other mods and Claude Code draw here stays, below this row; when that fails, the row is drawn without it.
     const theirs = await next(e).catch((): RenderChildren => null)
-    const ui = $.ui.resolve(e)
-    const { Box, Text, Button } = ui
     const planNow = open.length ? await $.clock.now() : 0
-    const bandWidth = Math.max(180, Math.min(MAX_BAND_W, (e.props.bodyColumns || 100) * 9 - 180))
     const planRowEls =
       e.surface !== 'terminal' && 'Svg' in ui
         ? open.map(pl => {
@@ -2754,6 +2848,12 @@ export const register: Register = (on, options) => {
     if (f === null) {
       return (
         <Box flexDirection="column">
+          {cache ? (
+            <Box key="flowdeck-cache" flexDirection="row" alignItems="center" gap={1} flexShrink={1} minWidth={0} overflow="hidden">
+              {cache.row}
+            </Box>
+          ) : null}
+          {cache?.card ?? null}
           {planRowEls}
           {theirs}
         </Box>
@@ -2786,15 +2886,18 @@ export const register: Register = (on, options) => {
       const { Svg } = ui
       // About 9 CSS px per reported column (measured in the desktop app; savvy-progress assumed 8 and stopped
       // short); the count, the dismiss and their gaps take the rest, so the row runs to the right edge like the other bars.
-      const width = Math.max(180, Math.min(MAX_BAND_W, (e.props.bodyColumns || 100) * 9 - 180))
+      // The cache chip, between the progress and the buttons, takes its own width from the progress.
+      const width = Math.max(180, Math.min(MAX_BAND_W, (e.props.bodyColumns || 100) * 9 - 180) - (cache?.size ?? 0))
       return (
         <Box flexDirection="column">
           <Box flexDirection="row" alignItems="center" gap={1} flexShrink={1} minWidth={0} overflow="hidden">
             <Svg source={rowSvg(g, width, isWorking)} alt={`${g.title}: ${label(g)}, ${percent}`} width={width} height={H} />
+            {cache?.row ?? null}
             {crewButton}
             {finish}
             {dismiss}
           </Box>
+          {cache?.card ?? null}
           {planRowEls}
           {theirs}
         </Box>
@@ -2803,7 +2906,7 @@ export const register: Register = (on, options) => {
 
     const cols = e.props.bodyColumns
     const titleW = Math.max(8, Math.min(30, f.title.length + 2, Math.floor(cols / 3)))
-    const width = Math.max(6, Math.min(40, cols - titleW - 32))
+    const width = Math.max(6, Math.min(40, cols - titleW - 32 - (cache?.size ?? 0)))
     return (
       <Box flexDirection="column">
       <Box flexDirection="row" gap={2} flexShrink={1} minWidth={0} overflow="hidden">
@@ -2814,11 +2917,17 @@ export const register: Register = (on, options) => {
         <Text color={f.isFinished ? DONE : ACCENT}>{barText(g, width)}</Text>
         <Text bold>{label(g)}</Text>
         <Text dimColor>{percent}</Text>
+        {cache ? (
+          <Box key="flowdeck-cache" flexDirection="row" gap={1} flexShrink={0}>
+            {cache.row}
+          </Box>
+        ) : null}
         <Text color={CLAY}>▣</Text>
         {crewButton}
         {finish}
         {dismiss}
       </Box>
+      {cache?.card ?? null}
       {planRowEls}
       {theirs}
       </Box>

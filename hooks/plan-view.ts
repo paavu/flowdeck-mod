@@ -22,7 +22,7 @@ export const stateLabel = (p: TaskPlan): string => STATE_NAME[stateOf(p)]
 
 // plan-progress's estimate: 6.2px a character at 11px, 3.4 for thin glyphs, 9.5 for m and w, 12 for CJK; scaled by size, bold a little wider
 const pxAt11 = (ch: string) => (/[　-鿿]/.test(ch) ? 12 : /[ilI.,:;'|!]/.test(ch) ? 3.4 : /[mwMW]/.test(ch) ? 9.5 : 6.2)
-const textWidth = (s: string, size: number, bold = false) => ([...s].reduce((n, ch) => n + pxAt11(ch), 0) * size * (bold ? 1.06 : 1)) / 11
+export const textWidth = (s: string, size: number, bold = false) => ([...s].reduce((n, ch) => n + pxAt11(ch), 0) * size * (bold ? 1.06 : 1)) / 11
 
 const fitText = (s: string, size: number, maxW: number, bold = false): string => {
   if (textWidth(s, size, bold) <= maxW) return s

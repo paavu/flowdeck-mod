@@ -21,3 +21,20 @@ export function doneText(at: number, now: number, tz?: string): string {
   if (a.day === b.day && a.year === b.year) return a.time
   return a.year === b.year ? `${a.day} · ${a.time}` : `${a.day}, ${a.year} · ${a.time}`
 }
+
+const MINUTE = 60_000
+
+// How long something has been idle, in whole minutes: `18m`, `2h 5m`, then `3d 9h` from a day on.
+export function idleText(ms: number): string {
+  const mins = Math.max(0, Math.floor(ms / MINUTE))
+  if (mins < 60) return `${mins}m`
+  const hours = Math.floor(mins / 60)
+  if (hours < 24) return `${hours}h ${mins % 60}m`
+  return `${Math.floor(hours / 24)}d ${hours % 24}h`
+}
+
+// Time left of a span of at most an hour, in whole minutes and never hours: `42m`, `60m`, and `<1m` below a minute.
+export function minutesLeft(ms: number): string {
+  const mins = Math.floor(Math.max(0, ms) / MINUTE)
+  return mins < 1 ? '<1m' : `${mins}m`
+}

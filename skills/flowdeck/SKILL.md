@@ -45,7 +45,7 @@ When delegating, begin the Agent tool's `description` with the task number, then
 2. Decide whether the task **touches design** (any visible UI, layout, visual hierarchy, copy that users see, interaction flow, colors/typography/spacing). If yes → go to section 2 before any implementation.
 3. Break the work into **tasks** with:
    - a clear, self-contained brief (what, where, constraints, definition of done, how to verify);
-   - explicit dependencies between tasks;
+   - explicit dependencies between tasks: Tasks that edit the same files must be chained with `after` (they never run in parallel); give every waiting task its `after`; independent tasks get none;
    - a **tier** per task (section 3).
 4. Present the plan to the user in a compact form: numbered tasks, tier, dependency order. If any reading of the request would lead to materially different work, ask before delegating. Otherwise proceed.
 
@@ -95,7 +95,7 @@ Heuristics:
 
 ## 4. Delegate
 
-- Use the Agent tool with `subagent_type` = the tier agent name exactly as the Agent tool lists it (`flowdeck-careful` or `flowdeck:flowdeck-careful`). Run independent tasks in parallel in one message; chain dependent ones. The panel marks a planned task `ready` when everything in its `after` is done (and every task without `after`): launch every `ready` task at once, in parallel, then the next ones as they become ready.
+- Use the Agent tool with `subagent_type` = the tier agent name exactly as the Agent tool lists it (`flowdeck-careful` or `flowdeck:flowdeck-careful`). Run independent tasks in parallel in one message; chain dependent ones. Tasks that edit the same files must be chained with `after` (they never run in parallel); give every waiting task its `after`; independent tasks get none. The panel marks a planned task `ready` when everything in its `after` is done (and every task without `after`): launch every `ready` task at once, in parallel, then the next ones as they become ready.
 - Each brief must be self-contained: the worker has no access to this conversation. Include file paths, the decided design specs, constraints from CLAUDE.md that matter, and the exact verification expected.
 - Every brief ends with this line: "Before your final report, close your step list with `mcp__flowdeck__step`: every step `done` or `failed` (a skipped step too, with a note saying so); none left pending or active."
 - Keep briefs tight. Do not paste the whole plan; paste this task.

@@ -2,6 +2,13 @@
 
 Versions are `M.m.xxxx`; every build bumps the 4-digit build number. Details and rulings: `docs/ledger.md`, `docs/design.md`.
 
+## 1.0.0027 (2026-10-30)
+- The band shows the prompt cache: a `WARM` chip (red) for an hour after the main thread's last request, with the minutes left (`42m left`, `<1m left`, never hours), then a `COLD` chip (blue) with the idle time and the next message's cost on the session's model (`12h 45m · $4.78`). It sits on the flow row between the progress and the buttons, desktop and terminal, and shows on its own when there is no flow, once the session has made a request. Subagent requests do not count.
+- `Show` / `Hide` at the end of the chip opens a card below the row: idle time, tokens in the cache, `cold in 12m` (or `cold for …`), the next message's cost on each model with the session's model marked `YOU`, and `prices are estimates`. Warm starts folded, cold starts open; a choice holds until the cache flips. The terminal shows the same facts as four lines.
+- `/clear` and `/compact` drop the cache facts until the next request; a resumed or forked session starts from how long ago its last response was and how big it was. The facts are held per session and survive `/reload-plugins`; nothing is written to project files.
+- Prices are estimates, in one table (`MODELS` in hooks/cache.ts). Idea and cost method from ribbon (MIT, see NOTICE.md).
+- The orchestrator's rule, in SKILL.md and the `progress` tool: tasks that edit the same files are chained with `after` and never run in parallel; every waiting task gets its `after`, independent ones none.
+
 ## 1.0.0026 (2026-10-30)
 - The band's `Tasks X/Y`, bar and percent count the rows the tabs count, on the desktop and in the terminal: Y = Active rows + Finished rows (+ archived runs), X = the complete finished rows (Done runs and `Accepted · no worker run` rows; Incomplete and Error rows are not). A run linked to no task counts as its own row. A flow with no rows keeps the orchestrator's total and accepted count. One function (`flowProgress`) feeds the band and the tab counts.
 - The terminal band draws its text row again: the terminal's kit has an `Svg` too (drawn as an empty box), so the flow row had shown only its buttons there.

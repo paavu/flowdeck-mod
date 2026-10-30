@@ -195,6 +195,18 @@ export type TaskPlan = {
   endedAt?: number | null
 }
 
+/** WARM for an hour after the main thread's last request, then COLD. */
+export type CacheMode = 'warm' | 'cold'
+
+/**
+ * The prompt cache as the band last saw it: when the main thread last sent a request (clock ms), the context the next
+ * request re-sends (tokens), the model's context window, and the model (null when not known yet).
+ */
+export type CacheFacts = { lastAt: number; tokens: number; window: number; model: string | null }
+
+/** Whether the cache card is open, remembered only for the mode it was chosen in. */
+export type CacheFold = { mode: CacheMode; open: boolean }
+
 declare module 'claude-code' {
   interface PluginState {
     'flowdeck': {
@@ -212,6 +224,12 @@ declare module 'claude-code' {
       plans: TaskPlan[]
       /** Why the band above the prompt last failed in this load (the panel's `band error` line), '' when it has not. */
       bandError: string
+      /** The prompt cache's facts for this session, null until the main thread made a request (or a resume seeded them). */
+      cache: CacheFacts | null
+      /** The cache card's Show/Hide choice, for the mode it was made in; null for the default (warm folded, cold open). */
+      cacheFold: CacheFold | null
+      /** The cache texts the band last showed (`cacheKey`): the 5-second tick writes it when they change, so the band redraws once a minute at most. */
+      cacheTick: string
     }
   }
 }
