@@ -8,8 +8,8 @@ import { agentState, HOUSEKEEPING, isComplete, isIncomplete, isLive, isSettled, 
 import { contextRows, contextSvg, toReading } from './context'
 import { isWorthKeeping, keyOf, planEntry, snapshot, VOLUME_MAX } from './archive'
 import { INDEX_FILE, parseIndexFile, recordOf, TRASH_DIR, TRASH_INDEX } from './archive-index'
-import { dataDir, getFile, listing, loadArchive, parseJson, readSession, restoreSession, saveSession, saveToStore, trashSession, writeData } from './archive-store'
-import type { Io, Moved } from './archive-store'
+import { dataDir, emptyTrash, getFile, listing, loadArchive, parseJson, readSession, restoreSession, saveSession, saveToStore, trashSession, writeData } from './archive-store'
+import type { Emptied, Io, Moved } from './archive-store'
 import { archiveSection, groupKey, isGroupOpen } from './archive-view'
 import type { ArchiveWords, FlowDrawing, FlowView, Planned } from './archive-view'
 import { foldGlyph } from './fold'
@@ -186,6 +186,13 @@ const STRINGS = {
     cancel: 'Cancel',
     trashFailed: 'could not move it to the trash',
     restoreFailed: 'could not restore it',
+    emptyTrash: 'Empty Trash ({n})',
+    emptyAsk: 'Erase {n} sessions for good? This cannot be undone.',
+    emptyAskOne: 'Erase 1 session for good? This cannot be undone.',
+    erase: 'Erase',
+    emptied: '{n} sessions erased, {m} failed',
+    emptiedOne: '1 session erased, {m} failed',
+    emptyFailed: 'could not empty the trash',
   },
   ru: {
     pane: 'flowdeck',
@@ -233,6 +240,13 @@ const STRINGS = {
     cancel: 'Отмена',
     trashFailed: 'не удалось переместить в корзину',
     restoreFailed: 'не удалось восстановить',
+    emptyTrash: 'Очистить корзину ({n})',
+    emptyAsk: 'Стереть навсегда сессии: {n}? Это нельзя отменить.',
+    emptyAskOne: 'Стереть навсегда сессии: 1? Это нельзя отменить.',
+    erase: 'Стереть',
+    emptied: 'стёрто сессий: {n}, не удалось: {m}',
+    emptiedOne: 'стёрто сессий: 1, не удалось: {m}',
+    emptyFailed: 'не удалось очистить корзину',
   },
 } as const
 
@@ -1021,6 +1035,8 @@ const io = ($: EngineInterface): Io => ({
   exists: path => $.fs.exists(path),
   storeGet: () => $.store.get('history'), // the store key keeps its name from before the rename
   storeSet: value => $.store.set('history', value),
+  statReal: path => $.fs.stat(path, { resolve: true }),
+  run: (argv, env) => $.process.run(argv, env ? { env, timeoutMs: 15_000 } : { timeoutMs: 15_000 }),
 })
 
 // The clock, or null when it cannot be read.
@@ -1138,6 +1154,24 @@ async function moveSession($: EngineInterface, to: 'trash' | 'archive', id: stri
     if (moved.lists) await showLists($, { ...moved.lists, warnings: [...moved.lists.warnings, ...failed] })
     else if (failed.length) await update($, archiveLists, prev => ({ ...asLists(prev), warnings: [...asLists(prev).warnings, ...failed] }))
     await dropDetail($, to === 'trash' ? 'archive' : 'trash', id)
+  } catch {
+    // A failing store leaves both lists as they are.
+  }
+}
+
+// Empty Trash, after its confirmation: the trashed sessions erased (archive-store.ts `emptyTrash`); `n sessions erased,
+// m failed` is said above the list when any session is left. Never throws into the press.
+async function emptyTrashPress($: EngineInterface): Promise<void> {
+  try {
+    await updatePanel($, prev => ({ ...prev, confirm: null }))
+    const now = await clockOr($, Date.now())
+    const done: Emptied = await emptyTrash(io($), project, now).catch((): Emptied => ({ ok: false, erased: 0, failed: 0, error: 'the erase stopped' }))
+    const s = tr()
+    const counts = (done.erased === 1 ? s.emptiedOne : s.emptied).replace('{n}', String(done.erased)).replace('{m}', String(done.failed))
+    const said = done.ok ? [] : [done.failed || done.erased ? counts : '', done.error ? `${s.emptyFailed}: ${done.error}` : ''].filter(Boolean)
+    if (done.lists) await showLists($, { ...done.lists, warnings: [...done.lists.warnings, ...said] })
+    else if (said.length) await update($, archiveLists, prev => ({ ...asLists(prev), warnings: [...asLists(prev).warnings, ...said] }))
+    await updateDetails($, prev => prev.filter(d => d.list !== 'trash'))
   } catch {
     // A failing store leaves both lists as they are.
   }
@@ -1871,7 +1905,8 @@ function tabRow($: EngineInterface, ui: Pick<Elements['desktop'], 'Box' | 'Text'
     const n = counts[tab]
     const text = n === null ? TAB_LABEL[tab] : `${TAB_LABEL[tab]} (${n})`
     const select = async () => {
-      await updatePanel($, prev => (prev.tab === tab ? prev : { ...prev, tab }))
+      // Leaving the Trash closes an open Empty Trash confirmation.
+      await updatePanel($, prev => (prev.tab === tab ? prev : { ...prev, tab, confirm: prev.confirm?.all ? null : prev.confirm }))
       if (tab === 'archive' || tab === 'trash') await loadOpenDetails($)
     }
     return tab === p.tab ? (
@@ -3017,6 +3052,10 @@ export const register: Register = (on, options) => {
       restoreTell: s.restoreTell,
       restore: s.restore,
       cancel: s.cancel,
+      emptyTrash: s.emptyTrash,
+      emptyAsk: s.emptyAsk,
+      emptyAskOne: s.emptyAskOne,
+      erase: s.erase,
     }
     // The Archive or Trash tab: the list from its index; a group's file is read when it opens and let go when it folds.
     const archivePart = (list: 'archive' | 'trash') => async (): Promise<RenderChildren> => {
@@ -3048,6 +3087,8 @@ export const register: Register = (on, options) => {
           ask: rec => updatePanel($, prev => ({ ...prev, confirm: { list, id: rec.id } })),
           confirm: rec => queueArchive(() => moveSession($, list === 'archive' ? 'trash' : 'archive', rec.id)),
           cancel: () => updatePanel($, prev => ({ ...prev, confirm: null })),
+          askEmpty: () => updatePanel($, prev => ({ ...prev, confirm: { list: 'trash', id: '', all: true } })),
+          empty: () => queueArchive(() => emptyTrashPress($)),
           more: async () => {
             await updatePanel($, prev => (list === 'archive' ? { ...prev, archiveLimit: prev.archiveLimit + ARCHIVE_PAGE } : { ...prev, trashLimit: prev.trashLimit + ARCHIVE_PAGE }))
             await loadOpenDetails($)

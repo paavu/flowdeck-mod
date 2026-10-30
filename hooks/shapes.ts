@@ -57,7 +57,13 @@ export function asPanel(v: unknown): Panel {
     // A page is never smaller than the default (a panel held from before 1.0.0025 had 10).
     archiveLimit: Math.max(ARCHIVE_PAGE, num(o.archiveLimit) ?? d.archiveLimit),
     trashLimit: Math.max(ARCHIVE_PAGE, num(o.trashLimit) ?? d.trashLimit),
-    confirm: isObj(o.confirm) && (o.confirm.list === 'archive' || o.confirm.list === 'trash') && typeof o.confirm.id === 'string' ? { list: o.confirm.list, id: o.confirm.id } : null,
+    confirm: !isObj(o.confirm)
+      ? null
+      : o.confirm.list === 'trash' && o.confirm.all === true
+        ? { list: 'trash', id: '', all: true }
+        : (o.confirm.list === 'archive' || o.confirm.list === 'trash') && typeof o.confirm.id === 'string'
+          ? { list: o.confirm.list, id: o.confirm.id }
+          : null,
     autoOpenedFor: text(o.autoOpenedFor, d.autoOpenedFor),
     tab: TABS.includes(o.tab as PanelTab) ? (o.tab as PanelTab) : d.tab,
   }

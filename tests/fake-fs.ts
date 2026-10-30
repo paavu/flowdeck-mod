@@ -37,6 +37,10 @@ export type FakeFs = {
   tried: { path: string; bytes: number }[]
   /** held before every call; resolve it later to let the call go on */
   delay: null | ((op: 'read' | 'write' | 'stat' | 'list' | 'exists', path: string) => Promise<void> | void)
+  /** symbolic links: a path and where it lands, as a resolving stat answers */
+  links: Record<string, string>
+  /** another spelling a resolving stat gives a path (a Windows drive path), with no link */
+  aliases: Record<string, string>
 }
 
 export function fakeFs(on: any, opts: { files?: Record<string, string>; fail?: Fail; unreadable?: string[]; tooBig?: string[] } = {}): FakeFs {
@@ -49,6 +53,8 @@ export function fakeFs(on: any, opts: { files?: Record<string, string>; fail?: F
     reads: [],
     tried: [],
     delay: null,
+    links: {},
+    aliases: {},
   }
   const names = (dir: string) => {
     const pre = `${dir.replace(/\/$/, '')}/`
@@ -79,8 +85,14 @@ export function fakeFs(on: any, opts: { files?: Record<string, string>; fail?: F
   on('fs.stat', async (_$: any, e: any) => {
     await fs.delay?.('stat', e.path)
     if (fs.fail.fs || fs.fail.stat) throw new Error('EIO')
+    // Asked to resolve, a folder holding files stats as a folder, and `links` says where a path lands (itself else).
+    if (e.resolve && !(e.path in fs.files) && Object.keys(fs.files).some(p => p.startsWith(`${e.path}/`))) {
+      return { value: { kind: 'dir', size: 0, mtimeMs: 0, isLink: false, realPath: fs.aliases[e.path] ?? e.path } }
+    }
     if (!(e.path in fs.files)) throw new Error('ENOENT')
-    return { value: { kind: 'file', size: utf8(fs.files[e.path]!), mtimeMs: 0, isLink: false } }
+    const link = fs.links[e.path]
+    const real = e.resolve ? { realPath: link ?? fs.aliases[e.path] ?? e.path } : {}
+    return { value: { kind: 'file', size: utf8(fs.files[e.path]!), mtimeMs: 0, isLink: !!link, ...real } }
   })
   on('fs.list', async (_$: any, e: any) => {
     await fs.delay?.('list', String(e.path))

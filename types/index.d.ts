@@ -170,8 +170,8 @@ export type Panel = {
   archiveLimit: number
   /** How many Trash rows are drawn; this session only. */
   trashLimit: number
-  /** The one move-to-trash or restore confirmation open, null when none; this session only. */
-  confirm: { list: 'archive' | 'trash'; id: string } | null
+  /** The one move-to-trash, restore or Empty Trash (`all`, list `trash`, id '') confirmation open, null when none; this session only. */
+  confirm: { list: 'archive' | 'trash'; id: string; all?: true } | null
   autoOpenedFor: string
   /** The list the panel's flowdeck group shows under its tabs; this session only. */
   tab: PanelTab

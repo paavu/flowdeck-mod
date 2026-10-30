@@ -53,6 +53,11 @@ export type ArchiveWords = {
   restoreTell: string
   restore: string
   cancel: string
+  /** `{n}`: how many sessions the Trash tab shows. */
+  emptyTrash: string
+  emptyAsk: string
+  emptyAskOne: string
+  erase: string
 }
 
 export type ArchiveView = {
@@ -85,6 +90,10 @@ export type ArchiveView = {
     confirm: (rec: ArchiveRecord) => unknown
     cancel: () => unknown
     more: () => unknown
+    /** Empty Trash: opens its confirmation. */
+    askEmpty: () => unknown
+    /** Erase, in Empty Trash's confirmation. */
+    empty: () => unknown
   }
 }
 
@@ -185,7 +194,7 @@ function sessionRow(v: ArchiveView, rec: ArchiveRecord, i: number): RenderChildr
   const { Svg, W, p } = v
   const key = keyOf(rec.id)
   const isOpen = isGroupOpen(p, v.list, rec.id, i)
-  const isAsking = p.confirm?.list === v.list && p.confirm.id === rec.id
+  const isAsking = p.confirm?.list === v.list && !p.confirm.all && p.confirm.id === rec.id
   const action = !v.canMove ? null : v.list === 'archive' ? (
     <Button key={`archive-del-${key}`} label="✕" plain dimColor onPress={() => v.on.ask(rec)} />
   ) : (
@@ -231,8 +240,28 @@ function safeRow(v: ArchiveView, rec: ArchiveRecord, i: number): RenderChildren 
   }
 }
 
-// The Archive or Trash tab's list: what the last read could not do, the sessions (a page of them, `Show more` for the
-// rest), newest first.
+// The Trash tab's first line while it holds sessions: `Empty Trash (n)`, or in its place the confirmation that names
+// what goes, with Erase and Cancel.
+function emptyLine(v: ArchiveView): RenderChildren {
+  const { Box, Text, Button } = v.ui
+  const w = v.words
+  const n = v.records.length
+  if (!(v.p.confirm?.list === 'trash' && v.p.confirm.all)) return <Button key="trash-empty" label={w.emptyTrash.replace('{n}', String(n))} plain onPress={v.on.askEmpty} />
+  return (
+    <Box key="trash-empty-confirm" flexDirection="column">
+      <Text bold wrap="truncate-end">
+        {(n === 1 ? w.emptyAskOne : w.emptyAsk).replace('{n}', String(n))}
+      </Text>
+      <Box flexDirection="row" gap={2}>
+        <Button key="trash-empty-yes" label={w.erase} plain onPress={v.on.empty} />
+        <Button key="trash-empty-cancel" label={w.cancel} plain onPress={v.on.cancel} />
+      </Box>
+    </Box>
+  )
+}
+
+// The Archive or Trash tab's list: what the last read could not do, Empty Trash (the Trash, when it holds sessions), the
+// sessions (a page of them, `Show more` for the rest), newest first.
 export function archiveSection(v: ArchiveView): RenderChildren {
   const { Box, Text, Button } = v.ui
   const { p, records } = v
@@ -245,6 +274,7 @@ export function archiveSection(v: ArchiveView): RenderChildren {
           {w}
         </Text>
       ))}
+      {v.list === 'trash' && v.canMove && records.length > 0 && <Box key="trash-empty-line" flexDirection="column" marginBottom={1}>{emptyLine(v)}</Box>}
       {records.length === 0 ? <Text dimColor>{v.list === 'archive' ? v.words.noArchive : v.words.trashEmpty}</Text> : shown.map((rec, i) => safeRow(v, rec, i))}
       {records.length > shown.length && <Button key={`${v.list}-more`} label={v.words.showMore.replace('{n}', String(records.length - shown.length))} plain onPress={v.on.more} />}
     </Box>

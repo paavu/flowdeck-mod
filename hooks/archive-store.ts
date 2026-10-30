@@ -3,7 +3,8 @@
 //
 // The engine's `$` may not cross an import (the hooks loader follows it only into functions of register.tsx), so these
 // take an `Io`: the few engine calls they make, built in register.tsx around `$`. The engine reads, writes, lists and
-// stats files; it cannot move, rename or remove one, so nothing here ever does (and nothing is ever erased).
+// stats files; it cannot move, rename or remove one. Nothing here moves a file, and one function alone erases:
+// `eraseSessionFile`, for Empty Trash, one session file in `.trash/` or `archive/` at a time through a host command.
 //
 // In `<project>/.claude/flowdeck/` (with its `*` .gitignore):
 // - `archive/<session>.json`: one saved session each (a flow or a finished plan), the whole entry; written first on every
@@ -14,7 +15,7 @@
 // - `archive-migrated.json`: which files of the archive before 1.0.0025 (`history*.json`) were imported; those files are
 //   left as they are.
 import type { ArchiveEntry, ArchiveLists, ArchiveRecord } from '../types'
-import { addEntry, byteLength, INDEX_MAX, isLegacyFile, isNewer, jsonBytes, LEGACY_INDEX, MAX_TEXT, mergeEntries, parseArchive, parseSession, WRITE_MAX } from './archive'
+import { addEntry, byteLength, INDEX_MAX, isLegacyFile, isNewer, jsonBytes, keyOf, LEGACY_INDEX, MAX_TEXT, mergeEntries, parseArchive, parseSession, WRITE_MAX } from './archive'
 import { ARCHIVE_DIR, byNewest, DAMAGED_DIR, INDEX_FILE, indexText, MARKER_FILE, parseIndexFile, reconcile, recordOf, sessionName, TRASH_DIR, TRASH_INDEX, trashName, trashStamp, upsertArchive, upsertTrash } from './archive-index'
 
 export type Io = {
@@ -26,6 +27,10 @@ export type Io = {
   /** The shared store's `history` key (its name from before the rename). */
   storeGet: () => Promise<unknown>
   storeSet: (value: ArchiveEntry[]) => Promise<unknown>
+  /** A stat with `realPath` (`$.fs.stat(path, { resolve: true })`); Empty Trash only. */
+  statReal?: (path: string) => unknown
+  /** A host command by argv, no shell (`$.process.run`); Empty Trash only. */
+  run?: (argv: string[], env?: Record<string, string>) => unknown
 }
 
 // Saved data lives in the project folder, so projects never overwrite each other; '' without a project.
@@ -463,6 +468,89 @@ export async function restoreSession(io: Io, project: string, id: string, now: n
   const trash = tr.records.map(r => (r.id === id && !(typeof r.restoredAt === 'number' && r.restoredAt >= (r.trashedAt ?? 0)) ? { ...r, restoredAt: now } : r))
   await writeIndex(io, dir, tr, trash, now, warnings)
   return { ok: true, lists: listsOf(records, trash, warnings) }
+}
+
+type Real = { kind: string; isLink: boolean; realPath: string }
+
+const statReal = async (io: Io, path: string): Promise<Real | null> => {
+  const s: unknown = await Promise.resolve()
+    .then(() => io.statReal?.(path))
+    .catch(() => null)
+  const o = s && typeof s === 'object' ? (s as { kind?: unknown; isLink?: unknown; realPath?: unknown }) : null
+  return o && typeof o.kind === 'string' && typeof o.realPath === 'string' && o.realPath ? { kind: o.kind, isLink: o.isLink === true, realPath: o.realPath } : null
+}
+
+const WINDOWS_ERASE = '$p = $env:FLOWDECK_ERASE_FILE; if (Test-Path -LiteralPath $p -PathType Leaf) { Remove-Item -LiteralPath $p -ErrorAction Stop } else { exit 3 }'
+
+export type Erased = 'erased' | 'gone' | 'failed'
+
+// The only code in flowdeck that erases a file (Empty Trash). It erases one session file in `.trash/` (side `trash`, a
+// trash copy) or `archive/` (side `archive`, the session's original), and only when every check holds: the record's file
+// name is exactly the one the store gives the record's own session there (its id's key and start, plus its trash time in
+// `.trash/`; [a-z0-9-] only, no separator, no wildcard), the path is `<dir>/<folder>/<name>`, and what it resolves to is
+// a plain file (no link) directly inside that resolved folder. One argv, no shell, no recursion: `unlink <file>` on macOS
+// and Linux, PowerShell `Remove-Item -LiteralPath` (the path passed in the environment) on Windows. `erased` only when
+// the file is then known to be gone; a file known to be missing is `gone`; anything else is `failed`, nothing erased.
+export async function eraseSessionFile(io: Io, dir: string, side: Side, rec: Pick<ArchiveRecord, 'id' | 'file'>): Promise<Erased> {
+  const name = rec.file
+  const shape = side === 'trash' ? '-\\d+(?:-\\d+)?-t\\d+(?:-\\d+)?\\.json' : '-\\d+(?:-\\d+)?\\.json'
+  if (!new RegExp(`^${keyOf(rec.id)}${shape}$`).test(name) || !dir || !io.run || !io.statReal) return 'failed'
+  const folder = `${dir}/${folderOf(side)}`
+  const path = `${folder}/${name}`
+  const there = await isThere(io, path)
+  if (there === 'no') return 'gone'
+  if (there === 'unknown') return 'failed'
+  const [d, f] = [await statReal(io, folder), await statReal(io, path)]
+  if (!d || !f || d.kind !== 'dir' || f.kind !== 'file' || f.isLink) return 'failed'
+  const base = d.realPath.replace(/[\\/]+$/, '')
+  if (f.realPath !== `${base}/${name}` && f.realPath !== `${base}\\${name}`) return 'failed'
+  const isWindows = /^[A-Za-z]:[\\/]|^\\\\/.test(base)
+  const argv = isWindows ? ['powershell.exe', '-NoProfile', '-NonInteractive', '-Command', WINDOWS_ERASE] : ['unlink', f.realPath]
+  await Promise.resolve()
+    .then(() => io.run!(argv, isWindows ? { FLOWDECK_ERASE_FILE: f.realPath } : undefined))
+    .catch(() => null)
+  return (await isThere(io, path)) === 'no' ? 'erased' : 'failed'
+}
+
+export type Emptied = { ok: boolean; erased: number; failed: number; error?: string; lists?: ArchiveLists }
+
+// Empty Trash, session by session (every id the trash index lists; `erased` and `failed` count sessions). A session the
+// Trash shows (reconcile: hidden from the Archive) loses its original in `archive/` first, then every trash copy; a
+// session back in the Archive (its copy already restored) loses only its copies, its archive file stays. A file already
+// gone counts as erased; when the original cannot be erased its copies are left as they are. The trash index is then
+// written with the records of the sessions that failed only (a copy of theirs that went shows `file missing`), so the
+// user can press again. Nothing else is touched: not `archive-index.json` (an erased session's record stays there,
+// hidden by its `trashedAt`, marked missing on the next load), `.trash/damaged/`, or any file not named by a record.
+export async function emptyTrash(io: Io, project: string, now: number): Promise<Emptied> {
+  if (!project) return { ok: false, erased: 0, failed: 0, error: 'no project folder' }
+  const dir = dataDir(project)
+  const { arch, tr, view } = await both(io, dir, now)
+  const warnings = [...arch.warnings, ...tr.warnings]
+  if (!tr.canWrite) return { ok: false, erased: 0, failed: 0, error: `${TRASH_DIR}/${TRASH_INDEX} cannot be written`, lists: { ...view, warnings } }
+  const binned = new Set(view.trash.map(r => r.id))
+  const ids = [...new Set(tr.records.map(r => r.id))]
+  const failed = new Set<string>()
+  const went = new Set<ArchiveRecord>()
+  for (const id of ids) {
+    const original = binned.has(id) ? arch.records.find(r => r.id === id && r.source !== 'store' && r.file) : undefined
+    if (original && (await eraseSessionFile(io, dir, 'archive', original)) === 'failed') {
+      failed.add(id)
+      continue
+    }
+    for (const rec of tr.records.filter(r => r.id === id)) {
+      if ((await eraseSessionFile(io, dir, 'trash', rec)) === 'failed') failed.add(id)
+      else went.add(rec)
+    }
+  }
+  const counts = { erased: ids.length - failed.size, failed: failed.size }
+  const kept = tr.records.filter(r => failed.has(r.id)).map(r => (went.has(r) ? { ...r, missing: true } : r))
+  if (kept.length === tr.records.length && !went.size) return { ok: !failed.size, ...counts, lists: { ...view, warnings } }
+  if (!(await writeIndex(io, dir, tr, kept, now, warnings))) {
+    // The index still lists the erased copies: they show as `file missing`, as the next load marks them.
+    const shown = tr.records.map(r => (went.has(r) ? { ...r, missing: true } : r))
+    return { ok: false, ...counts, error: `could not write ${TRASH_DIR}/${TRASH_INDEX}`, lists: listsOf(arch.records, shown, warnings) }
+  }
+  return { ok: !failed.size, ...counts, lists: listsOf(arch.records, kept, warnings) }
 }
 
 // One session's entry for an open group: its file in `archive/` or `.trash/`, or the shared store's copy; null when it
