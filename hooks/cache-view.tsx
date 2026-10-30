@@ -1,9 +1,10 @@
 // The prompt cache in the band: the WARM / COLD chip with its summary and the fold chevron beside it for the band's row,
-// and the card below the row (idle time, tokens, the TTL line, the next message's cost per model, `prices are estimates`).
+// and the card below the row (idle time, tokens, the TTL line, keep warm's state, what a renewal costs beside a cold
+// restart, the next message's cost per model, `prices are estimates`).
 // The desktop draws Svgs, the terminal plain text. It draws only: the view, the fold and the press come from register.tsx.
 import type { Elements, RenderChildren } from 'claude-code'
 
-import { CACHE_HUE, CACHE_INK, CACHE_WORD, costLabel, FOOTER, MODELS, nextCost, summaryText, tokText, TTL_MS, ttlText, usd } from './cache'
+import { CACHE_HUE, CACHE_INK, CACHE_WORD, costLabel, FOOTER, keepText, MODELS, nextCost, renewalText, summaryText, tokText, TTL_MS, ttlText, usd } from './cache'
 import type { CacheMode, CacheView } from './cache'
 import { foldGlyph } from './fold'
 import { idleText } from './time'
@@ -56,10 +57,12 @@ export function chipSvg(v: CacheView, wrap: (w: number, h: number, body: string)
 
 const priced = (v: CacheView) => MODELS.map(m => ({ m, cost: usd(nextCost(m, v.mode, v.tokens)), isMine: v.model?.id === m.id }))
 
-/** The card's facts as plain lines, the terminal's card (and the desktop card's alt). */
-export function cardLines(v: CacheView): { facts: string; label: string; models: { name: string; cost: string; isMine: boolean }[]; footer: string } {
+/** The card's facts as plain lines, the terminal's card (and the desktop card's alt); `renewal` is null for an unpriced model. */
+export function cardLines(v: CacheView): { facts: string; keep: string; renewal: string | null; label: string; models: { name: string; cost: string; isMine: boolean }[]; footer: string } {
   return {
     facts: `idle ${idleText(v.idleMs)} · ${tokText(v.tokens)} tokens cached · ${ttlText(v)}`,
+    keep: keepText(v.keep),
+    renewal: renewalText(v),
     label: `${costLabel(v.mode)}:`,
     models: priced(v).map(p => ({ name: p.m.name, cost: p.cost, isMine: p.isMine })),
     footer: FOOTER,
@@ -82,27 +85,31 @@ export function cardSvg(v: CacheView, W: number, wrap: (w: number, h: number, bo
   g += t(PAD, 48, ttl, 11.5, `fill="${hue}" font-weight="600"`)
   const barX = Math.round(PAD + textWidth(ttl, 11.5, true) + 10)
   const barW = Math.max(20, width - PAD - barX)
-  const gone = Math.min(1, v.idleMs / TTL_MS)
+  const gone = Math.min(1, v.warmMs / TTL_MS)
   g += `<rect class="k" x="${barX}" y="41" width="${barW}" height="6" rx="3"/>`
   g += `<rect x="${barX}" y="41" width="${Math.max(gone > 0 ? 3 : 0, Math.round(barW * gone))}" height="6" rx="3" fill="${hue}"/>`
+  // Keep warm's state, then what a renewal costs beside a cold restart.
+  const lines = cardLines(v)
+  g += t(PAD, 68, lines.keep, 11.5, 'class="t" font-weight="500"')
+  if (lines.renewal) g += t(PAD, 86, lines.renewal, 11, 'class="s"')
   // What the next message costs on each model; the session's model is marked YOU.
-  g += t(PAD, 71, costLabel(v.mode), 11, 'class="s"')
+  const labelY = (lines.renewal ? 86 : 68) + 23
+  g += t(PAD, labelY, costLabel(v.mode), 11, 'class="s"')
   const cols = width >= 380 ? 4 : 2
   const cellW = (width - PAD * 2) / cols
   const ROW = 36
   priced(v).forEach((p, i) => {
     const x = Math.round(PAD + (i % cols) * cellW)
-    const y = 92 + Math.floor(i / cols) * ROW
+    const y = labelY + 21 + Math.floor(i / cols) * ROW
     g += t(x, y, p.m.name, 11, p.isMine ? `fill="${hue}" font-weight="700"` : 'class="s" font-weight="600"')
     if (p.isMine) g += chipShape(x + Math.round(textWidth(p.m.name, 11, true)) + 6, y - 10, 'YOU', v.mode, 8).svg
     g += t(x, y + 18, p.cost, 14, p.isMine ? 'class="t" font-weight="700"' : 'class="m" font-weight="500"')
   })
-  const footerY = 92 + Math.ceil(MODELS.length / cols) * ROW + 4
+  const footerY = labelY + 21 + Math.ceil(MODELS.length / cols) * ROW + 4
   g += t(PAD, footerY, FOOTER, 10.5, 'class="m"')
   const height = footerY + 10
-  const lines = cardLines(v)
   const alt =
-    `Cache ${v.mode}: ${lines.facts}. ${costLabel(v.mode)}: ` +
+    `Cache ${v.mode}: ${lines.facts}. ${lines.keep}.${lines.renewal ? ` ${lines.renewal}.` : ''} ${costLabel(v.mode)}: ` +
     lines.models.map(m => `${m.name} ${m.cost}${m.isMine ? ' (you)' : ''}`).join(', ') +
     `. ${FOOTER}.`
   const body = `<rect class="tile" x="0" y="0" width="${width}" height="${height}" rx="10"/>${g}`
@@ -167,6 +174,8 @@ export function cacheDrawing(
   const card = open ? (
     <Box key="cache-card" flexDirection="column">
       <Text wrap="truncate-end">{lines.facts}</Text>
+      <Text wrap="truncate-end">{lines.keep}</Text>
+      {lines.renewal ? <Text wrap="truncate-end">{lines.renewal}</Text> : null}
       <Text wrap="truncate-end">{lines.label}</Text>
       <Text wrap="truncate-end">
         {lines.models.map((m, i) => (

@@ -19,13 +19,13 @@ import { importPlan, isFinished, isStoredStep, normalize, percent, PLAN_ID, plac
 import { planBandSvg, planBandText, planRows, planSvg, STATE_COLOR, stateLabel } from './plan-view'
 import { acceptedOf, acceptedOnly, allTasksDone, cleanAfter, linkRuns, norm, shortTitle, taskOf, taskTag, unstarted, workerTier } from './tasks'
 import type { TaskLike } from './tasks'
-import { ARCHIVE_PAGE, asAgents, asCacheFacts, asCacheFold, asCacheTick, asDetails, asFlow, asLists, asLive, asMeta, asNow, asPanel, asReading, asUsage, LIVE_DEFAULT, PANEL_DEFAULT } from './shapes'
+import { ARCHIVE_PAGE, asAgents, asCacheFacts, asCacheFold, asCacheTick, asDetails, asFlow, asKeepWarm, asLists, asLive, asMeta, asNow, asPanel, asReading, asUsage, LIVE_DEFAULT, PANEL_DEFAULT } from './shapes'
 import { changeLive, endRuns, IDLE_FINISH_MS, isGone, LIVE_BEAT_MS, LIVE_STALE_MS, liveKey, readLive, without } from './live'
 import type { LiveRecord } from './live'
 import { VERSION } from './version'
 import { live, record, resetKey, resets, toWindows, usageRows, usageSvg } from './usage'
-import { cacheKey, isCardOpen, isShowable, measured, remeasured, seeded, stamped, toggledFold, viewOf } from './cache'
-import type { CacheFacts } from './cache'
+import { cacheKey, isCardOpen, isRenewDue, isShowable, KEEP_WARM_DEFAULT, measured, remeasured, renewalEnded, seeded, stamped, toggledFold, userSpoke, viewOf } from './cache'
+import type { CacheFacts, KeepWarm } from './cache'
 import { cacheDrawing } from './cache-view'
 import type { CacheDrawing, CacheUi } from './cache-view'
 
@@ -46,6 +46,8 @@ const bandError = atom({ plugin: 'flowdeck', key: 'bandError' } as const, '')
 const cacheFacts = atom({ plugin: 'flowdeck', key: 'cache' } as const, null as CacheFacts | null)
 const cacheFold = atom({ plugin: 'flowdeck', key: 'cacheFold' } as const, null)
 const cacheTick = atom({ plugin: 'flowdeck', key: 'cacheTick' } as const, '')
+// Keep warm's bookkeeping (cache.ts `keepStatus`): the main turn running, the user's last message, renewals, failures.
+const keepWarm = atom({ plugin: 'flowdeck', key: 'keepWarm' } as const, KEEP_WARM_DEFAULT)
 // The shown flow's owner session and activity (flow-live.json), and what reading or writing that file could not do.
 const liveState = atom({ plugin: 'flowdeck', key: 'live' } as const, LIVE_DEFAULT)
 const liveError = atom({ plugin: 'flowdeck', key: 'liveError' } as const, '')
@@ -95,6 +97,14 @@ const readLiveState = async ($: EngineInterface) => asLive(await read($, liveSta
 const readCache = async ($: EngineInterface): Promise<CacheFacts | null> => asCacheFacts(await read($, cacheFacts))
 const updateCache = async ($: EngineInterface, change: (c: CacheFacts | null) => CacheFacts | null): Promise<void> => {
   await update($, cacheFacts, prev => change(asCacheFacts(prev)))
+}
+const readKeepWarm = async ($: EngineInterface): Promise<KeepWarm> => asKeepWarm(await read($, keepWarm))
+const updateKeepWarm = async ($: EngineInterface, change: (k: KeepWarm) => KeepWarm): Promise<void> => {
+  await update($, keepWarm, prev => {
+    const was = asKeepWarm(prev)
+    const next = change(was)
+    return next === was ? prev : next
+  })
 }
 
 const TOOL = 'mcp__flowdeck__progress'
@@ -1693,19 +1703,58 @@ function noteFault($: EngineInterface, kind: 'band' | 'live', why: string): void
 // which holds only for the mode it was made in.
 async function stampCache($: EngineInterface, model: string): Promise<void> {
   const at = await $.clock.now()
-  const was = viewOf(await readCache($), at)
+  const was = viewOf(await readCache($), at, await readKeepWarm($))
   await updateCache($, c => stamped(c, at, model))
   if (was?.mode !== 'warm' && asCacheFold(await read($, cacheFold))) await update($, cacheFold, () => null)
 }
 
+// The cache at `now` with keep warm's bookkeeping and the panel's switch.
+const cacheView = async ($: EngineInterface, c: CacheFacts | null, now: number) =>
+  isShowable(c) ? viewOf(c, now, await readKeepWarm($), (await readPanel($)).isKeepWarm) : null
+
 // The band shows whole minutes: the tick writes the texts it would show only when they change, so the band redraws once
-// a minute at most (each redraw gives its buttons new handles).
+// a minute at most (each redraw gives its buttons new handles). It also sends keep warm's renewal when one is due.
 async function tickCache($: EngineInterface): Promise<void> {
   const c = await readCache($)
   const shown = asCacheTick(await read($, cacheTick))
   if (!isShowable(c) && !shown) return
-  const key = cacheKey(viewOf(c, await $.clock.now()))
+  const now = await $.clock.now()
+  const k = isShowable(c) ? await readKeepWarm($) : KEEP_WARM_DEFAULT
+  const isOn = isShowable(c) && (await readPanel($)).isKeepWarm
+  const key = cacheKey(viewOf(c, now, k, isOn))
   if (key !== shown) await update($, cacheTick, () => key)
+  if (isRenewDue(c, k, isOn, now)) await renewNow($, k, now)
+}
+
+// Keep warm (cache.ts `keepStatus`, README "Keep warm"). One renewal at a time; while one is out, a main turn that
+// no prompt started is the renewal's own request, should the engine raise one, and is not taken for the user's.
+let renewing = false
+let prompted = false
+const RENEW_PROMPT = 'This request only renews the prompt cache for an idle session. Reply with the single word: ok'
+
+const isRenewalEcho = async ($: EngineInterface): Promise<boolean> => renewing && (await readKeepWarm($)).turnAt === 0
+
+// The renewal itself: one tool-less side request over the main thread's transcript as it was last sent (`$.model.fork`,
+// Claude Code 2.1.288 and later), so the API reads the whole context from the cache and its hour starts again. Nothing
+// is added to the transcript. True when the request was made and answered (a reply without text read the cache too).
+async function renewCache($: EngineInterface): Promise<boolean> {
+  const r = await $.model.fork({ prompt: RENEW_PROMPT })
+  return r.isAnswered || r.reason === 'empty-reply'
+}
+
+// A renewal now (cache.ts `isRenewDue` said so), never once the session ended. A failure is counted, backs off and
+// shows on the card; it never reaches the band or the panel as an error.
+async function renewNow($: EngineInterface, k: KeepWarm, at: number): Promise<void> {
+  if (renewing || (endedSession && endedSession === sessionId)) return
+  renewing = true
+  prompted = false // only a prompt from now on starts a real turn while the renewal is out
+  try {
+    await updateKeepWarm($, x => ({ ...x, triedAt: at }))
+    const isRenewed = await renewCache($).catch(() => false)
+    await updateKeepWarm($, x => renewalEnded(x, at, k.userAt, isRenewed))
+  } finally {
+    renewing = false
+  }
 }
 
 // The band's cache part, null with nothing to show yet. A part that cannot be drawn is said (noteFault) and left out,
@@ -1714,10 +1763,10 @@ async function cacheBandPart($: EngineInterface, ui: CacheUi, bandW: number): Pr
   try {
     await read($, cacheTick) // read so the minute tick redraws the band
     const c = await readCache($)
-    const v = isShowable(c) ? viewOf(c, await $.clock.now()) : null
+    const v = isShowable(c) ? await cacheView($, c, await $.clock.now()) : null
     if (!v) return null
     const toggle = async () => {
-      const mode = viewOf(await readCache($), await $.clock.now())?.mode
+      const mode = (await cacheView($, await readCache($), await $.clock.now()))?.mode
       if (mode) await update($, cacheFold, f => toggledFold(asCacheFold(f), mode))
     }
     return cacheDrawing(ui, v, isCardOpen(asCacheFold(await read($, cacheFold)), v.mode), toggle, bandW, svg)
@@ -1725,6 +1774,18 @@ async function cacheBandPart($: EngineInterface, ui: CacheUi, bandW: number): Pr
     noteFault($, 'band', `cache: ${err instanceof Error ? err.message : String(err)}`)
     return null
   }
+}
+
+// Keep warm's switch per project: the engine-store key `keepWarm` maps each project folder to its choice (on unless set).
+const KEEP_WARM_KEY = 'keepWarm'
+async function saveKeepWarm($: EngineInterface, on: boolean): Promise<void> {
+  const all: unknown = await $.store.get(KEEP_WARM_KEY)
+  await $.store.set(KEEP_WARM_KEY, { ...(isPlansObject(all) ? all : {}), [project]: on })
+}
+async function loadKeepWarm($: EngineInterface): Promise<boolean | undefined> {
+  const all: unknown = await $.store.get(KEEP_WARM_KEY)
+  const on = isPlansObject(all) ? all[project] : undefined
+  return typeof on === 'boolean' ? on : undefined
 }
 
 // The buttons on top of the panel, and at the row's far end the dim version of the code running (version.ts). They read
@@ -1766,6 +1827,18 @@ function topToggleRow($: EngineInterface, ui: Pick<Elements['desktop'], 'Box' | 
       }}
     />
   )
+  const toggleKeepWarm = (
+    <Button
+      key="keep-warm"
+      label={`${p.isKeepWarm ? '▾' : '▸'} Keep warm`}
+      plain
+      onPress={async () => {
+        const on = !p.isKeepWarm
+        await updatePanel($, prev => ({ ...prev, isKeepWarm: on }))
+        await saveKeepWarm($, on).catch(() => {})
+      }}
+    />
+  )
   // One line, never wrapped: the buttons keep their width and only the spacer gives way.
   return (
     <Box key="top-toggles" flexDirection="row" flexWrap="nowrap" gap={1}>
@@ -1773,6 +1846,7 @@ function topToggleRow($: EngineInterface, ui: Pick<Elements['desktop'], 'Box' | 
         {toggleContext}
         {toggleUsage}
         {toggleBand}
+        {toggleKeepWarm}
       </Box>
       <Box flexGrow={1} />
       <Box flexShrink={0}>
@@ -1832,6 +1906,8 @@ export const register: Register = (on, options) => {
     if (typeof storedPlansShown === 'boolean') await updatePanel($, prev => ({ ...prev, isPlansShown: storedPlansShown }))
     const storedArchiveShown = await $.store.get('historyShown').catch(() => undefined)
     if (typeof storedArchiveShown === 'boolean') await updatePanel($, prev => ({ ...prev, isArchiveShown: storedArchiveShown }))
+    const storedKeepWarm = await loadKeepWarm($).catch(() => undefined)
+    if (typeof storedKeepWarm === 'boolean') await updatePanel($, prev => ({ ...prev, isKeepWarm: storedKeepWarm }))
     // The Archive and Trash lists from their indexes (healed, the old archive imported once, this project's store entries
     // put into files), then the first group's file.
     const loadedAt = await clockOr($, 0)
@@ -1993,7 +2069,7 @@ export const register: Register = (on, options) => {
     // Ticks the running agents' clocks; quiet when nothing runs. Every tick redraws the pane and gives its buttons new
     // handles, so it stays slow: a click on a handle from before the redraw is refused by the desktop app.
     $.clock.every(TICK_MS, () => {
-      void tickCache($).catch(() => {}) // the band's WARM countdown and its flip to COLD
+      void tickCache($).catch(() => {}) // the band's WARM countdown, its flip to COLD and keep warm's renewal
       void tickLive($).catch(() => {}) // flow-live.json, the idle finish, other sessions' records
       void (async () => {
         const list = await readAgents($)
@@ -2221,7 +2297,15 @@ export const register: Register = (on, options) => {
   })
 
   // The user's own prompt (typed, or sent from the phone over Remote Control) answers whatever a plan was waiting on.
+  // It is also the user's message keep warm counts renewals from; an SDK host's turn (`sdk`) counts too, as a host may
+  // send what the user typed that way.
   on('prompt.submit', async ($, e, next) => {
+    prompted = true
+    const kind = e.origin?.kind
+    if ((kind === 'composer' || kind === 'bridge' || kind === 'sdk') && !e.isMeta) {
+      const at = await $.clock.now().catch(() => 0)
+      if (at) await updateKeepWarm($, k => userSpoke(k, at)).catch(() => {})
+    }
     if (e.origin?.kind === 'composer' || e.origin?.kind === 'bridge') {
       try {
         if ((await readPlans($)).some(p => p.state === 'needs_input')) {
@@ -2290,9 +2374,20 @@ export const register: Register = (on, options) => {
     return started
   })
 
+  // A main turn starts: keep warm sends nothing until it ends (turn.complete).
+  on('turn.start', async ($, e, next) => {
+    const result = await next(e)
+    if (!e.agentId && (!renewing || prompted)) {
+      prompted = false
+      const at = await $.clock.now().catch(() => 0)
+      if (at) await updateKeepWarm($, k => ({ ...k, turnAt: at })).catch(() => {})
+    }
+    return result
+  })
+
   // Each model request of a subagent: live context, tokens and cost. A main request reads or writes the prompt cache.
   on('turn.step', async function* ($, e, next) {
-    if (!e.agentId) await stampCache($, e.model).catch(() => {})
+    if (!e.agentId && !(await isRenewalEcho($).catch(() => false))) await stampCache($, e.model).catch(() => {})
     const result = yield* next(e)
     const agentId = e.agentId
     const usage = result.usage
@@ -2367,6 +2462,8 @@ export const register: Register = (on, options) => {
       )
       await update($, now, () => at)
     }
+    if (!agentId && (await isRenewalEcho($).catch(() => false))) return next(e) // keep warm's own request, not a turn of the session
+    if (!agentId) await updateKeepWarm($, k => (k.turnAt ? { ...k, turnAt: 0 } : k)).catch(() => {}) // no main turn runs now
     const result = await next(e)
     if (!agentId) {
       const context = await refreshContext($).catch(() => null) // a subagent's turn fills its own window, not this one
@@ -2403,6 +2500,7 @@ export const register: Register = (on, options) => {
         .then(async c => {
           await updateCache($, () => c)
           await update($, cacheFold, () => null)
+          await updateKeepWarm($, k => ({ ...KEEP_WARM_DEFAULT, turnAt: k.turnAt })) // a new cache: nothing renewed yet
         })
         .catch(() => {}) // the band never holds up a session's start
     }

@@ -1,7 +1,7 @@
 // The held values as the panel and the band read them. A reload keeps what an older flowdeck wrote, in its older shape,
 // so every read goes through these: defaults fill what is missing, a field of the wrong kind falls back to its default,
 // fields no longer used are dropped, and entries that are no entry at all are left out.
-import type { AgentRun, AgentStatus, ArchiveDetail, ArchiveEntry, ArchiveLists, CacheFacts, CacheFold, Flow, LiveState, Panel, PanelTab, Phase, PlannedTask, Reading, Sample, Samples, UsageWindow } from '../types'
+import type { AgentRun, AgentStatus, ArchiveDetail, ArchiveEntry, ArchiveLists, CacheFacts, CacheFold, Flow, KeepWarm, LiveState, Panel, PanelTab, Phase, PlannedTask, Reading, Sample, Samples, UsageWindow } from '../types'
 import { parseArchive, stampsOf } from './archive'
 import { parseRecords } from './archive-index'
 
@@ -15,6 +15,8 @@ export const PANEL_DEFAULT: Panel = {
   isUsageRemaining: true,
   isPlansShown: true,
   isBandHidden: false,
+  // On unless the user switched it off in this project (the store key `keepWarm` wins at session start).
+  isKeepWarm: true,
   // Shown unless the user hid it (the store key `historyShown` wins at session start).
   isArchiveShown: true,
   openEntries: [],
@@ -46,6 +48,8 @@ export function asPanel(v: unknown): Panel {
     isUsageRemaining: bool(o.isUsageRemaining, d.isUsageRemaining),
     isPlansShown: bool(o.isPlansShown, d.isPlansShown),
     isBandHidden: bool(o.isBandHidden, d.isBandHidden),
+    // A panel held from before 1.0.0030 has no switch: keep warm is on.
+    isKeepWarm: bool(o.isKeepWarm, d.isKeepWarm),
     isArchiveShown: bool(o.isArchiveShown, d.isArchiveShown),
     openEntries: strings(o.openEntries),
     openAgents: strings(o.openAgents),
@@ -209,6 +213,13 @@ export const asCacheFold = (v: unknown): CacheFold | null =>
   isObj(v) && (v.mode === 'warm' || v.mode === 'cold') && typeof v.open === 'boolean' ? { mode: v.mode, open: v.open } : null
 
 export const asCacheTick = (v: unknown): string => text(v, '')
+
+// Keep warm's bookkeeping; a value held from before 1.0.0030 (none), or a field of the wrong kind, reads as nothing yet.
+export const asKeepWarm = (v: unknown): KeepWarm => {
+  const o = isObj(v) ? v : {}
+  const n = (x: unknown) => Math.max(0, num(x) ?? 0)
+  return { turnAt: n(o.turnAt), userAt: n(o.userAt), renewals: n(o.renewals), renewedAt: n(o.renewedAt), failures: n(o.failures), triedAt: n(o.triedAt) }
+}
 
 export const LIVE_DEFAULT: LiveState = { owner: '', activityAt: 0, key: '', writtenAt: 0 }
 

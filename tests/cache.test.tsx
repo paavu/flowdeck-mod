@@ -3,7 +3,7 @@ import { describe, expect, mock, test } from 'claude-code/testing'
 import { coldCost, familyOf, isCardOpen, MODELS, nextCost, summaryText, toggledFold, tokText, TTL_MS, ttlText, usd, viewOf, warmCost } from '../hooks/cache'
 import { CACHE_FOLD_PX } from '../hooks/cache-view'
 import { asCacheFacts, asCacheFold, asCacheTick } from '../hooks/shapes'
-import { idleText, minutesLeft } from '../hooks/time'
+import { hhmm, idleText, minutesLeft } from '../hooks/time'
 
 // The prompt cache in the band: WARM for an hour after the main thread's last request, then COLD with the next
 // message's cost; the card the chevron beside the chip opens and folds; the facts' hooks; held values from older shapes.
@@ -13,9 +13,10 @@ const MIN = 60_000
 const SURFACES = ['desktop', 'terminal'] as const
 const TOKENS = 770_000
 
-function engine(on: any, opts: { tokens?: number; model?: string } = {}) {
+// Nothing answers `$.model.fork` here, so a keep-warm renewal fails quietly; tests/keep-warm.test.tsx answers it.
+function engine(on: any, opts: { tokens?: number; model?: string; store?: Record<string, unknown> } = {}) {
   const clock = mock.clock(on, { now: NOW })
-  mock.store(on)
+  mock.store(on, opts.store)
   const ctx = { tokens: opts.tokens ?? TOKENS }
   const logs: string[] = []
   let tickWrites = 0
@@ -392,7 +393,8 @@ describe('the chip in the band', () => {
 
 describe('Show and Hide', () => {
   for (const surface of SURFACES) {
-    test(`warm starts folded, cold starts open, a choice holds until the mode flips (${surface})`, async ($, on) => {
+    // Seven hours of 5-second ticks: it took about 4.6 s before keep warm, so it gets more than the default 5 s.
+    test(`warm starts folded, cold starts open, a choice holds until the mode flips (${surface})`, { timeoutMs: 15_000 }, async ($, on) => {
       const { clock } = engine(on)
       await start($)
       await mainTurn($)
@@ -408,7 +410,7 @@ describe('Show and Hide', () => {
       if (surface === 'desktop') {
         const alt = l.alts.find(a => a.startsWith('Cache warm'))!
         expect(alt).toBe(
-          'Cache warm: idle 18m · 770k tokens cached · cold in 42m. next message, cache read: Fable $0.19, Opus $0.15 (you), Sonnet $0.15, Haiku $0.04. prices are estimates.',
+          `Cache warm: idle 18m · 770k tokens cached · cold in 42m. keep warm: renews at ${hhmm(NOW + 50 * MIN)}. renewal ≈ $0.15 · cold ≈ $6.16. next message, cache read: Fable $0.19, Opus $0.15 (you), Sonnet $0.15, Haiku $0.04. prices are estimates.`,
         )
         const card = l.svgs[l.alts.indexOf(alt)]!
         expect(card).toContain('YOU')
@@ -445,14 +447,14 @@ describe('Show and Hide', () => {
   }
 
   test('a cold card names the re-cache price per model and marks the session model', async ($, on) => {
-    const { clock } = engine(on)
+    const { clock } = engine(on, { store: { keepWarm: { '': false } } }) // keep warm switched off in this project
     await start($)
     await mainTurn($, 'claude-fable-5')
     await clock.set(NOW + 2 * TTL_MS)
     const d = await look($, 'desktop')
     expect(d.chip).toBe('COLD: 2h 0m · $15.40')
     expect(d.alts.find(a => a.startsWith('Cache cold'))).toBe(
-      'Cache cold: idle 2h 0m · 770k tokens cached · cold for 1h 0m. next message, re-cache (1-hour write): Fable $15.40 (you), Opus $6.16, Sonnet $3.08, Haiku $0.77. prices are estimates.',
+      'Cache cold: idle 2h 0m · 770k tokens cached · cold for 1h 0m. keep warm: off. renewal ≈ $0.19 · cold ≈ $15.40. next message, re-cache (1-hour write): Fable $15.40 (you), Opus $6.16, Sonnet $3.08, Haiku $0.77. prices are estimates.',
     )
     const t = await look($, 'terminal')
     expect(t.texts.some(x => x.startsWith('Fable $15.40 YOU · Opus $6.16'))).toBe(true)

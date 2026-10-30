@@ -2,6 +2,11 @@
 
 Versions are `M.m.xxxx`; every build bumps the 4-digit build number. Details and rulings: `docs/ledger.md`, `docs/design.md`.
 
+## 1.0.0030 (2026-10-30)
+- Keep warm: an idle session's prompt cache is renewed before it goes cold, by one side request over the main thread's transcript (`$.model.fork`, Claude Code 2.1.288 or later; Cache Bell's renewal method, built in) that adds nothing to the transcript. It renews at minute 50 of the cache's hour (`RENEW_AT_MS`), only for a context of at least 80,000 tokens (`KEEP_WARM_MIN_TOKENS`), while no main turn runs, at most twice between two of the user's messages (`KEEP_WARM_MAX_RENEWALS`); only the user's own message starts the count again. Never while cold (a machine that slept past the hour, a resume after it), never in the hour's last minute, never twice in a minute, never after the session ended. A failure backs off 2 minutes and stops after the second in an idle period (`KEEP_WARM_MAX_FAILURES`); it never shows as an error.
+- `Keep warm` in the panel's top row, after `Band`, in its style (`▾` on, `▸` off): on by default, saved per project (mod store key `keepWarm`). A panel held by an older version reads as on.
+- The cache card: a keep warm line (`keep warm: renews at 14:32`, `kept warm ×1 · renews at 15:22`, `kept warm ×2 · limit reached`, `keep warm: failed`, `keep warm: off`, …) and what a renewal costs beside a cold restart (`renewal ≈ $0.15 · cold ≈ $6.16`). The band row and the chip keep their width; after a renewal the chip counts the hour from it, while the card's idle time stays since the main thread's last request. Renewals count against plan usage limits like any request.
+
 ## 1.0.0029 (2026-10-30)
 - No more `Collapse` / `Expand` in the panel: the Active and Finished lists always show in full. A panel held collapsed by an older version reads as a full one. The per-row fold chevrons stay.
 - The band's prompt cache: the `Show` / `Hide` button is gone; a small dim chevron right after the `WARM` / `COLD` chip (`▸` / `▾`) opens or folds the card, on the desktop and in the terminal. The chip looks as before (the kit cannot make an Svg or coloured text pressable, so the chevron is the press).

@@ -156,6 +156,8 @@ export type Panel = {
   isUsageRemaining: boolean
   isPlansShown: boolean
   isBandHidden: boolean
+  /** Keep warm renews an idle session's prompt cache (default on); saved per project under the engine-store key `keepWarm`. */
+  isKeepWarm: boolean
   /** Stored under the engine-store key `historyShown`, its name from before the rename. */
   isArchiveShown: boolean
   /** Archive groups the user opened (the first group shown is open by default), by session id, a Trash group's as `trash:<id>`; this session only. */
@@ -207,6 +209,12 @@ export type CacheFacts = { lastAt: number; tokens: number; window: number; model
 export type CacheFold = { mode: CacheMode; open: boolean }
 
 /**
+ * Keep warm's bookkeeping (clock ms, 0 for never): when the main turn running started (0 while none runs), the user's
+ * last message, the renewals and failed renewals since it, when a renewal last read the cache, when one was last sent.
+ */
+export type KeepWarm = { turnAt: number; userAt: number; renewals: number; renewedAt: number; failures: number; triedAt: number }
+
+/**
  * The shown flow's bookkeeping for `flow-live.json`: the session that owns it ('' until known), when it last changed
  * (clock ms, 0 until known), the key of what was last seen (a change of it is activity) and when its record was last written.
  */
@@ -235,6 +243,8 @@ declare module 'claude-code' {
       cacheFold: CacheFold | null
       /** The cache texts the band last showed (`cacheKey`): the 5-second tick writes it when they change, so the band redraws once a minute at most. */
       cacheTick: string
+      /** Keep warm's turn, renewals and failures for this session (cache.ts `keepStatus`). */
+      keepWarm: KeepWarm
       /** The shown flow's owner session and activity, for flow-live.json. */
       live: LiveState
       /** What the last read or write of flow-live.json could not do in this load (the panel's line), '' when nothing. */
