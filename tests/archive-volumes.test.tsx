@@ -120,7 +120,7 @@ const view = async ($: any, surface: 'terminal' | 'desktop' = 'terminal') => {
     groups: folds.map((b: any) => String(b.props.key).slice('archive-'.length)),
     open: folds.map((b: any) => JSON.stringify(b).includes('▼ ')),
     label: (key: string) => String(buttons.find((b: any) => String(b.props.key) === key)?.props.label ?? ''),
-    tab: buttons.find((b: any) => String(b.props.key) === 'tab-archive')?.text,
+    tab: buttons.find((b: any) => String(b.props.key) === 'tab-archive')?.text?.replace(/^● /, ''),
   }
 }
 const press = async ($: any, surface: 'terminal' | 'desktop', ...keys: string[]) => {

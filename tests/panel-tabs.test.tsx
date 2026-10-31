@@ -99,7 +99,8 @@ const MARK: Record<Tab, RegExp> = {
   archive: new RegExp(`archive-${keyOf('e1')}`),
   trash: new RegExp(`trash-${keyOf('e9')}`),
 }
-const tabText = async (p: any, tab: Tab) => (await p.find({ type: 'Button', key: `tab-${tab}` }))?.text
+const rawTabText = async (p: any, tab: Tab) => (await p.find({ type: 'Button', key: `tab-${tab}` }))?.text
+const tabText = async (p: any, tab: Tab) => String(await rawTabText(p, tab)).replace(/^● /, '')
 
 const kidsOf = (n: any): any[] => (Array.isArray(n?.children) ? n.children : Array.isArray(n?.props?.children) ? n.props.children : []).filter((c: any) => c && typeof c === 'object')
 const walk = (n: any, out: any[] = []): any[] => {
@@ -117,7 +118,7 @@ describe('the tabs', () => {
     await start($)
     for (const surface of SURFACES) {
       let p = await mount($, surface)
-      expect((await p.find({ type: 'Text', text: 'Active (0)' }))?.props).toMatchObject({ bold: true, underline: true })
+      expect((await p.find({ type: 'Text', text: '● Active (0)' }))?.props).toMatchObject({ bold: true, underline: true })
       for (const tab of ['finished', 'archive', 'trash'] as const) {
         const b = await p.find({ type: 'Button', key: `tab-${tab}` })
         expect(b?.props.dimColor).toBe(true)
@@ -125,8 +126,46 @@ describe('the tabs', () => {
       await p.press({ key: 'tab-trash' })
       await p.unmount()
       p = await mount($, surface)
-      expect((await p.find({ type: 'Text', text: 'Trash (0)' }))?.props).toMatchObject({ bold: true, underline: true })
+      expect((await p.find({ type: 'Text', text: '● Trash (0)' }))?.props).toMatchObject({ bold: true, underline: true })
       expect(await p.find({ type: 'Text', text: 'Trash is empty' })).toBeDefined()
+      await p.unmount()
+      await showTab($, 'active')
+    }
+  })
+
+  test('the selected tab starts with a dot in its label and no other does, for each tab, on both surfaces; the row stays on one line', async ($, on) => {
+    engine(on)
+    await start($)
+    for (const surface of SURFACES) {
+      for (const tab of TABS) {
+        await showTab($, tab)
+        const p = await mount($, surface)
+        const labels: string[] = []
+        for (const other of TABS) {
+          const text = String(await rawTabText(p, other))
+          labels.push(text)
+          const name = `${other[0]!.toUpperCase()}${other.slice(1)} (0)`
+          expect([other, text]).toEqual([other, other === tab ? `● ${name}` : name])
+        }
+        const selected = await p.find({ type: 'Button', key: `tab-${tab}` })
+        expect(selected?.props.label).toBe(`● ${String(await tabText(p, tab))}`)
+        expect(labels.join(' '.repeat(surface === 'terminal' ? 2 : 0)).length).toBeLessThan(80)
+        await p.unmount()
+      }
+      await showTab($, 'active')
+    }
+  })
+
+  test('pressing another tab still stores it as the selected one', async ($, on) => {
+    engine(on)
+    await start($)
+    for (const surface of SURFACES) {
+      let p = await mount($, surface)
+      await p.press({ key: 'tab-finished' })
+      await p.unmount()
+      p = await mount($, surface)
+      expect(await rawTabText(p, 'finished')).toBe('● Finished (0)')
+      expect(await rawTabText(p, 'active')).toBe('Active (0)')
       await p.unmount()
       await showTab($, 'active')
     }
@@ -152,7 +191,7 @@ describe('the tabs', () => {
     held(on, 'panel', { ...PANEL_DEFAULT, tab: 'plans', isPlansShown: true })
     for (const surface of SURFACES) {
       const p = await mount($, surface)
-      expect((await p.find({ type: 'Text', text: 'Active (0)' }))?.props).toMatchObject({ bold: true, underline: true })
+      expect((await p.find({ type: 'Text', text: '● Active (0)' }))?.props).toMatchObject({ bold: true, underline: true })
       expect(await p.find({ type: 'Text', text: 'Nothing running or queued' })).toBeDefined()
       await p.unmount()
     }
@@ -204,7 +243,7 @@ describe('the tabs', () => {
     held(on, 'panel', { ...PANEL_DEFAULT, tab: 'history' })
     for (const surface of SURFACES) {
       const p = await mount($, surface)
-      expect((await p.find({ type: 'Text', text: 'Active (0)' }))?.props.underline).toBe(true)
+      expect((await p.find({ type: 'Text', text: '● Active (0)' }))?.props.underline).toBe(true)
       await p.unmount()
     }
   })

@@ -1,6 +1,6 @@
 <svg xmlns="http://www.w3.org/2000/svg" width="117" height="22" viewBox="0 0 117 22"><style>
-.t{fill:#1f1f1f}.s{fill:#6b6b68}.m{fill:#9a9a96}.k{fill:#ecebe8}.ln{stroke:#e4e4e1}.tile{fill:#f4f3f0}
-@media (prefers-color-scheme: dark){.t{fill:#ececec}.s{fill:#a8a8a4}.m{fill:#7d7d79}.k{fill:#2c2c2b}.ln{stroke:#333331}.tile{fill:#262625}}
+.t{fill:#1f1f1f}.s{fill:#6b6b68}.m{fill:#9a9a96}.mg{stroke:#9a9a96}.k{fill:#ecebe8}.ln{stroke:#e4e4e1}.tile{fill:#f4f3f0}
+@media (prefers-color-scheme: dark){.t{fill:#ececec}.s{fill:#a8a8a4}.m{fill:#7d7d79}.mg{stroke:#7d7d79}.k{fill:#2c2c2b}.ln{stroke:#333331}.tile{fill:#262625}}
 .live{animation:p 1.6s ease-in-out infinite}@keyframes p{50%{opacity:.3}}
 @media (prefers-reduced-motion: reduce){.live{animation:none}}
 </style><rect x="0" y="3" width="45" height="16" rx="4" fill="#cc6363"/><text x="22.5" y="14.6" text-anchor="middle" font-family="-apple-system,BlinkMacSystemFont,'SF Pro Text','Segoe UI',sans-serif" font-size="10" font-weight="700" letter-spacing="0.6" fill="#1c1a16">WARM</text><text x="52.0" y="15.5" font-family="-apple-system,BlinkMacSystemFont,'SF Pro Text','Segoe UI',sans-serif" font-size="12.5" font-variant-numeric="tabular-nums" fill="#cc6363" font-weight="600">42m left</text></svg>

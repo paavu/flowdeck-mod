@@ -49,7 +49,8 @@ describe('the running version', () => {
       const row = walk(root).find(n => n?.props?.key === 'top-toggles')
       const kids: any[] = row.children
       const buttons: any[] = kids[0]?.children ?? []
-      expect(buttons.map(c => c?.props?.key)).toEqual(['context', 'usage', 'band', 'keep-warm'])
+      expect(buttons.slice(0, 3).map(c => c?.props?.key)).toEqual(['context', 'usage', 'band'])
+      expect((buttons[3]?.children ?? []).map((c: any) => c?.type)).toEqual([surface === 'desktop' ? 'Svg' : 'Text', 'Button'])
       expect(kids[1]?.props?.flexGrow).toBe(1)
       if (surface === 'desktop') {
         const label = walk(kids[2]).find(n => n?.type === 'Svg')

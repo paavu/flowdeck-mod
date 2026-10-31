@@ -62,7 +62,7 @@ async function bandSays($: any) {
 }
 async function tabCounts($: any) {
   const p = await pane($, 'terminal')
-  const labels = (await p.findAll({ type: 'Button' })).map((b: any) => String(b.text ?? b.props.label))
+  const labels = (await p.findAll({ type: 'Button' })).map((b: any) => String(b.text ?? b.props.label).replace(/^● /, ''))
   await p.unmount()
   return { active: labels.find(l => l.startsWith('Active')), finished: labels.find(l => l.startsWith('Finished')) }
 }

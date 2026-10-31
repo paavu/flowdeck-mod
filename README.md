@@ -11,7 +11,7 @@
 </p>
 
 <p align="center">
-  <img alt="Version 1.0.0059" src="https://img.shields.io/badge/version-1.0.0059-8f8cf4">
+  <img alt="Version 1.0.0060" src="https://img.shields.io/badge/version-1.0.0060-8f8cf4">
   <img alt="MIT license" src="https://img.shields.io/badge/license-MIT-5fbf8f">
   <img alt="Claude Code 2.1.295 or later" src="https://img.shields.io/badge/Claude%20Code-%E2%89%A5%202.1.295-8f8cf4">
   <img alt="Terminal and desktop" src="https://img.shields.io/badge/surfaces-terminal%20%2B%20desktop-5fbf8f">
@@ -260,7 +260,7 @@ What you see (the keep warm line of the card):
 2. `kept warm ×1 · renews at 20:32`: one renewal done, the next one due.
 3. `keep warm: off`: the switch is off. The line can also read `failed` (with `retry at <time>`), `limit reached`, `below 80k tokens` or `not renewed`; after renewals it starts with `kept warm ×N`.
 
-How to use: the `● Keep warm` switch in the panel's top row turns it on or off; it is on by default and saved per project folder. Watch the line on the open card.
+How to use: the `Keep warm` switch (with its dot) in the panel's top row turns it on or off; it is on by default and saved per project folder. Watch the line on the open card.
 
 - **How**: one side request through `$.model.fork`: the main thread's last request again with a one-line prompt asking for `ok`, no tools. Nothing is added to the transcript.
 - **When**: 50 minutes after the cache was last read or written (`RENEW_AT_MS`), when the context holds at least 80,000 tokens (`KEEP_WARM_MIN_TOKENS`), no main turn is running and the user has sent nothing since. At most 2 renewals between two of the user's messages (`KEEP_WARM_MAX_RENEWALS`), so an idle session stays warm for about 2 h 40 min, then goes cold.
@@ -285,10 +285,10 @@ What you see:
 1. `▼ Context`: folds the Context section (`▶︎` when folded, the same glyphs as every fold in the panel). Remembered.
 2. `▼ Usage`: folds the Usage section. Remembered.
 3. `● Band`: shows or hides the band (`○` hidden).
-4. `● Keep warm`: keep warm on or off, per project folder.
+4. `● Keep warm`: keep warm on or off, per project folder. The dot before the label has the cache's colour while the switch is on: the warm colour while the cache is warm, the cold colour once it is cold, the plain text colour before any request; off, it is a hollow grey `○`.
 5. The version of the code that is running.
 
-How to use: press a switch to flip it; `●` is on or shown, `○` is off or hidden.
+How to use: press a switch to flip it; `●` is on or shown, `○` is off or hidden. The Keep warm dot is not a button of its own; press the label next to it.
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="docs/images/panel-tabs-dark.png">
@@ -298,7 +298,7 @@ How to use: press a switch to flip it; `●` is on or shown, `○` is off or hid
 What you see:
 
 1. `● Track tasks`, beside the `FlowDeck` title above the tabs: task tracking on or off for every project (`○` until it is on). See [Task tracking](#task-tracking).
-2. The tabs, each with its live count: `Active (n)`, `Finished (n)`, `Archive (n)`, `Trash (n)`. One list shows at a time. The selected tab is bold, in the accent colour and underlined; pressing it changes nothing.
+2. The tabs, each with its live count: `Active (n)`, `Finished (n)`, `Archive (n)`, `Trash (n)`. One list shows at a time. The selected tab starts with a dot (`● Active (n)`); in the terminal it is also bold, in the accent colour and underlined. Pressing it changes nothing.
 3. The tiles: the flow's estimated cost, its tokens and its time.
 
 How to use: press a tab to change the list.

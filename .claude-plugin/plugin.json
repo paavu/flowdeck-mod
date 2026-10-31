@@ -1,7 +1,7 @@
 {
   "name": "flowdeck",
   "displayName": "flowdeck",
-  "version": "1.0.0059",
+  "version": "1.0.0060",
   "description": "Claude mod: orchestrate subagents, route each task to the right model, and keep a live record of every task, cost and handoff note.",
   "author": { "name": "Paavu", "url": "https://github.com/paavu" },
   "homepage": "https://github.com/paavu/flowdeck-mod",

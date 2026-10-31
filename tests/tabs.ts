@@ -4,7 +4,7 @@
 export type Tab = 'active' | 'finished' | 'archive' | 'trash'
 
 /** A tab's own label, `Active (2)`: left out where a test collects the rows' coloured words. */
-export const TAB_TEXT = /^(Active|Finished|Archive|Trash)( \(\d+\))?$/
+export const TAB_TEXT = /^(● )?(Active|Finished|Archive|Trash)( \(\d+\))?$/
 
 export async function showTab($: any, tab: Tab): Promise<void> {
   const p = await $.ui.mount({ plugin: 'flowdeck', surface: 'terminal', component: 'Pane', requestId: 'flowdeck-agents', props: { bodyColumns: 80 } } as any)

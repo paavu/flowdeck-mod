@@ -145,7 +145,7 @@ describe('linking in the panel', () => {
     expect(t).toMatch(/^1\. Build history panel$/m)
     expect(t).not.toContain('History module')
     expect(queued(t)).toBe(1)
-    expect(t).toMatch(/^Active \(2\)$/m)
+    expect(t).toMatch(/^● Active \(2\)$/m)
     expect(t).not.toMatch(/ready/)
     clock.now = NOW + 10_000
     await complete($, 'w1')
@@ -162,7 +162,7 @@ describe('linking in the panel', () => {
     expect(t).toMatch(/^2\. wire up the tool$/m)
     expect(t).not.toContain('#2')
     expect(queued(t)).toBe(2)
-    expect(t).toMatch(/^Active \(3\)$/m)
+    expect(t).toMatch(/^● Active \(3\)$/m)
     expect(t).toContain('3. Polish')
   })
 
@@ -174,6 +174,6 @@ describe('linking in the panel', () => {
     const t = await terminal($)
     expect(t).toMatch(/^Unrelated chore$/m)
     expect(queued(t)).toBe(2)
-    expect(t).toMatch(/^Active \(3\)$/m)
+    expect(t).toMatch(/^● Active \(3\)$/m)
   })
 })

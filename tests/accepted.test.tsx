@@ -125,7 +125,7 @@ describe('accepted tasks in the panel', () => {
     const t = await terminal($)
     expect(t.text).toMatch(/1\. Read code/)
     expect(t.text).toMatch(/4\. Docs/)
-    expect(tabLabel(t.buttons, 'active')).toBe('Active (2)')
+    expect(tabLabel(t.buttons, 'active')).toBe('● Active (2)')
     expect(tabLabel(t.buttons, 'finished')).toBe('Finished (2)')
   })
 
@@ -146,7 +146,7 @@ describe('accepted tasks in the panel', () => {
     const t = await terminal($)
     expect(t.text).toMatch(/Accepted · no worker run/)
     expect(tabLabel(t.buttons, 'finished')).toBe('Finished (1)')
-    expect(tabLabel(t.buttons, 'active')).toBe('Active (3)')
+    expect(tabLabel(t.buttons, 'active')).toBe('● Active (3)')
   })
 
   test('an accepted task with a complete run is the normal Done row, no Accepted row', async ($, on) => {

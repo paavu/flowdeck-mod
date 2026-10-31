@@ -234,8 +234,8 @@ describe('a panel held from an older flowdeck', () => {
     ['context', 'context', undefined, p => p.find({ type: 'Button', key: 'context', text: /▼ Context/ }), p => p.find({ type: 'Button', key: 'context', text: /▶︎ Context/ })],
     ['usage', 'usage', undefined, p => p.find({ type: 'Button', key: 'usage', text: /▼ Usage/ }), p => p.find({ type: 'Button', key: 'usage', text: /▶︎ Usage/ })],
     ['band', 'band', undefined, p => p.find({ type: 'Button', key: 'band', text: /● Band/ }), p => p.find({ type: 'Button', key: 'band', text: /○ Band/ })],
-    ['finished tab', 'tab-finished', undefined, p => selected(p, 'Active (1)'), p => selected(p, 'Finished (1)')],
-    ['archive tab', 'tab-archive', undefined, p => selected(p, 'Active (1)'), p => p.find({ type: 'Button', key: `archive-${keyOf('e1')}` })],
+    ['finished tab', 'tab-finished', undefined, p => selected(p, '● Active (1)'), p => selected(p, '● Finished (1)')],
+    ['archive tab', 'tab-archive', undefined, p => selected(p, '● Active (1)'), p => p.find({ type: 'Button', key: `archive-${keyOf('e1')}` })],
     ['agent fold', 'agent-fold-w1', 'finished', p => p.find({ type: 'Button', key: 'agent-fold-w1', text: '▶︎' }), p => p.find({ type: 'Button', key: 'agent-fold-w1', text: '▼' })],
     // the newest group (e1) is open by default
     ['open archive group', `archive-${keyOf('e1')}`, 'archive', p => p.find({ type: 'Button', key: `archive-${keyOf('e1')}`, text: /^▼/ }), p => p.find({ type: 'Button', key: `archive-${keyOf('e1')}`, text: /^▶︎/ })],

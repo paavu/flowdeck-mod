@@ -30,8 +30,8 @@ import { SMALL_SIZE } from './sizes'
 import { VERSION } from './version'
 import { asRule, estimateTokens, isPriorFile, isStoredRule, PRIOR_STORE_KEYS, RULE_KEY, SCHEMA_CHARS_PER_TOKEN, toggledRule } from './rule'
 import { live, record, resetKey, resets, toWindows, usageHeadSvg, usageRows, usageSvg } from './usage'
-import { cacheKey, isCardOpen, isRenewDue, isShowable, KEEP_WARM_DEFAULT, measured, remeasured, renewalEnded, seeded, stamped, toggledFold, userSpoke, viewOf } from './cache'
-import type { CacheFacts, KeepWarm } from './cache'
+import { CACHE_HUE, cacheKey, isCardOpen, isRenewDue, isShowable, KEEP_WARM_DEFAULT, measured, remeasured, renewalEnded, seeded, stamped, toggledFold, userSpoke, viewOf } from './cache'
+import type { CacheFacts, CacheMode, KeepWarm } from './cache'
 import { cacheDrawing } from './cache-view'
 import type { CacheDrawing, CacheUi } from './cache-view'
 
@@ -795,8 +795,8 @@ const totals = (list: AgentRun[], at: number) => {
 // --- desktop drawings: each row is one SVG, as the band above the prompt is.
 
 const PANE_CSS = `<style>
-.t{fill:#1f1f1f}.s{fill:#6b6b68}.m{fill:#9a9a96}.k{fill:#ecebe8}.ln{stroke:#e4e4e1}.tile{fill:#f4f3f0}
-@media (prefers-color-scheme: dark){.t{fill:#ececec}.s{fill:#a8a8a4}.m{fill:#7d7d79}.k{fill:#2c2c2b}.ln{stroke:#333331}.tile{fill:#262625}}
+.t{fill:#1f1f1f}.s{fill:#6b6b68}.m{fill:#9a9a96}.mg{stroke:#9a9a96}.k{fill:#ecebe8}.ln{stroke:#e4e4e1}.tile{fill:#f4f3f0}
+@media (prefers-color-scheme: dark){.t{fill:#ececec}.s{fill:#a8a8a4}.m{fill:#7d7d79}.mg{stroke:#7d7d79}.k{fill:#2c2c2b}.ln{stroke:#333331}.tile{fill:#262625}}
 .live{animation:p 1.6s ease-in-out infinite}@keyframes p{50%{opacity:.3}}
 @media (prefers-reduced-motion: reduce){.live{animation:none}}
 </style>`
@@ -1821,9 +1821,13 @@ function ruleStrip($: EngineInterface, ui: Pick<Elements['desktop'], 'Box' | 'Te
   )
 }
 
+// The cache's mode now, for the Keep warm dot's colour; null with no cache facts yet.
+const keepWarmMode = async ($: EngineInterface): Promise<CacheMode | null> =>
+  cacheView($, await readCache($), await $.clock.now()).then(v => v?.mode ?? null).catch(() => null)
+
 // The buttons on top of the panel, and at the row's far end the dim version of the code running (version.ts). They read
-// only the panel's own toggles, so the panel can draw them whatever else fails.
-function topToggleRow($: EngineInterface, ui: Pick<Elements['desktop'], 'Box' | 'Text' | 'Button'> & { Svg?: Elements['desktop']['Svg'] | null }, p: Panel): RenderChildren {
+// only the panel's own toggles (and the cache mode, null when unknown), so the panel can draw them whatever else fails.
+function topToggleRow($: EngineInterface, ui: Pick<Elements['desktop'], 'Box' | 'Text' | 'Button'> & { Svg?: Elements['desktop']['Svg'] | null }, p: Panel, keepMode: CacheMode | null): RenderChildren {
   const { Box, Text, Button, Svg } = ui
   const versionText = `v${VERSION}`
   const versionW = Math.ceil(textWidth(versionText, SMALL_SIZE)) + 4
@@ -1862,10 +1866,31 @@ function topToggleRow($: EngineInterface, ui: Pick<Elements['desktop'], 'Box' | 
       }}
     />
   )
+  // The dot is apart from the button: a desktop Button draws only a plain label, so the dot's colour (the cache's hue
+  // while on, none yet without cache facts, a dim hollow ring off) is a tiny drawing there and a coloured Text here.
+  const dotHue = p.isKeepWarm && keepMode ? CACHE_HUE[keepMode] : null
+  const dotAlt = p.isKeepWarm ? `Keep warm on${keepMode ? `, cache ${keepMode}` : ''}` : 'Keep warm off'
+  const keepDot = Svg ? (
+    <Svg
+      key="keep-warm-dot"
+      source={svg(14, 18, p.isKeepWarm ? `<circle ${dotHue ? `fill="${dotHue}"` : 'class="t"'} cx="7" cy="9" r="5"/>` : '<circle class="mg" cx="7" cy="9" r="4.25" fill="none" stroke-width="1.5"/>')}
+      alt={dotAlt}
+      width={14}
+      height={18}
+    />
+  ) : p.isKeepWarm ? (
+    <Text key="keep-warm-dot" {...(dotHue ? { color: dotHue } : {})}>
+      ●
+    </Text>
+  ) : (
+    <Text key="keep-warm-dot" dimColor>
+      ○
+    </Text>
+  )
   const toggleKeepWarm = (
     <Button
       key="keep-warm"
-      label={`${p.isKeepWarm ? '●' : '○'} Keep warm`}
+      label="Keep warm"
       plain
       onPress={async () => {
         const on = !p.isKeepWarm
@@ -1881,7 +1906,10 @@ function topToggleRow($: EngineInterface, ui: Pick<Elements['desktop'], 'Box' | 
         {toggleContext}
         {toggleUsage}
         {toggleBand}
-        {toggleKeepWarm}
+        <Box flexDirection="row" flexShrink={0} gap={Svg ? 0 : 1}>
+          {keepDot}
+          {toggleKeepWarm}
+        </Box>
       </Box>
       <Box flexGrow={1} />
       <Box flexShrink={0}>
@@ -1922,7 +1950,8 @@ const TABS: readonly PanelTab[] = ['active', 'finished', 'archive', 'trash']
 const TAB_LABEL: Record<PanelTab, string> = { active: 'Active', finished: 'Finished', archive: 'Archive', trash: 'Trash' }
 
 // The flowdeck group's tabs, one list shown at a time, each with its count (left out when it could not be read). The
-// selected tab is bold in the accent and underlined; pressing it changes nothing.
+// selected tab starts with a solid dot in its label (the desktop draws only a Button's label) and is also bold in the
+// accent and underlined in the terminal; pressing it changes nothing.
 // Two spaces between tabs: the terminal draws a plain Button as its bare label, so 2 columns; a native (desktop) button
 // pads its own label, which is about that much already, so no gap is added there.
 const tabGap = (surface: string): number => (surface === 'terminal' ? 2 : 0)
@@ -1938,9 +1967,9 @@ function tabRow($: EngineInterface, ui: Pick<Elements['desktop'], 'Box' | 'Text'
       if (tab === 'archive' || tab === 'trash') await loadOpenDetails($)
     }
     return tab === p.tab ? (
-      <Button key={`tab-${tab}`} plain onPress={() => undefined}>
+      <Button key={`tab-${tab}`} label={`● ${text}`} plain onPress={() => undefined}>
         <Text bold underline color={ACCENT}>
-          {text}
+          {`● ${text}`}
         </Text>
       </Button>
     ) : (
@@ -2451,7 +2480,7 @@ export const register: Register = (on, options) => {
         return failed(label)
       }
     }
-    const topToggles = topToggleRow($, { Box, Text, Button, Svg: e.surface === 'desktop' && 'Svg' in ui ? ui.Svg : null }, p)
+    const topToggles = topToggleRow($, { Box, Text, Button, Svg: e.surface === 'desktop' && 'Svg' in ui ? ui.Svg : null }, p, await keepWarmMode($))
     // Why the band above the prompt failed in this load, under the buttons (the Band button is among them).
     const fault: unknown = await read($, bandError).catch(() => '')
     const bandLine = typeof fault === 'string' && fault ? <Text dimColor>{`band error: ${fault} (v${VERSION})`}</Text> : null
@@ -3126,7 +3155,7 @@ export const register: Register = (on, options) => {
     const p = await readPanel($).catch(() => asPanel(null))
     return (
       <Box flexDirection="column">
-        {topToggleRow($, { Box, Text, Button, Svg: e.surface === 'desktop' && 'Svg' in ui ? ui.Svg : null }, p)}
+        {topToggleRow($, { Box, Text, Button, Svg: e.surface === 'desktop' && 'Svg' in ui ? ui.Svg : null }, p, null)}
         {flowTitleRow($, { Box, Text, Button }, p)}
         {tabRow($, { Box, Text, Button }, p, { active: null, finished: null, archive: null, trash: null }, tabGap(e.surface))}
         <Text dimColor>flowdeck could not draw this panel</Text>

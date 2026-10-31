@@ -173,7 +173,7 @@ describe('Incomplete rows in the live panel', () => {
     const tab = await p.find({ type: 'Button', key: 'tab-finished' })
     const row = await p.find({ type: 'Text', text: /one of six/ })
     await p.unmount()
-    expect(tab?.text).toBe('Finished (4)')
+    expect(tab?.text).toBe('● Finished (4)')
     expect(row).toBeDefined()
   })
 

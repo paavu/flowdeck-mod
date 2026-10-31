@@ -1,6 +1,7 @@
 import { describe, expect, mock, test } from 'claude-code/testing'
 
 import { isRenewDue, KEEP_WARM_DEFAULT, KEEP_WARM_MAX_RENEWALS, KEEP_WARM_MIN_TOKENS, keepStatus, keepText, RENEW_AT_MS, TTL_MS, viewOf } from '../hooks/cache'
+import { CACHE_HUE } from '../hooks/cache'
 import { CACHE_FOLD_PX } from '../hooks/cache-view'
 import { FOLD_OPEN, FOLD_SHUT, foldGlyph } from '../hooks/fold'
 import { asKeepWarm, asPanel, PANEL_DEFAULT } from '../hooks/shapes'
@@ -123,11 +124,32 @@ const pressKeepWarm = async ($: any, surface: 'desktop' | 'terminal' = 'terminal
   await p.press({ key: 'keep-warm' })
   await p.unmount()
 }
+// The dot beside the Keep warm button: a tiny drawing on the desktop, a coloured Text in the terminal. `hue` is the
+// cache's colour, 'default' for the plain text colour and 'grey' for the hollow off dot.
+const keepDot = async (p: any, surface: 'desktop' | 'terminal'): Promise<{ glyph: string; hue: string; alt?: string }> => {
+  if (surface === 'desktop') {
+    const d = await p.find({ type: 'Svg', alt: /^Keep warm/ })
+    const source = String(d?.props?.source)
+    const hue = source.match(/fill="(#[0-9a-f]{6})"/)?.[1] ?? (source.includes('class="mg"') ? 'grey' : 'default')
+    return { glyph: hue === 'grey' ? '○' : '●', hue, alt: String(d?.props?.alt) }
+  }
+  const t = await p.find({ type: 'Text', text: /^[●○]$/ })
+  return { glyph: String(t?.text), hue: t?.props?.color ?? (t?.props?.dimColor ? 'grey' : 'default') }
+}
+// The dot's glyph and the button's label as the row reads, `● Keep warm`.
 const keepWarmLabel = async ($: any, surface: 'desktop' | 'terminal') => {
   const p = await pane($, surface)
   const b = await p.find({ type: 'Button', key: 'keep-warm' })
+  const dot = await keepDot(p, surface)
   await p.unmount()
-  return String(b?.props?.label ?? '')
+  return `${dot.glyph} ${String(b?.props?.label ?? '')}`
+}
+const keepDotNow = async ($: any, surface: 'desktop' | 'terminal') => {
+  const p = await pane($, surface)
+  const dot = await keepDot(p, surface)
+  const b = await p.find({ type: 'Button', key: 'keep-warm' })
+  await p.unmount()
+  return { ...dot, label: String(b?.props?.label) }
 }
 
 describe('when keep warm renews', () => {
@@ -362,7 +384,8 @@ describe('the Keep warm switch', () => {
       const band = await p.find({ type: 'Button', key: 'band' })
       const keep = await p.find({ type: 'Button', key: 'keep-warm' })
       await p.unmount()
-      expect(keep?.props?.label).toBe('● Keep warm')
+      expect(keep?.props?.label).toBe('Keep warm')
+      expect(await keepWarmLabel($, surface)).toBe('● Keep warm')
       expect(keep?.props?.plain).toBe(band?.props?.plain)
       expect(keep?.props?.dimColor).toBeUndefined()
       await pressKeepWarm($, surface)
@@ -545,7 +568,10 @@ describe('the toggle and collapse glyphs', () => {
       const p = await pane($, surface)
       const labels = async () => {
         const out: string[] = []
-        for (const key of ['context', 'usage', 'band', 'keep-warm']) out.push(String((await p.find({ type: 'Button', key }))?.props?.label))
+        for (const key of ['context', 'usage', 'band', 'keep-warm']) {
+          const label = String((await p.find({ type: 'Button', key }))?.props?.label)
+          out.push(key === 'keep-warm' ? `${(await keepDot(p, surface)).glyph} ${label}` : label)
+        }
         return out
       }
       expect(await labels()).toEqual(['\u25bc Context', '\u25bc Usage', '\u25cf Band', '\u25cf Keep warm'])
@@ -554,4 +580,39 @@ describe('the toggle and collapse glyphs', () => {
       await p.unmount()
     })
   }
+})
+
+describe("the Keep warm switch's dot colour", () => {
+  for (const surface of SURFACES) {
+    test(`on and warm it is the warm hue, on and cold the cold hue, on without a request the default, off a hollow grey; the button reads Keep warm throughout (${surface})`, async ($, on) => {
+      const { clock, fork } = engine(on)
+      const alt = (text: string) => (surface === 'desktop' ? { alt: text } : {})
+      fork.answer = 'error'
+      await start($)
+      expect(await keepDotNow($, surface)).toMatchObject({ glyph: '●', hue: 'default', label: 'Keep warm', ...alt('Keep warm on') })
+      await mainTurn($)
+      expect(await keepDotNow($, surface)).toMatchObject({ glyph: '●', hue: CACHE_HUE.warm, label: 'Keep warm', ...alt('Keep warm on, cache warm') })
+      await clock.set(NOW + 70 * MIN)
+      expect(await keepDotNow($, surface)).toMatchObject({ glyph: '●', hue: CACHE_HUE.cold, label: 'Keep warm', ...alt('Keep warm on, cache cold') })
+      await pressKeepWarm($, surface)
+      expect(await keepDotNow($, surface)).toMatchObject({ glyph: '○', hue: 'grey', label: 'Keep warm', ...alt('Keep warm off') })
+      await pressKeepWarm($, surface)
+      expect(await keepDotNow($, surface)).toMatchObject({ glyph: '●', hue: CACHE_HUE.cold })
+    })
+  }
+
+  test('the desktop dot is a small drawing: 14 by 18, a ring in a class that follows light and dark when off, never a button', async ($, on) => {
+    engine(on)
+    await start($)
+    const p = await pane($, 'desktop')
+    const onDot = await p.find({ type: 'Svg', alt: /^Keep warm/ })
+    await p.press({ key: 'keep-warm' })
+    const offDot = await p.find({ type: 'Svg', alt: /^Keep warm/ })
+    expect(await p.find({ type: 'Button', key: 'keep-warm-dot' })).toBeUndefined()
+    await p.unmount()
+    expect(onDot?.props).toMatchObject({ width: 14, height: 18 })
+    expect(String(onDot?.props?.source)).toContain('<circle class="t"')
+    expect(String(offDot?.props?.source)).toContain('class="mg"')
+    expect(String(offDot?.props?.source)).toContain('fill="none"')
+  })
 })

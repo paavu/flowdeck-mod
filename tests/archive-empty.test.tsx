@@ -182,11 +182,11 @@ describe('Erase', () => {
     expect(sessionPaths(s.files, dir)).toEqual([original(2)])
     const t = await look($)
     expect(t.texts).toContain('Trash is empty')
-    expect(t.buttons.find(b => b.key === 'tab-trash')?.text).toBe('Trash (0)')
+    expect(t.buttons.find(b => b.key === 'tab-trash')?.text?.replace(/^● /, '')).toBe('Trash (0)')
     expect(t.keys.some(k => k.startsWith('trash-empty'))).toBe(false)
     expect(t.texts.some(x => /erased|failed/.test(x))).toBe(false)
     const a = await look($, 'archive')
-    expect(a.buttons.find(b => b.key === 'tab-archive')?.text).toBe('Archive (1)')
+    expect(a.buttons.find(b => b.key === 'tab-archive')?.text?.replace(/^● /, '')).toBe('Archive (1)')
     expect(a.keys).toContain(`archive-${keyOf(entry(2, root).id)}`)
   })
 
@@ -206,7 +206,7 @@ describe('Erase', () => {
     expect(s.runs.some(r => r.argv.includes(original(2)))).toBe(false)
     expect(records(s.files, trashIndexPath(s.dir))).toEqual([])
     const a = await look($, 'archive')
-    expect(a.buttons.find(b => b.key === 'tab-archive')?.text).toBe('Archive (2)')
+    expect(a.buttons.find(b => b.key === 'tab-archive')?.text?.replace(/^● /, '')).toBe('Archive (2)')
     expect(a.keys).toContain(`archive-${keyOf(entry(2, s.root).id)}`)
   })
 
@@ -233,7 +233,7 @@ describe('Erase', () => {
     expect(titles(records(s.files, trashIndexPath(s.dir)))).toEqual(['Flow 2'])
     const t = await look($)
     expect(t.texts).toContain('1 session erased, 1 failed')
-    expect(t.buttons.find(b => b.key === 'tab-trash')?.text).toBe('Trash (1)')
+    expect(t.buttons.find(b => b.key === 'tab-trash')?.text?.replace(/^● /, '')).toBe('Trash (1)')
     expect(t.buttons.find(b => b.key === 'trash-empty')?.text).toBe('Empty Trash (1)')
     // Pressed again once the copy can go, the session is erased.
     blocked = ''

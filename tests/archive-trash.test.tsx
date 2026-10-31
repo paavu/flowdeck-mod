@@ -93,8 +93,8 @@ describe('the Archive list draws from the index alone', () => {
     expect(sessionReads(fs)).toEqual([`${DIR}/archive/${fileOf(entry(1))}`])
     const t = await look($)
     expect(t.keys.filter(k => /^archive-k[a-z0-9]+$/.test(k))).toEqual([1, 2, 3, 4, 5].map(i => `archive-${K(i)}`))
-    expect(t.buttons.find(b => b.key === 'tab-archive')?.text).toBe('Archive (5)')
-    expect(t.buttons.find(b => b.key === 'tab-trash')?.text).toBe('Trash (0)')
+    expect(t.buttons.find(b => b.key === 'tab-archive')?.text?.replace(/^● /, '')).toBe('Archive (5)')
+    expect(t.buttons.find(b => b.key === 'tab-trash')?.text?.replace(/^● /, '')).toBe('Trash (0)')
     // Each row: the chevron first, the date and the item count, its summary below.
     expect(t.buttons.find(b => b.key === `archive-${K(2)}`)?.text).toMatch(/^▶︎ Oct 30, 2026 · \d\d:\d\d \(1\)$/)
     expect(t.texts.filter(x => x === '  ≈$1.25 · 12k tokens · 30:00')).toHaveLength(5)
@@ -152,7 +152,7 @@ describe('the Archive list draws from the index alone', () => {
     expect(t.texts).toContain(`could not read ${fileOf(entry(1))}`)
     expect(t.texts).toContain('file missing')
     expect(t.texts.some(x => / · file missing$/.test(x))).toBe(true)
-    expect(t.buttons.find(b => b.key === 'tab-archive')?.text).toBe('Archive (3)')
+    expect(t.buttons.find(b => b.key === 'tab-archive')?.text?.replace(/^● /, '')).toBe('Archive (3)')
   })
 
   test('at most 10 files are held: opening one more folds the group opened longest ago', async ($, on) => {
@@ -242,7 +242,7 @@ describe('moving a session to the trash', () => {
     await press($, `archive-cancel-${K(3)}`)
     t = await look($)
     expect(t.texts).not.toContain('Move this session to the trash?')
-    expect(t.buttons.find(b => b.key === 'tab-archive')?.text).toBe('Archive (3)')
+    expect(t.buttons.find(b => b.key === 'tab-archive')?.text?.replace(/^● /, '')).toBe('Archive (3)')
     expect(JSON.stringify(files)).toBe(before)
   })
 
@@ -261,8 +261,8 @@ describe('moving a session to the trash', () => {
     expect(sessions(files, DIR)).toHaveLength(3)
     for (const surface of ['terminal', 'desktop'] as const) {
       const a = await look($, surface)
-      expect(a.buttons.find(b => b.key === 'tab-archive')?.text).toBe('Archive (2)')
-      expect(a.buttons.find(b => b.key === 'tab-trash')?.text).toBe('Trash (1)')
+      expect(a.buttons.find(b => b.key === 'tab-archive')?.text?.replace(/^● /, '')).toBe('Archive (2)')
+      expect(a.buttons.find(b => b.key === 'tab-trash')?.text?.replace(/^● /, '')).toBe('Trash (1)')
       expect(a.keys).not.toContain(`archive-${K(2)}`)
       const t = await look($, surface, 'trash')
       expect(t.keys.filter(k => /^trash-k[a-z0-9]+$/.test(k))).toEqual([`trash-${K(2)}`])
@@ -292,7 +292,7 @@ describe('moving a session to the trash', () => {
     await press($, `trash-restore-yes-${K(2)}`, 'trash')
     t = await look($, 'terminal', 'trash')
     expect(t.texts).toContain('Trash is empty')
-    expect(t.buttons.find(b => b.key === 'tab-trash')?.text).toBe('Trash (0)')
+    expect(t.buttons.find(b => b.key === 'tab-trash')?.text?.replace(/^● /, '')).toBe('Trash (0)')
     const a = await look($)
     expect(a.keys.filter(k => /^archive-k[a-z0-9]+$/.test(k))).toEqual([1, 2, 3].map(i => `archive-${K(i)}`))
     expect(sessions(files, DIR)).toHaveLength(3)
