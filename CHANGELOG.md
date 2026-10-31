@@ -2,6 +2,13 @@
 
 Versions are `M.m.xxxx`; every build bumps the 4-digit build number. Details and rulings: `docs/ledger.md`, `docs/design.md`.
 
+## 1.0.0034 (2026-10-31)
+- Public release on GitHub (https://github.com/paavu/flowdeck-mod) under the MIT license: LICENSE, SECURITY.md, CONTRIBUTING.md and a `.gitignore`; NOTICE.md lists each source mod's license and adds Cache Bell (keep warm's renewal method).
+- README.md rewritten for new users: requirements (Claude Code 2.1.295 or later), install from GitHub, update, uninstall, every feature, configuration and data, privacy (what the mod reads, writes and runs), known limits, troubleshooting, development.
+- Screenshots in `docs/images/`, light and dark, rendered from the mod's own drawings with sample data by `scripts/screenshots.sh`.
+- `plugin.json` and `marketplace.json` carry the author, homepage, repository, license, keywords, an icon (`.claude-plugin/icon.png`) and the directory listing links. No change to the mod's behaviour.
+- Design notes, build ledger and first plan in `docs/` marked as history, with private paths and other private references taken out; test data paths made generic.
+
 ## 1.0.0033 (2026-10-31)
 - Handoff notes on every task row: up to four plain-text parts, `Goal` (300 characters), `Brief` (about 600), `Result` (300) and `Feedback` (300), cleaned and capped by the mod. The orchestrator sends `goal` with each task in `progress` `tasks` and `add`, and `result` and `feedback` through the new `notes: [{task, goal?, result?, feedback?}]` with the `done` that accepts the task; `notes` updates any task by number at any time (a part sent again replaces it, `""` clears it); unknown numbers are ignored with a reply line, and a finished flow takes no notes.
 - The brief is taken by the mod from the worker's Agent `prompt` when it starts (`agent.spawn`'s `prompt`): headings, code fences, blank runs and the standard preamble (the step-list closing line, `Repo:`, `Read README…`, lean-ctx, no-delete, no-commit, comments and 24-hour sentences) left out, the start of the real task kept, `…` when cut. A return round replaces it until the task is accepted; without a prompt the description stands in when it says more than the title; a run linked to no task keeps its own brief.
@@ -17,7 +24,7 @@ Versions are `M.m.xxxx`; every build bumps the 4-digit build number. Details and
 
 ## 1.0.0031 (2026-10-30)
 - `Empty Trash (n)` at the top of the Trash tab, shown only while the Trash holds sessions (never on the Archive tab). It asks first: `Erase n sessions for good? This cannot be undone.` with `Erase` / `Cancel` in its place (held through redraws; Cancel or switching tab closes it).
-- `Erase` permanently erases every trashed session everywhere (no Mac Trash, no undo): its original in `archive/` and its copies in `.trash/`, then writes `.trash/trash-index.json` empty. The one place flowdeck erases a file, a one-off exception the user chose for this button. Restore still moves a session back; Empty Trash erases for good. Nothing was erased before.
+- `Erase` permanently erases every trashed session everywhere (no Mac Trash, no undo): its original in `archive/` and its copies in `.trash/`, then writes `.trash/trash-index.json` empty. The one place flowdeck erases a file, a deliberate one-off exception for this button. Restore still moves a session back; Empty Trash erases for good. Nothing was erased before.
 - A session back in the Archive whose restored copy is still in `.trash/` loses only that copy; its archive file stays. A file of a session the Archive lists is never erased.
 - Each file is erased only when its name is the one the store gives its own session in that folder, it lies directly in the resolved `.trash/` or `archive/` folder and is a plain file (no link): `unlink <file>` on macOS and Linux, PowerShell `Remove-Item -LiteralPath` on Windows, one file at a time, no shell, no wildcards, no recursion, through the archive's queue so it never races a save, move or restore. A file already gone counts as erased. A session that cannot be erased whole stays in the Trash (an original that fails leaves its copies as they are) and the tab says `n sessions erased, m failed`; pressing again retries it. `archive-index.json`, `.trash/damaged/`, plans and `flow-live.json` are never touched; an erased session's small record stays in `archive-index.json`, hidden.
 

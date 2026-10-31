@@ -1,8 +1,17 @@
 {
   "name": "flowdeck",
-  "version": "1.0.0033",
-  "description": "Orchestrated delivery flow with a live side panel: /flowdeck plans and delegates to tiered workers, /flowdeck-agents shows the panel with the agents, progress and context window.",
-  "author": { "name": "paavu-mods" },
+  "displayName": "flowdeck",
+  "version": "1.0.0034",
+  "description": "Orchestrated delivery flow with a live view: /flowdeck plans the work and delegates it to five tiered worker agents, a band above the prompt shows progress and the prompt-cache state, and a side panel shows the agents, context, usage limits, plans and an archive of past flows.",
+  "author": { "name": "Paavu", "url": "https://github.com/paavu" },
+  "homepage": "https://github.com/paavu/flowdeck-mod",
+  "repository": "https://github.com/paavu/flowdeck-mod",
+  "license": "MIT",
+  "keywords": ["mod", "orchestration", "subagents", "workflow", "progress", "agents-panel", "context", "usage-limits", "prompt-cache", "keep-warm", "archive"],
+  "icon": "./.claude-plugin/icon.png",
+  "documentationUrl": "https://github.com/paavu/flowdeck-mod#readme",
+  "supportUrl": "https://github.com/paavu/flowdeck-mod/issues",
+  "privacyPolicyUrl": "https://github.com/paavu/flowdeck-mod#privacy-what-it-reads-writes-and-runs",
   "types": "./types/index.d.ts",
   "userConfig": {
     "language": {
@@ -12,6 +21,5 @@
       "default": "auto",
       "options": ["auto", "en", "ru"]
     }
-  },
-  "license": "MIT"
+  }
 }

@@ -1,6 +1,16 @@
 {
   "name": "flowdeck-mod",
-  "owner": { "name": "paavu-mods" },
-  "description": "flowdeck: orchestrated delivery flow with a live agents panel",
-  "plugins": [{ "name": "flowdeck", "source": "./", "description": "Orchestrated delivery flow with a live side panel" }]
+  "owner": { "name": "Paavu", "url": "https://github.com/paavu" },
+  "description": "flowdeck: an orchestrated delivery flow for Claude Code with a live band and agents panel",
+  "plugins": [
+    {
+      "name": "flowdeck",
+      "source": "./",
+      "description": "Orchestrated delivery flow with a live band above the prompt and a side panel of agents, context, usage, plans and past flows",
+      "homepage": "https://github.com/paavu/flowdeck-mod",
+      "repository": "https://github.com/paavu/flowdeck-mod",
+      "license": "MIT",
+      "keywords": ["mod", "orchestration", "subagents", "progress", "agents-panel", "prompt-cache"]
+    }
+  ]
 }

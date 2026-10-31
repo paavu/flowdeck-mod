@@ -1,209 +1,371 @@
 # flowdeck
 
-An orchestrated delivery flow for Claude Code with a live side panel. The session model plans, designs and reviews; five tiered worker subagents implement. The panel shows the context window, usage limits, task plans, the agents and past flows; a band above the prompt shows the flow and open plans.
+A Claude Code mod that runs a session's work as a planned, delegated flow and shows it live: a band above the prompt, a side panel with the agents, context and usage, and an archive of past flows.
 
-## Commands
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/images/band-running-dark.png">
+  <img alt="The flowdeck band above the prompt: the running task, Tasks 2/4, the progress bar, 25%, the WARM cache chip with 42m left, the crew button and the dismiss button" src="docs/images/band-running-light.png">
+</picture>
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/images/panel-active-dark.png">
+  <img alt="The flowdeck panel: Context and Usage sections, the tab row, a running worker with its steps open and a queued task with its handoff note open" src="docs/images/panel-active-light.png" width="520">
+</picture>
+
+The screenshots are rendered from the mod's own drawing code with sample data (see [Screenshots](#screenshots)); nothing in them comes from a real session.
+
+## Contents
+
+- [Requirements](#requirements)
+- [Install](#install), [Update](#update), [Uninstall](#uninstall)
+- [How it works](#how-it-works)
+- [Features](#features)
+- [Configuration and data](#configuration-and-data)
+- [Privacy: what it reads, writes and runs](#privacy-what-it-reads-writes-and-runs)
+- [Known limits](#known-limits)
+- [Troubleshooting](#troubleshooting)
+- [Development](#development)
+- [Credits and license](#credits-and-license)
+
+## Requirements
+
+| | |
+|---|---|
+| Claude Code | **2.1.295 or later**. The full test suite passes on 2.1.295 and 2.1.312 (built and tested on 2.1.312); 2.1.212 refuses the manifest (`userConfig` `options` needs 2.1.271). Mods themselves need 2.1.287 in the terminal and 2.1.286 in the desktop app. |
+| Surfaces | Terminal (`claude`) and the Code tab of the Claude desktop app. Both draw the band and the panel; the desktop draws them as graphics, the terminal as text. `claude -p` and the Agent SDK run the hooks but draw nothing. |
+| Models | The `flowdeck-fable` worker runs on the Fable model; without access to it, change `model:` in `agents/flowdeck-fable.md`. The other four workers run on Opus. |
+| Usage section | A Claude subscription that reports rate limits (Pro, Max). Without one the section says there is no data yet. |
+| Empty Trash | `unlink` on macOS and Linux, `powershell.exe` on Windows (see [Privacy](#privacy-what-it-reads-writes-and-runs)). |
+
+## Install
+
+In your shell:
+
+```sh
+claude plugin marketplace add paavu/flowdeck-mod
+claude plugin install flowdeck@flowdeck-mod
+```
+
+Or in one step: `claude plugin install flowdeck --marketplace paavu/flowdeck-mod` from the shell (Claude Code 2.1.292 or later), or `/plugin install flowdeck --marketplace paavu/flowdeck-mod` inside a session (2.1.275 or later). In the desktop app, where `/plugin` does not run: click **+** next to the prompt box, then **Plugins**, **Add marketplace** with `paavu/flowdeck-mod`, then add `flowdeck`.
+
+The install may print `1 userConfig option not yet set`: that is the panel language, which defaults to `auto`; nothing needs setting. Then, in an open session, run `/reload-plugins` (new sessions load it by themselves).
+
+Check it loaded: `/plugin` shows a dim line such as `1 mod active · flowdeck` under its tabs (the count includes other mods).
+
+First run:
+
+1. `/flowdeck-agents` opens the panel: the top row (`Context`, `Usage`, `Band`, `Keep warm (on)` and the version), then the tabs, all at `(0)` in a new project. Context and Usage fill in once Claude Code reports them, at the latest after the first reply.
+2. After the first reply, the band above the prompt shows the `WARM` cache chip.
+3. `/flowdeck <a small task>` starts a flow: the orchestrator shows its plan, the band shows the running task with `Tasks X/Y`, and each worker appears in the panel's Active tab with its steps. When every task is done and the turn ends, the band reads `Done` and the flow is saved to the Archive tab.
+
+To see what the mod hooks and calls before you install it, clone the repository and run `claude plugin validate <folder>`: its `hooks:` and `calls:` lines list every event and engine call.
+
+**Overlapping mods.** flowdeck was built from savvy-flow, savvy-progress, context-bar and plan-progress and does what they do. Running them side by side gives two progress bands and two sets of tools; disable them first (`claude plugin disable <name>@<marketplace>`, or `/plugin`).
+
+**Optional: panel language.** `auto` (default), `en` or `ru`: `claude plugin configure flowdeck@flowdeck-mod`, or `/plugin configure flowdeck@flowdeck-mod` in a session. `auto` follows Claude Code's `language` setting, then `LC_ALL`, `LC_MESSAGES` and `LANG`.
+
+## Update
+
+```sh
+claude plugin update flowdeck@flowdeck-mod
+```
+
+then `/reload-plugins` in open sessions. Every release raises `version` in `.claude-plugin/plugin.json`, so `update` always sees the new one. The panel's top row shows the version of the code that is running (`v1.0.0034`); after an update without a reload it still names the old one. [CHANGELOG.md](CHANGELOG.md) lists what each version changed.
+
+## Uninstall
+
+```sh
+claude plugin uninstall flowdeck@flowdeck-mod
+claude plugin marketplace remove flowdeck-mod
+```
+
+Saved flows and plans stay in each project's `.claude/flowdeck/` folder (git-ignored). Move that folder to your system's trash if you want them gone.
+
+## How it works
+
+```mermaid
+flowchart LR
+  user([User]) -- "/flowdeck task" --> orch[Orchestrator:<br/>the main session plans, designs, reviews]
+  orch -- "Agent: #n title" --> workers[Worker subagents:<br/>light, medium, careful, heavy, fable]
+  orch -- "progress tool:<br/>tasks, done, notes" --> mod[(flowdeck mod)]
+  workers -- "step tool:<br/>their own steps" --> mod
+  mod --> band[Band above the prompt]
+  mod --> panel[Side panel]
+  mod --> files[".claude/flowdeck/<br/>archive, plans"]
+```
+
+The session model is the orchestrator: it reads the code, splits the work into self-contained tasks, picks a worker tier for each, delegates, and reviews every result before accepting it. It reports the plan and each accepted task through the `progress` tool; each worker reports its own steps through the `step` tool. The mod draws all of it and saves finished flows per project.
+
+## Features
+
+### `/flowdeck` and the worker tiers
+
 | Command | What it does |
 |---|---|
-| `/flowdeck <task>` | Starts a flow on a new task. |
-| `/flowdeck` | With no task: takes over the work already underway in the session. Every later task joins the same flow and panel. |
-| `/flowdeck-agents` | Shows or hides the side panel (titled `flowdeck`). |
+| `/flowdeck <task>` | Starts a flow on the task: plan, design (when the task touches UI), delegate, review, close. A flow already open is saved and replaced. |
+| `/flowdeck` | With no task: adopts the work already under way in the session into a flow. |
+| `/flowdeck-agents` | Shows or hides the side panel. |
 
-## Tools (for the model)
-| Tool | Used by | Purpose |
+The skill (`skills/flowdeck/SKILL.md`) tells the orchestrator how to plan, how to pick a tier and how to review. Five worker agents ship with the mod; the orchestrator picks the cheapest one likely to get the task right:
+
+| Agent | Model / effort | For |
 |---|---|---|
-| `mcp__flowdeck__progress` | the main session, for every task | Flow title, planned worker tasks (each with `after`: the numbers, from 1, of the tasks it waits for), the accepted tasks (`done: [1, 3]`, task numbers that add to those accepted before; a plain count `done: 2` still works and means the first 2 tasks), phase (`plan`, `design`, `delegate`, `review`, `close`), `finished` (only when the user ends the flow: a flow finishes by itself), `restart`. Each task is delegated with the Agent description `#<number> <title>`. Waits on unknown tasks, on the task itself or closing a cycle are ignored. Each task in `tasks` and `add` takes a `goal`, and `notes: [{task, goal?, result?, feedback?}]` updates the handoff notes of tasks by number (see Handoff notes); a number past the list is ignored and the reply says so. |
-| `mcp__flowdeck__step` | workers | A worker's own steps on its agent row: the plan sent once as a `steps` list, then moved with `next`, `done`, `active`, `failed`. The older `total`, `done`, `note` counts still work. |
-| `mcp__flowdeck__plan` | main session | A task plan for any work: stages of steps, or `kind: "todo"` for a flat list. Created once, then moved with short ops (`next`, `done`, `active`, `failed`, `state`, `note`); calls from subagents are ignored. |
+| `flowdeck-light` | Opus / low | Mechanical edits, renames, config, running builds and tests |
+| `flowdeck-medium` | Opus / medium | Standard features, bug fixes with a known cause |
+| `flowdeck-careful` | Opus / high | Delicate work: multi-file refactors, invariants, many edge cases |
+| `flowdeck-heavy` | Opus / xhigh | Unfamiliar code, unclear root causes, non-obvious architecture |
+| `flowdeck-fable` | Fable / high | The hardest logic and bugs; targeted design work when the user asks for it |
 
-Two short rules in the system prompt, added by the mod itself in every session (no CLAUDE.md, memory or setting is needed): `flowdeck:plan-rule` tells the model when to make a plan and how to move it; `flowdeck:flow-rule` tells it that every task goes through flowdeck: report it with `progress` (the plan with `tasks` and `after`, `add` for each new task, each with its `goal`; `done: [numbers]` when accepted, with the task's `result` and `feedback` in `notes`), chain tasks that edit the same files with `after`, begin every worker's Agent description with `#<n> <title>`, never leave a task unreported, and send `finished: true` only when the user ends the flow. Neither blocks an edit. SKILL.md and the five worker files say the same.
+Tasks that edit the same files are chained with `after` and never run in parallel. Workers never make design decisions unless the brief gives them one.
 
-## How the flow works
-1. The session model reads the code, breaks the task into self-contained tasks and picks a worker tier for each. It shows you the plan. Tasks that edit the same files are chained with `after` and never run in parallel; every waiting task gets its `after`, independent tasks none (SKILL.md sections 1 and 4, and the `progress` tool's description).
-2. It delegates to the cheapest tier likely to get the task right: `flowdeck-light` (mechanical), `flowdeck-medium` (standard), `flowdeck-careful` (delicate), `flowdeck-heavy` (unfamiliar code, root causes), `flowdeck-fable` (hardest logic).
-3. It reviews each result, accepting it or sending it back, and reports through `progress`; workers report through `step`.
+### Tools the model calls
 
-## Lifecycle of a flow
-Every task goes through flowdeck, with or without `/flowdeck`:
-- **Start.** A flow starts with the first `progress` call, or by itself: a task list (TodoWrite or TaskCreate on the main thread) with an item still to do and no open flow starts one named after its first item (cut to 48 characters at a word), its items mirrored as tasks (as a linked flow mirrors them: a completed item counts as accepted); a flowdeck worker launched with no open flow starts one named after its Agent description (its `#n` left out), in the delegate phase. A later plan joins that flow (renamed, its tasks added). A list whose items are all completed, a worker's own task list and non-flowdeck agents start nothing.
-- **Finish.** There is no Finish button. A flow with at least one task finishes by itself when the main turn ends (`turn.complete` of the main thread), every task is done (a complete worker run, completed in the task list, or accepted; an Incomplete or failed run does not count) and no worker run is still going. A flow with no run going and no task queued that sat idle for 30 minutes (`IDLE_FINISH_MS` in hooks/live.ts) while the session lives finishes itself, dated by its last activity. `progress` `finished: true` (the user ends the flow) and `restart: true` (a new `/flowdeck <task>`) still work. A finished flow is saved to the Archive at once and stays in the Finished tab, and on the band as Done, until the next task starts a new flow or a new session starts; a late `done` or phase for it changes nothing.
-- **Kept across a restart.** The flow shown, its runs, accepted tasks and record start are written to `.claude/flowdeck/flow-live.json` under the session's id whenever they change (checked on the 5-second tick, and at once after `progress`, a task list or a worker launch), and at least once a minute while a flow is shown (the session's heartbeat). The session's end marks its record ended.
-- **Next session.** On every start (`session.start`; `/clear`, `/resume` and a fork through `classic.SessionStart`) the records are sorted out: this session's own record (same session id, or the same transcript file) is restored into the panel when the panel holds no flow, its runs that were going read `Running at finish`; another session's record is closed once that session ended or stopped writing it for 3 minutes: finished at its last activity (not at the time of the start), its running runs ended then (`Running at finish`), saved as an Archive session under its own id (a second close merges into the same entry), and only then taken out of the file. A record of a session that may still run in another window is left and looked at again 3 minutes later. A flow the panel still holds from the session that ended here (`/clear`, `/resume`) is closed the same way and the panel starts clean. Done plans other sessions left in `plans.json` or their `plans-extra-*` files that the Archive does not hold yet are archived (running ones are left alone; no plans file is written).
-
-## The panel
-Top buttons: **Context · Usage · Band · Keep warm**, on one line that never wraps (the buttons keep their width; only the spacer gives way). Context and Usage toggle their sections and remember the choice; `Band` shows or hides the band above the prompt; `Keep warm`, its label saying its state (`▾ Keep warm (on)`, `▸ Keep warm (off)`; on by default) switches the prompt cache's keep warm for this project (see Keep warm). At the far end of that row a dim `v1.0.0033`: the version of the code running (hooks/version.ts, loaded with the mod; never read from plugin.json, so after an update without `/reload-plugins` it still names the old code), drawn in every state of the panel, the fallback drawing too. Below them, everything flowdeck has its own group: a tab row **Active (n) · Finished (n) · Plans (n) · Archive (n) · Trash (n)**, two spaces apart (2 columns in the terminal; on the desktop the native buttons' own padding, with no gap added), then the selected tab's one list. Only one list shows at a time. The selected tab is bold in the accent colour and underlined, the others dim; pressing a tab shows its list, pressing the selected one changes nothing. Active is selected at first; the choice holds for the session. Each count is live, from the same rows its list draws, and reads `(0)` when there is nothing; a count that cannot be read is left out (`Active`). The terminal shows the same tabs and counts as text.
-
-| Tab | Count | Lists |
+| Tool | Called by | Purpose |
 |---|---|---|
-| Active | running runs + queued tasks of the open flow | The flow header (cost, tokens, time; never the flow's title, which is named after the first request and says little about the session), then one flat list, always in full (there is no Collapse): the running runs first (newest first), then the tasks not started yet in plan order (their waits and `ready`). Empty: `Nothing running or queued`. |
-| Finished | finished rows of the open flow not archived yet | The same flow header, then one list, latest completion first: the finished rows (Done, Error, Incomplete) and the `Accepted · no worker run` rows, each placed by when it finished (an accepted row by when it was accepted); each Done or Error row has its archive icon (`⤓`). After an archive press a dim `M archived` line says how many left the list. Empty: `No finished items yet`. |
-| Plans | the plans in this list (open and done, not cleared) | The Plans section (below). Empty: `No plans`. |
-| Archive | the sessions `archive-index.json` lists outside the trash | The Archive (below), one collapsed row per saved session. |
-| Trash | the sessions moved to the trash (`.trash/trash-index.json`) | `Empty Trash (n)` first, then the same rows for the trashed sessions, each with `Restore` instead of `✕`. Empty: `Trash is empty`, and no button. |
+| `mcp__flowdeck__progress` | the main session | The flow's title and phase, its tasks (`title`, `tier`, `after`, `goal`), `add` for a new task, `done: [numbers]` for accepted tasks, `notes` for handoff notes, `finished` and `restart`. |
+| `mcp__flowdeck__step` | workers | A worker's own plan as a `steps` list, then `next`, `done`, `active`, `failed`. |
+| `mcp__flowdeck__plan` | the main session | A task plan for work outside a flow: stages of steps, or `kind: "todo"` for a flat list, moved with short operations. Calls from subagents are ignored. |
+
+### The prompt rules
+
+The mod adds two short sections to the system prompt of every session (about 1,600 characters together, no CLAUDE.md or setting needed): `flowdeck:plan-rule` says when to make a plan and how to move it; `flowdeck:flow-rule` says that every task goes through flowdeck, how to report it with `progress`, and to begin each worker's Agent description with `#<n> <title>`. Neither blocks an edit or a tool call. Disable the plugin to remove them.
+
+### The band above the prompt
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/images/band-done-dark.png">
+  <img alt="The band of a finished flow: FlowDeck, the full green bar, Done, 100%" src="docs/images/band-done-light.png">
+</picture>
+
+One row for the open flow:
+
+- **Title**: the running task's title (the lowest-numbered one and ` +N` when several run), else the next ready task, else `FlowDeck` once every task is done. It is never the flow's own title.
+- **`Tasks X/Y`, the bar and the percent**: Y counts every row the panel's tabs count; X is the running task's number while one runs, else the done count. The bar and the percent are the done fraction. The bar turns green when the flow is finished (`Done`).
+- **Cache chip**: `WARM` or `COLD` with the time left or the idle time and cost (see below).
+- **`×N`**: the number of agents and planned tasks; pressing it opens or closes the panel.
+- **`✕`**: hides the band only. The panel's `Band` button, or a new flow, brings it back.
+
+Up to two open plans (running, needing input or in error) draw as rows below the flow row.
+
+### The prompt cache chip and card
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/images/cache-warm-dark.png">
+  <img alt="The cache card, warm: idle 18m, 412k tokens cached, cold in 42m, keep warm renews at a given time, and the next message's cost on four models" src="docs/images/cache-warm-light.png">
+</picture>
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/images/cache-cold-dark.png">
+  <img alt="The cache card, cold: idle 3h 13m, cold for 33m, kept warm twice, limit reached, and the 1-hour cache write cost on four models" src="docs/images/cache-cold-light.png">
+</picture>
+
+Once the main thread has made a request, the chip says `WARM` (red) for an hour after its last request or keep warm's last renewal, then `COLD` (blue). Warm, it shows the minutes left (`42m left`); cold, the idle time and what the next message costs on the session's model (`3h 13m · $3.30`). Subagent requests do not count; `/clear` and `/compact` drop the chip until the next request.
+
+The small chevron after the chip opens a card: idle time and cached tokens, the hour as a bar, keep warm's state, what one renewal costs beside a cold restart, and the next message's cost on Fable, Opus, Sonnet and Haiku with the session's model marked `YOU`. Warm starts folded, cold starts open. The prices are estimates from one table, `MODELS` in `hooks/cache.ts` (USD per million tokens, input and cache read): a cold cache costs the 1-hour cache write (2x input), a warm one a cache read.
+
+### Keep warm
+
+Keeps the prompt cache warm through a long idle stretch so the next message reads the context from the cache instead of writing it again.
+
+- **How**: one side request through `$.model.fork`: the main thread's last request again with a one-line prompt asking for `ok`, no tools. Nothing is added to the transcript.
+- **When**: 50 minutes after the cache was last read or written (`RENEW_AT_MS`), when the context holds at least 80,000 tokens (`KEEP_WARM_MIN_TOKENS`), no main turn is running and the user has sent nothing since. At most 2 renewals between two of the user's messages (`KEEP_WARM_MAX_RENEWALS`), so an idle session stays warm for about 2 h 40 min, then goes cold.
+- **Never**: while the cache is already cold, in the hour's last minute, after the session ended, or with the switch off.
+- **Failures**: a failed renewal waits 2 minutes and tries again; after 2 failures in one idle stretch it stops until the user's next message. The card says `failed`; it never shows as an error.
+- **Cost**: a renewal is a real request. It costs about a cache read of the context (two renewals of a 770k-token Opus context are about $0.30, against about $6.16 to write it again) and **counts against the plan's usage limits** like any other message.
+- **Switch**: `Keep warm` in the panel's top row, on by default, saved per project folder. The constants are at the top of `hooks/cache.ts`.
+
+### The panel
+
+The panel opens with `/flowdeck-agents`, the band's `×N` button, or by itself when the first worker of a flow starts.
+
+**Top row**: `Context`, `Usage`, `Band` and `Keep warm (on)` / `Keep warm (off)`, with the running version (`v1.0.0034`) at the far end. Context and Usage fold their sections and remember the choice; Band shows or hides the band.
 
 | Section | Shows |
 |---|---|
-| Context | The context window as a stacked bar with tokens per category and where auto-compaction runs. Collapsed, it keeps the head line and the bar. |
-| Usage | The five-hour session and the week: the reset, by default as the time left (`Resets in 2d 13h 20m`, `Resets in 20m`); the small `◷` beside it switches both windows to the exact time (`Resets at 14:40`, `Resets Thursday 11:30`) and back, remembered for all projects. A bar that drains as the limit is used (full = 100% left), percent left, an even-pace mark, and a forecast to the reset (recent pace over ~30 min and the window average), e.g. `recent: 100% at 13:36, 1h 3m early` or `on pace`. All times of day in the panel (Usage and the Archive dates) are 24-hour `HH:MM`. Needs a subscription with rate-limit readings. |
-| Plans (tab) | Plans made with the `plan` tool, each as a track with its state and percent. A plan is saved to the Archive the moment it is done, as its own group; `Clear finished` only clears the done plans from this list (the Archive keeps them; a plan whose archive save failed stays in the list). |
-| Agents (Active and Finished tabs) | Running, finished and planned agents, with model, task progress, context, estimated cost and time. A run is linked to its planned task by the mod itself, in this order: its Agent description is the task's title (case and punctuation aside); it begins with the task number (`#3 …`, `[3] …`, `task 3 …`); its description is close to one task's title (one holds the other whole, or at least 60% of the shorter one's words are shared; a tie goes to the worker's own tier, a tie that stays links nothing; only tasks with no run yet); or, as a last guess for a flowdeck worker, exactly one task of the worker's tier had no run when it started. A task gets at most one run by the last two rules; a return round reuses the title or number. A run that matches nothing keeps its own row without a number. Every finished row (Done, Incomplete, Error, Accepted) shows when it finished, dim at the far right of its name line: `14:07` today, `Oct 29 · 14:07` on an earlier day (24-hour); running and queued rows show none. Every agent row has its fold chevron right before its name (`▣ ▸ 3. History module` in the terminal; on the desktop at the far left, in the crab's column, with the name starting at the drawing's text column, flush with the model line below it), never after it, running rows with no step list yet included; the chevron is dim on a row with no step list, and opening such a row shows its details (`Opus 5.5 · high · started 14:02 · 45k tokens · ≈$0.12`) and a dim `No steps reported yet`. Planned and Accepted rows do not fold; all names line up. A linked row leads with its task number (`3. History module`, the `#3` not repeated) and its model line names what that task waits for after the effort (`Opus 5.5 · medium · after 1, 2`; dropped first when the line is short, never at the cost of the stats). A planned row shows `ready` (blue-violet) once everything it waits for is done, and at once for a task that waits for nothing: those can be started now, in parallel. |
-| Archive (tab) | Formerly History. Past flows and finished plans of this project, one collapsed row per session, newest first by when the session ended. The list is drawn from `archive-index.json` alone: no session file is read to draw it. Each row is the fold button, chevron first, then the session's name (when it ended) and how many items it holds in brackets (`▸ Oct 26, 2026 · 10:42 (17)`, or `Oct 25 → Oct 26, 2026 · 10:42 (17)` when it started on an earlier day; a flow saved without runs counts its tasks, a plan its steps), with ` · running` for an entry archived while its flow runs (a narrow panel drops the time of day, then ` · running`); a small dim `✕` at the far right of that line; under it a dim summary line, `≈$1.23 · 45k tokens · 12:03` (a plan: its time only; ` · file missing` when its file is gone). The first row is open; pressing a row's fold button opens it (its session file is read then: `loading…`, or `could not read <file>`, the row kept) or folds it (the file is let go); at most 10 files are held at once, and opening one more folds the row opened longest ago. Opened, a flow shows its agents as they ended in one list, latest completion first, with the `Accepted · no worker run` rows among them (a run still going when the flow was saved reads `Running at finish`), with their chevrons and steps (a chevron folds that group's row only, never the live one); tasks never started are not shown; flows saved before agents were kept show their task list instead; a finished plan shows the plan as the Plans section draws it. The first 50 rows draw; `Show more (n)` adds 50. Above the rows, a dim line for each thing the last load, save or move could not do (a file that could not be read, an index past its size, a failed move). `✕` does not delete: it puts a confirmation in the row's place with the session's date and item count, title, summary and file, `Move this session to the trash? It leaves the Archive and shows in the Trash tab, where Restore brings it back. Its file is copied to .claude/flowdeck/.trash/; nothing is erased.`, and `Move to trash` / `Cancel`; one confirmation is open at a time. Without a project folder (the shared store's archive) there is no `✕`. |
-| Trash (tab) | The sessions moved to the trash, newest first by when each session ended (not by when it was trashed), drawn from `.trash/trash-index.json` the same way, opened from its copy in `.trash/`. Each row has a dim `Restore` instead of `✕`; it asks `Move back to the Archive?` with the same session details and `Restore` / `Cancel`, and the session returns to the Archive in its place by its end. Restore moves back; `Empty Trash (n)` erases for good. While the Trash holds sessions, `Empty Trash (n)` is its first line (never on the Archive tab); pressing it puts `Erase n sessions for good? This cannot be undone.` (`Erase 1 session …` for one) in its place with `Erase` / `Cancel`, held through redraws; Cancel or switching tab closes it. `Erase` erases each trashed session everywhere, its original in `archive/` and its copies in `.trash/`, and writes `.trash/trash-index.json` empty; a session that cannot be erased whole stays in the Trash and the tab says `n sessions erased, m failed`. This is the one place flowdeck erases a file (a one-off exception the user chose; see Saved data). |
+| Context | The context window as a stacked bar by category, tokens per category and where auto-compaction runs. Folded, it keeps the head line and the bar. |
+| Usage | The five-hour and weekly limits: a bar that drains with use, percent left, an even-pace mark, a forecast to the reset (`on pace`, or when the limit would run out), and the reset as time left (`Resets in 2h 20m`). The `◷` button switches to the exact time (`Resets at 14:40`) for all projects. |
 
-The panel always draws: the top buttons, Context, Usage and the tab row draw on their own whatever the flow is doing (so the Archive can be reviewed with no flow running); the selected list, the tab row, each Archive group and each agent row draw in their own guard, and a part that cannot be drawn shows one dim `<part> could not be drawn` line (`Active could not be drawn`); values an older flowdeck left in the session after a reload are read with their missing fields filled in (a panel from before the tabs shows Active). Plans and Archive have no hide toggle any more; their old stored choices (`plansShown`, `historyShown`) are still read but change nothing.
+**Tabs**: `Active (n)`, `Finished (n)`, `Plans (n)`, `Archive (n)`, `Trash (n)`. One list shows at a time; each count is live.
 
-Agent rows: the progress line names the state in its colour, with the live tool word while running (`Running · Bash`), `Needs approval` while a permission dialog for its call is up, then `Done` or `Error`. A run that ended OK but whose `step` list is not all done (e.g. `1/6`) reads `Incomplete` in amber: its bar is filled to its steps (never full), its mark is an amber half ring (`◐` in the terminal) instead of the green tick, and it has no archive icon. Only a run with no step list or with every step done is `Done` with the tick and a full green bar; the same holds in Archive groups, for runs saved before this rule too. Closing the list is the worker's job (its instructions require it); the mod never overrides Incomplete: a run of an accepted task that stays Incomplete reads `Incomplete · accepted`.
+| Tab | Lists |
+|---|---|
+| Active | The flow's cost, tokens and time, then the running workers (newest first) and the queued tasks in plan order. |
+| Finished | Done, Error and Incomplete runs and `Accepted · no worker run` rows, latest first. Done and Error rows have an archive icon (`⤓`). |
+| Plans | The `plan` tool's plans with state and percent; `Clear finished` clears done plans from the list. |
+| Archive | Saved sessions of this project, newest first, one foldable row each. |
+| Trash | Sessions moved to the trash, with `Restore` and `Empty Trash (n)`. |
 
-Accepted tasks: the flow records which tasks the orchestrator accepted (`done: [numbers]`). An accepted task that no worker run belongs to (the orchestrator did it, or one run covered several tasks) is an `Accepted · no worker run` row at the end of the Finished tab's list (counted in `Finished (n)`): green tick, no step bar, no archive icon; it is no longer planned, and tasks waiting on it become `ready`. An accepted task with a complete run is its normal Done row. A flow or archive entry that only has a count (older callers, flows saved before 1.0.0022) counts its first N tasks as accepted, which is all a count can tell. In an archive group, a run that was still going when its flow was saved reads `Running at finish` (blue-violet), its time stopped at the save. The tier colour stays on the tier name.
+### Flow rows
 
-Handoff notes: every task row can carry a short note, so whoever reviews the list knows what each task was about and how it ended. It has up to four parts, all plain text (whitespace collapsed, cut at a word with `…` past the cap, enforced by the mod whatever the caller sends):
+Each worker run is a row: its tier's pixel crab, the task number and title, model, effort and the tasks it waits for (`Opus 5.5 · high · after 1`), context use, tokens, estimated cost and time, and a state in colour:
 
-| Part | Written by | When | Cap |
-|---|---|---|---|
-| Goal | the orchestrator, `goal` in `tasks` / `add` (or `notes`) | when it creates the task; shown on queued rows too | 300 characters |
-| Brief | the mod, from the worker's Agent `prompt` | when the worker starts and is linked to the task; a return round's prompt replaces it until the task is accepted | about 600 characters |
-| Result | the orchestrator, `notes: [{task, result}]` | when it accepts the task (with its `done`) | 300 characters |
-| Feedback | the orchestrator, `notes: [{task, feedback}]` | with the result | 300 characters |
-
-The brief keeps the start of the real task text: headings, code fences, blank runs and the standard preamble sentences (the step-list closing line, `Repo:`, `Read README…`, `Use lean-ctx…`, `Never delete files`, `No rm`, `No commit/push/tag`, `Comments sparingly`, `24-hour time…`) are left out, list marks and `**` taken off. Without a prompt the Agent description stands in (without its `#n`, and only when it says more than the task's title). A run linked to no task keeps its brief as its own. `notes` can change a part at any time: a part sent again replaces it, `""` clears it, a part left out stays; a finished flow takes no notes.
-
-To read a note: a row with at least one part has a small dim `✎` right after its name (before the archive icon and the state glyph) on every row: queued, running, finished, Accepted, and the same rows inside an Archive group. Pressing it opens the note under the row (under its steps when those are open too): each part's dim label (`Goal`, `Brief`, `Result`, `Feedback`, only those that exist) on its own line, its text wrapped to the panel's width; pressing again folds it. Which notes are open is kept for the session and survives `/reload-plugins`; an Archive group's rows open on their own, apart from the live rows. On the desktop a queued or Accepted row with a note draws its title natively with the `✎` beside it, over a shorter drawing; a row without a note is drawn as before. Notes are saved with the flow's tasks (and a run's own brief with the run), so the Archive shows them; the archive index holds none.
-
-- Foldable steps: a worker that sends its plan as the `step` tool's `steps` list (then `next`, `done`, `active`, `failed`) gets a `▸` chevron right before its name; open, it lists each step with its state mark, colour and time (planned grey, running blue-violet, done green, error red). Every done or failed step shows how long it took: a step closed without having been active (marked done out of order, or closed in a batch at the end) runs from the end of the nearest step before it that ended no later than it, else from the run's start, so batch-closed steps may read `0s`; a step saved without an end (no clock) ends where the next step started, else when the run ended. A running step shows its live time; planned steps none. The row's `4/6 · step` line counts from the list: while the run goes and a step is active it names that step's place (3 done, the 4th active: `4/6`), otherwise the done count (`6/6` when all are done, `3/6` for an Incomplete run); the bar stays the done fraction. Open rows are kept for the session only.
-- Archiving finished items: while a flow is open, each row in its Finished tab that is Done or Error (not Incomplete, running or planned rows, not inside archive groups) has a small dim archive icon (`⤓`) after its task name (and its note icon) on both surfaces, away from the row's chevron, which sits before the name. Pressing it moves that row and every Done or Error row not archived yet that finished at or before it (by completion time, whatever order the presses come in) into the archive; rows that finished later stay, and so does an Incomplete row (it is listed and counted in `Finished (n)`, but the Archive collects only finished work). The flow's archive entry is saved at once with only the archived rows, marked partial (its group line ends in ` · running`), and grows with each press under the same id. When the flow finishes, restarts or the session ends, the flow's full entry (all its agents, archived ones included) replaces it. Archived rows leave the live list and the Finished count, and a dim `M archived` line heads the list; the header's cost, tokens and time still count them, and a planned task with an archived run stays started. If the entry cannot be saved anywhere (its session file or the mod store), the rows stay in the list. Nothing is deleted.
-
-## The band above the prompt
-- The flow row (a title saying where the flow is, then the track, state, percent, the prompt-cache chip, `×N` agents button that opens the panel) plus up to 2 open plan rows (running, needing input or in error), newest first. With no flow, the cache chip and the plan rows show alone.
-- The title is never the flow's own title (named after the first request, it says little about the session). It is the running task's title (a run linked to no task: its description without its `#n`); with several running, the lowest-numbered one and ` +N` for the others (`Wire it +2`); with nothing running, the next ready task (else the next queued one); with every task done, or no task title at all, `FlowDeck`. It changes as runs start and finish, in the same ink the title always had, and takes up to 40% of the desktop row (cut with `…`; the bar takes the rest) or up to a third of the terminal row.
-- The flow row's `Tasks X/Y`, its bar and its percent come from the rows the panel's tabs count, the same numbers on the desktop and in the terminal: Y = every row (running runs and queued tasks, as `Active (n)` counts them, plus finished runs and `Accepted · no worker run` rows, as `Finished (n)` counts them, plus archived runs), done = the finished rows that are complete (Done runs and Accepted rows; Incomplete and Error rows are not). X says where the flow is: while a task runs, the running task's number (done + 1, at most Y: the first task running reads `1/2`); with nothing running, the done count. The bar and the percent stay the done fraction, and the colour turns green only when the flow is finished (`Done`). A run linked to no task is a row of its own. Only a flow with no row at all (no tasks and no runs) shows the orchestrator's own total and accepted count.
-- The prompt cache (idea and cost method from ribbon, see NOTICE.md): once the session's main thread has made a request, a chip on the flow row, between the progress and the buttons, says `WARM` (red, `#cc6363`, dark text) for an hour after the main thread's last request (or keep warm's last renewal, whichever is later), then `COLD` (blue, `#6aaabd`). Warm, it is followed by the minutes left of that hour (`42m left`; whole minutes, never hours; `<1m left` in the last minute); cold, by the idle time and what the next message costs on the session's model (`12h 45m · $4.78`, `3d 9h · $6.16`; no price for a model the table does not know). With no flow the band shows the chip alone, above the plan rows. Each main request starts the hour again (subagent requests do not count); `/clear` and `/compact` drop the chip until the next request; a resumed or forked session starts from how long ago its last response was and how big it was. The band redraws once a minute at most for it (the 5-second tick writes only when the shown text changes), so the flip to `COLD` shows within 5 seconds.
-- The small dim chevron right after the chip (`▸` folded, `▾` open; there is no `Show` / `Hide` button any more) opens or folds a card below the band's row: the idle time and the tokens in the cache (`770k`, `1.2M`), `cold in 12m` (cold: `cold for 11h 45m`) with the hour as a bar, keep warm's line (see Keep warm), what one renewal costs beside a cold restart on the session's model (`renewal ≈ $0.15 · cold ≈ $6.16`: a cache read of the context against the 1-hour write; no such line for a model the table does not price), the next message's cost on each model (warm: the cache read; cold: the 1-hour cache write, 2x input) with the session's model marked `YOU`, and `prices are estimates`. On the desktop the card is as wide as the band, up to 760 px, in two columns of about three rows (left: the chip with the idle time and tokens, the TTL line and its bar, keep warm's line with the renewal and cold costs beside it; right: the caption with `prices are estimates` at its end, then the four models side by side); a line that does not fit drops to a fourth row, and a band below 520 px (or too narrow for the two columns' texts) stacks the card in one column with its lines wrapped, so no text is cut. Warm starts folded, cold starts open; the choice holds until the cache flips. The terminal draws the same facts in three lines (facts and TTL; keep warm with the costs; the caption with the models, the footer after them when the row is wide enough, else on a fourth line). Prices are estimates in one table, `MODELS` in `hooks/cache.ts` (USD per million tokens, input / cache read: Fable 10 / 0.25, Opus 4 / 0.20, Sonnet 2 / 0.20, Haiku 0.5 / 0.05); edit it there. The cache's facts, the card's choice, keep warm's bookkeeping and the tick are held per session (they survive `/reload-plugins`); only the Keep warm switch is written to the mod store, nothing to the project.
-- ✕ hides the band only; the flow stays in the panel. The `Band` button in the panel's top row brings it back, and so does a new flow. A hidden band hides the cache chip too.
-- There is no Finish button on the band or in the panel: a flow finishes by itself (see Lifecycle of a flow).
-- A new `/flowdeck <task>` while a flow is linked sends `progress` with `restart: true`: the open flow is saved as finished and the new one starts.
-- A band that cannot be drawn (a throw, a timeout, a tree the surface refuses) gives way to what other mods draw there and says why, once per reason: a dim transcript line `flowdeck: the band above the prompt could not be drawn: <reason>` (the model does not read it; `claude --debug` logs it too) and a dim `band error: <reason> (v<version>)` line under the panel's Context and Usage buttons, cleared by `/reload-plugins` or a new session; the transcript line ends with the running version too. When what is drawn below the band fails, the flow row is drawn without it. When only the cache chip cannot be drawn, the row is drawn without the chip and the reason is said the same way (`cache: <reason>`).
-- A mod listed before flowdeck in `enabledPlugins` that draws the band without passing it on hides flowdeck's band completely: flowdeck's hook never runs, so nothing is logged and the `Band` button cannot bring it back. replay-theater does this after every turn in which files were edited (its `▶ Replay: N edits (press r)` line takes the band's place) until the session's process restarts; `/reload-plugins` does not clear it. List flowdeck before such mods (see Install).
-
-## Keep warm
-Keeps the prompt cache warm through a long idle stretch, so the next message reads the context from the cache instead of writing it all again (the renewal method of Cache Bell, claude-mods.com/cache-bell, built in; not its compaction, questions or status line).
-
-- **How it renews.** One side request through the engine's `$.model.fork` (Claude Code 2.1.288 or later): the main thread's last request again (its model, system prompt, tools and messages) with a one-line prompt asking for the word `ok`, every tool denied. The API reads the whole context from the cache, which starts its hour again. Nothing is added to the transcript and the model's answer is not shown.
-- **When.** With the switch on, once the cache was last read or written `RENEW_AT_MS` ago (50 minutes: 10 minutes before it would go cold), when the context holds at least `KEEP_WARM_MIN_TOKENS` (80,000) tokens, no main turn is running (a long tool call included) and the user has sent nothing since. At most `KEEP_WARM_MAX_RENEWALS` (2) renewals between two of the user's messages; only the user's own message (typed, Remote Control, or an SDK host's turn) starts the count again, not a background task's notification. So an idle session stays warm for about 2 h 40 min after the user's last message, then goes cold.
-- **When not.** Never while the cache is cold (a renewal would only write the context again: a session that slept past the hour, or was resumed after it, is left alone), never in the hour's last minute, never twice in the same minute, never once the session ended, never below 80,000 tokens, never with the switch off. `/clear`, `/compact`, a resume or a fork start a new cache with nothing renewed.
-- **Failures.** A renewal that fails (an API error, nothing to fork yet, a call that throws, an engine without `$.model.fork`) is counted, waits `KEEP_WARM_BACKOFF_MS` (2 minutes) and tries again; after `KEEP_WARM_MAX_FAILURES` (2) failures in an idle period it stops until the user's next message. It never shows as an error in the band or the panel: the card says `failed`.
-- **What the band shows.** The chip and the row stay as they were (no wider): after a renewal the chip counts the hour from the renewal (`60m left` again), while the card's idle time stays the real one, since the main thread's last request. The card's keep warm line: `keep warm: renews at 14:32`, `kept warm ×1 · renews at 15:22`, `kept warm ×2 · limit reached`, `keep warm: failed · retry at 14:52`, `keep warm: failed`, `keep warm: below 80k tokens`, `keep warm: off`, and once cold `kept warm ×1` or `keep warm: not renewed`. Times are 24-hour `HH:MM`. Below it, `renewal ≈ $0.15 · cold ≈ $6.16`: what one renewal costs (a cache read of the context) beside a cold restart (the 1-hour write), on the session's model from `MODELS`.
-- **Cost.** A renewal is a real request: it costs about a cache read of the context plus a few tokens, and on a Pro or Max plan it counts against the plan's usage limits like any other message. Two renewals of a 770k-token Opus context cost about $0.30 against about $6.16 for writing it again; prices are estimates.
-- **The switch.** `Keep warm` in the panel's top row (`▾ Keep warm (on)` / `▸ Keep warm (off)`), on by default, saved per project (mod store key `keepWarm`, `{<project folder>: true|false}`); a project never switched keeps it on. The constants are at the top of `hooks/cache.ts`.
-
-## State colours
 | State | Colour |
 |---|---|
-| Running | blue-violet |
-| Needs input / Needs approval | amber |
+| Running (with the live tool, `Running · Bash`) | blue-violet |
+| Needs approval | amber |
 | Done | green |
-| Incomplete (ended OK, steps left) | amber |
+| Incomplete (ended, steps left) | amber |
 | Error | red |
 
-## Saved data
-The archive and plans are kept per project in `<project>/.claude/flowdeck/` (the session's working folder), so two projects never overwrite each other. The folder holds its own `.gitignore` (`*`), so nothing in it is committed; the project's own files are never touched. flowdeck never moves or truncates a file, and erases only through `Empty Trash` (below), a one-off exception the user chose for that button alone: the engine's fs gives a mod read, write, list and stat, nothing that removes or renames, so that button runs a host command. All sizes are UTF-8 bytes (the engine reads and writes at most 4 MiB, 4,194,304 bytes, a file; Cyrillic takes 2 bytes a character, CJK 3, emoji 4).
+The chevron before the name folds out the worker's steps, each with its mark and how long it took. A queued task shows `ready` once everything it waits for is done: those can start now, in parallel. A finished row shows when it finished (`14:07`, or `Oct 29 · 14:07` on an earlier day).
+
+The mod links each run to its planned task by itself: by the `#n` at the start of the Agent description, else the exact title, else the closest title, else the only open task of the worker's tier.
+
+### Handoff notes
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/images/panel-finished-dark.png">
+  <img alt="The Finished tab: an accepted task with its note open, showing Goal, Brief, Result and Feedback" src="docs/images/panel-finished-light.png" width="520">
+</picture>
+
+Every task row can carry a short note so whoever reviews the list knows what each task was about and how it ended. Below, "the orchestrator" is the Claude session running `/flowdeck`, and "the mod" is flowdeck itself.
+
+| Part | Written by | When |
+| --- | --- | --- |
+| Goal | the orchestrator: an optimized summary of the user's request (a sentence or two) | when it creates or adds the task, so queued rows have it too |
+| Brief | the mod, taken automatically from the worker's delegation prompt | when the worker starts |
+| Result | the orchestrator: what was achieved | when it accepts the task |
+| Feedback | the orchestrator: a short review | when it accepts the task |
+
+Caps: goal 300, brief 600, result 300 and feedback 300 characters; the mod cleans each part to plain text and cuts it at a word with `…`, whatever the caller sends. Every row with a note, queued, running, finished or archived, has a dim `✎` after its name; pressing it opens the note under the row.
+
+The brief leaves out headings, code fences and common preamble lines (repository line, tool and commit rules, the step-list closing line) and keeps the start of the real task text; a return round's prompt replaces it until the task is accepted. The orchestrator can change any part later through `notes` (an empty string clears it), but a finished flow takes no notes. Notes are saved with the flow, so the Archive shows them too.
+
+### Automatic flow lifecycle
+
+There are no Start or Finish buttons.
+
+- **Start**: the first `progress` call starts a flow. So does a task list (TodoWrite or TaskCreate) with an open item, or a flowdeck worker launched while no flow is open.
+- **Finish**: when the main turn ends with every task done and no worker running, the flow finishes by itself. A flow with nothing running or queued finishes after 30 minutes idle (`IDLE_FINISH_MS` in `hooks/live.ts`). A finished flow is archived at once and stays in Finished and on the band (`Done`) until the next task starts a new flow.
+- **Across restarts**: the open flow is written to `.claude/flowdeck/flow-live.json` as it changes. The next session restores its own flow, and closes and archives a flow another session left once that session ended or has been quiet for 3 minutes. Runs that were still going read `Running at finish`.
+
+### Archive and Trash
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/images/panel-archive-dark.png">
+  <img alt="The Archive tab: the newest session open with its finished runs, an older session folded, and the confirmation to move a third session to the trash" src="docs/images/panel-archive-light.png" width="520">
+</picture>
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/images/panel-trash-dark.png">
+  <img alt="The Trash tab: Empty Trash (2) and two trashed sessions, each with Restore" src="docs/images/panel-trash-light.png" width="520">
+</picture>
+
+- **Archive**: one file per saved session (a flow, or a finished plan) in `.claude/flowdeck/archive/`, listed by `archive-index.json`. The list draws from the index alone; a session's file is read only when its row is opened. The archive icon (`⤓`) on a finished row archives it and every older finished row early, while the flow runs.
+- **Move to trash** (`✕` on a session row): asks first, then copies the session to `.claude/flowdeck/.trash/` and hides it from the Archive. Nothing is erased.
+- **Restore**: asks first, then moves the session back to the Archive.
+- **Empty Trash (n)**: asks `Erase n sessions for good? This cannot be undone.` with `Erase` / `Cancel`, then erases each trashed session's files permanently, with no system trash and no undo. This is the only place flowdeck deletes a file. It erases only files whose names the archive itself gives the trashed sessions, directly inside `.trash/` or `archive/`, never a link, one file at a time; a session that cannot be erased whole stays in the Trash and the tab says how many failed.
+
+## Configuration and data
+
+| Setting | Where | Default |
+|---|---|---|
+| Panel language | `claude plugin configure flowdeck@flowdeck-mod` | `auto` |
+| Context, Usage folded | panel top row (mod store `contextShown`, `usageShown`) | shown |
+| Reset as time left or exact time | `◷` in Usage (mod store `usageRemaining`) | time left |
+| Keep warm | panel top row (mod store `keepWarm`, per project folder) | on |
+| Band shown | panel top row (per session) | shown |
+| Cache prices | `MODELS` in `hooks/cache.ts` | Fable 10 / 0.25, Opus 4 / 0.20, Sonnet 2 / 0.20, Haiku 0.5 / 0.05 USD per million tokens |
+| Keep warm timing | top of `hooks/cache.ts` | renew at minute 50, at least 80,000 tokens, at most 2 renewals |
+| Idle finish | `IDLE_FINISH_MS` in `hooks/live.ts` | 30 minutes |
+
+All times are 24-hour `HH:MM`.
+
+**Where data lives.** Per project, in `<project>/.claude/flowdeck/` (the session's working folder). The mod writes a `.gitignore` containing `*` into that folder before its first file, so nothing there is committed.
 
 | File | Holds |
 |---|---|
-| `archive/<key>-<startedAt>.json` | One saved session each: a flow (its agent runs as they ended, up to 60 runs, 12 steps per run, titles and texts cut at 200 characters, 100 tasks with their handoff notes, each run's brief when no task took it, the accepted tasks and when each was accepted) or a finished plan. The name is the session id's key and its start, only `[a-z0-9-]` (`-2`, `-3` … when that name holds another session). A flow is saved when it finishes (by itself, idle, or `finished: true`), when a new flow replaces it, as open when the session ends with it running (dated by its last activity), when the next session closes it (finished, dated by its last activity, under the same id), and as partial on an archive press. A session file can take up to 3,900,000 bytes; a bigger one is not written (it goes to the mod store, and the Archive says so). |
-| `flow-live.json` | `{version: 1, sessions: {<session id>: record}}`: per session the flow shown (`flow`, `agents`, `meta`), `lastActivityAt` (its last change), `beatAt` (last written: at least once a minute while a flow is shown), `endedAt` (set by the session's end) and `transcript` when known. Each session writes only its own record (read, change, write; other records and unknown fields are written back as they were); the next session closes another session's record (see Lifecycle of a flow) and writes the file again without it. A file that cannot be read, whose existence cannot be told, or that holds no such object is never written: the panel starts without it and says so once (a dim line under the top buttons, and a transcript line). At most 3,900,000 bytes. |
-| `archive-index.json` | `{version: 1, sessions: [...]}`, one small record per session (about 330 bytes): id, file, kind (`flow`/`plan`), title, start, end, status, partial, item count, task count, cost, tokens, time, the file's size, and `missing`, `trashedAt`, `restoredAt` when they apply. The Archive tab draws from it alone. |
-| `.trash/<key>-<startedAt>-t<ms>.json` | A copy of a session moved to the trash, `<ms>` when it was moved. |
-| `.trash/trash-index.json` | The trash copies' records (the same fields, plus `originalFile`); the Trash tab draws from it. |
-| `.trash/damaged/archive-index-<ms>.json` | A damaged index, kept as it was before the rebuilt one was written (also `trash-index-<ms>.json`). |
-| `archive-migrated.json` | Which files of the archive before 1.0.0025 were imported (`{version, files, at}`). |
-| `history.json`, `history-<n>.json`, `history-index.json`, `history-extra-<startedAt>.json` | The archive as 1.0.0024 and earlier kept it (the latest part, its volumes, the volume index, one side file per flow). Read once by the migration and never written, moved or renamed again. |
-| `plans.json` | Task plans per session, every session kept (none is dropped for age); a resumed session gets its plans back. Up to 3 plans are kept per session. |
-| `plans-extra-<session id>.json` | This session's plans when `plans.json` cannot take them; from then on the session writes only this file, and a resumed session loads it first. |
+| `archive/<key>-<start>.json` | One saved session: a flow (up to 60 runs, 12 steps per run, 100 tasks with their notes) or a finished plan |
+| `archive-index.json` | One small record per session (about 330 bytes); the Archive tab draws from it |
+| `flow-live.json` | Each running session's open flow, for restoring it after a restart |
+| `plans.json`, `plans-extra-<session>.json` | The `plan` tool's plans, up to 3 per session |
+| `.trash/` | Copies of trashed sessions and `trash-index.json`; `.trash/damaged/` keeps an index that could not be parsed before it is rebuilt |
+| `history*.json`, `archive-migrated.json` | The archive format before 1.0.0025, read once by a migration and never written again |
 
-- Save order: (1) the session's own file, written only when its name is free or holds an older copy of the same session (a newer copy stays, and is what the index lists); (2) the index read again, checked against `archive/` (below), the record put in (of two records of one session the newer by its end wins; no other record is ever dropped), written whole. A crash after (1) leaves the file, which the next load lists.
-- The index heals itself on every load and save: a session file in `archive/` it does not list is read once and its record added (and the index written); a record whose file is not in `archive/` is kept and marked `missing` (shown `file missing`), and unmarked when the file is back. Two sessions saving at once can each write the index without the other's session; the next load or save lists it again. The same holds for `.trash/` and its index.
-- A file that exists but cannot be read is never written over, and neither is one whose existence cannot be told (its stat, the folder listing and `exists` all fail); only a file known to be missing is created. An index that cannot be read is never written: the Archive shows the sessions found in `archive/` and says so. A damaged index (read, but no index) is rebuilt from `archive/` and written only after every file there was read, the damaged one first kept in `.trash/damaged/`.
-- Size: past 2,500,000 bytes the index is still written whole and the Archive says so (no record is dropped); that is about 7,500 sessions. Past 3,900,000 bytes it cannot be written: the session files are kept and the Archive says so. The follow-up when a project gets near that is index volumes (several index files); not built yet.
-- Moving to the trash: (1) the session's file is copied to `.trash/` under a new name (never over anything); (2) its trash record is added; (3) its archive record is marked `trashedAt`. Its file also stays in `archive/`: the engine cannot move or remove a file. Restore: (1) `archive/` holds the session (its file is usually still there; else the trash copy is written back; a newer trash copy replaces an older file of the same session); (2) the archive record is marked `restoredAt`; (3) the trash record is marked `restoredAt` (kept, as the copy stays in `.trash/`). Where a session shows is decided by its latest event, read from both indexes: its end (a save), a move to the trash, a restore. So a crash between steps never shows a session in neither list (after the copy, the next load lists the copy and finishes the move), a session saved again after it was trashed (a running flow's partial entry) shows in the Archive again, and restoring a session the Archive holds again adds no duplicate.
-- Empty Trash erases for good (no Mac Trash, no undo); Restore is the way back before it. It runs in the archive's queue, after any save, move or restore under way: both indexes are read and healed again, then every session `.trash/trash-index.json` lists is erased, one file at a time. A session the Trash shows (hidden from the Archive) loses its original in `archive/` first (the file its `archive-index.json` record names), then every trash copy of it. A session that is back in the Archive (its trash copy was restored, and a restored copy stays in `.trash/`) loses only that leftover copy: its archive file stays, since the Archive still lists it. When an original cannot be erased, that session's copies are left as they are. The trash index is then written with only the records of the sessions that could not be erased whole (a copy of theirs that did go shows `file missing`), so pressing again retries them; the tab says `n sessions erased, m failed`. Each erase (`eraseSessionFile` in hooks/archive-store.ts, scoped to `.trash/` or `archive/`) is refused unless the record's file name is exactly the one the store gives that record's session in that folder (its id's key and start, plus the trash time in `.trash/`: `[a-z0-9-]` and `.json`, no separator, no wildcard), the path is `<folder>/<name>`, and the resolved path (`$.fs.stat` with `resolve`) is a plain file, not a link, directly inside that resolved folder. Then one command, by argv with no shell: `unlink <file>` on macOS and Linux, PowerShell `Remove-Item -LiteralPath` with the path passed in the environment on Windows (no `-Recurse`). A file counts as erased only once a stat and the listing say it is gone; a file already missing counts as gone. It never touches a file of a session the Archive lists, `archive-index.json` (an erased session's record stays there, hidden by its `trashedAt`, and is marked `missing` by the next load), `.trash/damaged/`, plans, `flow-live.json` or any file no record names.
-- Emptying the trash by hand instead: move `.claude/flowdeck/.trash/` (or single copies in it) to the Mac Trash. The sessions it held then show in neither list; their files also stay in `archive/` (hidden by their `trashedAt`). To restore by hand instead, use `Restore`; a session file put back into `archive/` by hand is listed by the next load.
-- Migration from 1.0.0024 and earlier: the first load imports every entry of `history.json`, the volumes `history-<n>.json` and the side files `history-extra-*.json` into session files and the index (of two copies of one session the later-ended, a full one over a partial one at the same end), idempotent by id, then writes `archive-migrated.json` listing each file imported. The old files stay where they are, untouched, and are not read again once listed. A file that cannot be read is said above the Archive, not listed, and tried again on the next load; nothing in it is lost. A session that an older flowdeck still running in another session writes to a file already imported is not imported again (reload every open session after updating).
-- Mod store: with no working folder, or when the project folder cannot take a save, that save goes to the mod store (key `history`) as before, so nothing is lost. This project's entries in the store key `history` are put into session files on every load and save (the store itself is never changed by that). Without a working folder the Archive shows the store's entries and has no trash. A save that neither the folder nor the store took still shows in the Archive for the session, and says so. Plans are not imported from the store.
-- Mod store keys still in use: `contextShown`, `usageShown`, `usageRemaining`, `plansShown`, `historyShown` (the Context and Usage toggles and the Usage reset switch; `plansShown` and `historyShown`, the old Plans and Archive toggles, are still read but no longer used since the tabs), and `keepWarm` (the Keep warm switch per project folder).
-- `FLOWDECK_ARCHIVE_VOLUME_MAX` and `FLOWDECK_HISTORY_SEGMENT_MAX` are no longer read (there are no volumes).
+**Size guards.** Sizes are UTF-8 bytes. No file over 3,900,000 bytes is written (the engine reads and writes at most 4 MiB a file); a session too big for its file goes to the mod store instead and the Archive says so. Past 2,500,000 bytes (about 7,500 sessions) the Archive warns that the index is large. A file that exists but cannot be read is never written over, and a damaged index is kept before it is rebuilt.
 
-## Install on a new machine
-Everything needed is in this repo: it is its own marketplace (`.claude-plugin/marketplace.json`, name `flowdeck-mod`, plugin `flowdeck` at `./`).
+Without a project folder, or when the folder cannot be written, saves go to Claude Code's mod store (key `history`), so nothing is lost.
 
-### Prerequisites
-- Claude Code with mods and the `claude plugin` commands (`claude plugin --help` lists `marketplace`, `install`, `test`, `validate`). Built and tested with 2.1.312 (`claude --version`). Keep warm needs `$.model.fork`, in 2.1.288 and later; on an older engine every renewal fails and the card says `failed`.
-- git, and SSH access to `git.paavu.com` for the SSH clone (the HTTPS form asks for a Gitea login: the repo is private).
-- `flowdeck-fable` runs on the Fable model; without access to it, change `model:` in `agents/flowdeck-fable.md`.
+## Privacy: what it reads, writes and runs
 
-### Conflicts
-flowdeck replaces savvy-flow, savvy-progress, context-bar, plan-progress and flightdeck. They share its tool names (`progress`, `step`, `plan`), pane ids and commands: disable or uninstall them first (`claude plugin disable <name>@<marketplace>`, or `/plugin` in a session).
+flowdeck makes **no network calls of its own**: there is no `fetch`, no HTTP and no telemetry in the code. Everything it keeps stays on the local machine.
 
-### Install (from a local clone; recommended)
-```
-git clone gitea@git.paavu.com:paavu/flowdeck-mod.git ~/flowdeck-mod
-#   or: git clone https://git.paavu.com/paavu/flowdeck-mod.git ~/flowdeck-mod
-claude plugin validate ~/flowdeck-mod                  # ✔ Validation passed
-claude plugin marketplace add ~/flowdeck-mod           # adds marketplace "flowdeck-mod" (user settings)
-claude plugin install flowdeck@flowdeck-mod            # installs and enables it (scope: user)
-claude plugin list                                     # flowdeck@flowdeck-mod, Version: <plugin.json version>, Read from: ~/flowdeck-mod
-```
-A marketplace added from a folder is read in place: Claude Code loads flowdeck straight from the clone, nothing is copied.
+| Kind | What |
+|---|---|
+| Model requests | Keep warm's renewal, `$.model.fork` (`hooks/register.tsx`, `renewCache`): one request to the model provider the session already uses, over the session's own transcript. Off with the `Keep warm` switch. |
+| Processes | `$.process.run`, only from `Empty Trash` (`eraseSessionFile` in `hooks/archive-store.ts`): `unlink <file>` on macOS and Linux, `powershell.exe -NoProfile -NonInteractive -Command Remove-Item -LiteralPath …` on Windows (the path passed in the environment). No shell, one file per call, 15-second timeout. |
+| Files written | Only under `<project>/.claude/flowdeck/` (`$.fs.write`): the files listed above and the folder's `.gitignore`. |
+| Files read | The same folder (`$.fs.read`, `$.fs.list`, `$.fs.stat`, `$.fs.exists`). |
+| Session data | Context breakdown and rate limits (`$.session.usage`), the session's model and id, agent launches with their description and prompt (the first ~600 characters of a worker's prompt become its brief), the name of each tool a worker calls (the live `Running · <tool>` word), TodoWrite, TaskCreate, Agent, ExitPlanMode and AskUserQuestion calls, permission requests (to show `Needs approval`), whether a prompt was typed by the user (keep warm's count), turn usage (tokens and cost), and the transcript path from `SessionStart` (kept to recognise the session after a restart). |
+| Settings and env | `language` from Claude Code's settings, `LC_ALL`, `LC_MESSAGES`, `LANG`; only to pick the panel language. |
+| System prompt | Adds the two rules described in [The prompt rules](#the-prompt-rules). |
 
-Optionally set the panel language (`auto`, `en`, `ru`; default `auto`): `claude plugin configure flowdeck@flowdeck-mod`, or `/plugin configure flowdeck@flowdeck-mod` in a session.
-
-Then fix the load order in `~/.claude/settings.json`: mods nest in the order of `enabledPlugins`, the first outermost. `install` appends `"flowdeck@flowdeck-mod": true` at the end; move that line above other mods that draw above the prompt (next-steps and the like), or they squeeze the band, and above replay-theater, which otherwise takes the band's place after any turn that edited files. Then start a new session or run `/reload-plugins`, and open the panel with `/flowdeck-agents`.
-
-Installing straight from the git URL (`claude plugin marketplace add gitea@git.paavu.com:paavu/flowdeck-mod.git`) should work the same way once the marketplace file is on the remote, but it was not tried: the local clone is the tested path.
-
-### Releasing
-Every build bumps the version (`M.m.xxxx`) in three places together: `.claude-plugin/plugin.json` (what Claude Code installs), `hooks/version.ts` (`VERSION`, what the panel shows as running) and a new top heading in `CHANGELOG.md`. `tests/version.test.tsx` fails when the first two differ (the engine hands the test the manifest's version as it loads the mod); `sh scripts/check-version.sh` checks all three. Then `claude plugin test .`, `claude plugin validate .`, commit, and tag `v<version>`.
-
-### Update
-```
-git -C ~/flowdeck-mod pull
-claude plugin marketplace update flowdeck-mod          # re-reads the catalog
-claude plugin list                                     # shows the new version
-```
-then `/reload-plugins` in open sessions (or start new ones). With a folder marketplace, `claude plugin update flowdeck@flowdeck-mod` only says the plugin is read from its folder: the pull is the update. The running version is the `version` in `.claude-plugin/plugin.json`, as `claude plugin list` shows it; `CHANGELOG.md` lists what each version changed.
-
-### Run the tests
-```
-claude plugin test ~/flowdeck-mod                      # the whole suite: every test passes
-claude plugin validate ~/flowdeck-mod
-```
-(`claude plugin test` takes the plugin's folder.)
-
-### Roll back, uninstall
-- Roll back: `git -C ~/flowdeck-mod checkout v1.0.0021` (a release tag; from 1.0.0021 on each release is tagged `v<version>`; any commit from `git log` works too), then `/reload-plugins`. A version before 1.0.0025 reads only the old `history*.json` files (left as they were): sessions saved by 1.0.0025 or later are in `archive/` only and do not show there. Back to the newest: `git -C ~/flowdeck-mod checkout main && git -C ~/flowdeck-mod pull`.
-- Uninstall: `claude plugin uninstall flowdeck@flowdeck-mod`, then `claude plugin marketplace remove flowdeck-mod`. The clone and the saved data stay where they are; move them to the Trash yourself if you want them gone.
-
-### What it keeps, and the defaults
-- Per project: `<project>/.claude/flowdeck/` (archive, plans and `flow-live.json`, see Saved data), with its own `.gitignore` (`*`), so nothing there is committed.
-- Global mod store keys: `contextShown`, `usageShown`, `usageRemaining`, `plansShown`, `historyShown`, `keepWarm` (one entry per project folder) (and `history`/`plans` only as a fallback when a project folder cannot be written).
-- Defaults: all times are 24-hour `HH:MM`, and every list is ordered latest completion first; the usage reset shows the time left (`Resets in 2d 13h 20m`) until `◷` switches it to the exact time, and that choice holds for all projects (`usageRemaining`); Context and Usage shown, Archive shown; Keep warm on in every project until switched off there.
+What it saves (task titles, goals, briefs, results and feedback, costs and times) is what the user and the orchestrator wrote during the session. It stays in the project folder, git-ignored.
 
 ## Known limits
-- Terminal text is English only.
-- plan-progress's hover and clock overlays are not ported.
-- No sounds.
-- No edit gate: work is never blocked for lack of a plan.
-- A worker still running when its flow is saved is kept as `Running at finish`; what it spends after that is not recorded in the flow.
-- Handoff notes sent after a flow finished are ignored (the reply says so): send `result` and `feedback` with the `done` that accepts the task. An Archive group of a flow saved without runs shows its plain task list, without note icons. The `✎` glyph was checked in the tests only, not on a live desktop.
-- A flow is known by its start time in the project folder: two flows started in the same millisecond there count as one.
-- `archive-index.json` grows by about 330 bytes per session and is one file: past 2,500,000 bytes (about 7,500 sessions) the Archive says so, and past 3,900,000 bytes it can no longer be written (the session files are kept). Index volumes would be the fix; not built.
-- A session moved to the trash keeps its file in `archive/` as well as its copy in `.trash/` (the engine's fs cannot move or remove files); `Empty Trash` erases both. Its small record in `archive-index.json` (title, times, cost, tokens) stays, hidden.
-- `Empty Trash` needs `$.process.run` (the CLI's host commands) and `unlink` (macOS, Linux) or `powershell.exe` (Windows) on the PATH; where it cannot run, every file is kept and the tab says `0 sessions erased, n failed`.
-- A button can ignore a click while workers run: the desktop app keeps a button's old handle until the next redraw and refuses a press on it; the panel redraws every 5 seconds while agents run, so elapsed times also advance in 5-second steps. After `/reload-plugins` the engine refuses every press on a button drawn before the reload until the desktop app draws the panel again; such a press never reaches the mod (the desktop app's log says `ui_press not handled`).
-- Two sessions saving at once can each write `archive-index.json` without the other's session for a moment; the next load or save lists it again from its file.
-- A flow whose tasks are all done finishes when the main turn ends, before the orchestrator may have sent `done` for a task whose run is already complete; such a late `done` changes nothing (the row reads Done anyway).
-- A session is told apart by its id (and transcript file): whether a resume keeps its id was not seen in a real session; a resume under a new id closes the old record as the last session's (archived, not restored). Two sessions in one project at once: a session ended without its end being written (a crash, the 1.5-second end budget) looks alive for 3 minutes, so the next session closes its flow up to 3 minutes later. A worker that runs on after its session ended is not followed: its run reads `Running at finish`.
-- The desktop agent row puts the task name at the drawing's text column by assuming the chevron Button is about 20 px wide (`CHEVRON_W` in register.tsx); a Box's `width` counts character cells, so pixels cannot be set there.
-- The cache chip assumes Claude Code's 1-hour prompt cache and knows only what the engine reports (the main thread's requests, the context size after a turn); its prices are estimates. A press of its chevron right as the band redraws for the minute can land on a stale handle and be refused, as for the panel's buttons. The chip itself cannot be the press: the kit's Button carries only a text label (an Svg or coloured Texts inside it are dropped) and neither Svg nor Box takes a press, so the chevron beside it does; its room on the desktop row (`CACHE_FOLD_PX`, 30 px with the gap) is an estimate. The tab row's two-space gap on the desktop is the native buttons' own padding alone (no `columnGap`), not measured live.
-- Keep warm was tested through the test kit only (`$.model.fork` answered by the test), not yet in a live session: that a renewal really renews the cache shows as `cache_read_input_tokens` in its usage, which flowdeck does not read. Should the engine raise a main turn for a fork, it is ignored while a renewal is out. A renewal is sent from the 5-second tick, so it may come up to 5 seconds after minute 50; while the machine sleeps nothing runs, and a cache found cold on waking is left alone.
 
-Built from savvy-flow/savvy-progress, context-bar and plan-progress, with the prompt-cache idea from ribbon (see NOTICE.md) and keep warm's renewal method from Cache Bell.
+- The terminal text is English only; the `ru` language covers part of the panel.
+- No sounds, and plan-progress's hover and clock overlays are not ported.
+- No edit gate: work is never blocked for lack of a plan.
+- A worker still running when its flow is saved is kept as `Running at finish`; what it spends after that is not recorded.
+- Handoff notes sent after a flow finished are ignored: send `result` and `feedback` with the `done` that accepts the task.
+- The archive index is one file: past about 7,500 sessions it warns, and past 3,900,000 bytes it can no longer be written (the session files are kept). Index volumes would fix this; they are not built.
+- The engine's file API cannot move or delete, so a trashed session keeps its file in `archive/` as well as its copy in `.trash/` until `Empty Trash`. Its small index record stays, hidden.
+- Two sessions saving at once can each write the index without the other's session for a moment; the next load lists it again.
+- A session that ends without its end being written (a crash) looks alive for 3 minutes, so the next session closes its flow up to 3 minutes later.
+- On the desktop, a button pressed right as the panel redraws can land on an old handle and be ignored; while workers run, the panel redraws every 5 seconds, so elapsed times move in 5-second steps.
+- The cache chip assumes Claude Code's 1-hour prompt cache, and its prices are estimates.
+- Keep warm was tested through the test kit only (with `$.model.fork` answered by the test), not yet measured in a live session. A renewal can come up to 5 seconds after minute 50; while the machine sleeps nothing runs.
+- The `✎` glyph and the desktop layout estimates (chevron width, the cache chevron's room) were checked in tests, not measured in a live desktop window.
+
+## Troubleshooting
+
+| Problem | Try |
+|---|---|
+| Nothing changed after install or update | `/reload-plugins`, or start a new session. Check `/plugin` lists `flowdeck` among the active mods. |
+| The band is gone | Press `Band` in the panel's top row (`/flowdeck-agents` opens the panel). `✕` on the band only hides it. |
+| The band never shows, and `Band` cannot bring it back | Another mod that draws above the prompt and is listed before flowdeck in `enabledPlugins` (in `~/.claude/settings.json`) can answer the band without passing it on, so flowdeck's hook never runs. Mods nest in the order of `enabledPlugins`, first outermost: move `"flowdeck@flowdeck-mod": true` above such mods, then `/reload-plugins`. The `replay-theater` sample mod, for one, takes the band after a turn that edited files. |
+| A line `band error: …` under the top row | The band could not be drawn for that reason; flowdeck gives way to what other mods draw and says so once. `/reload-plugins` clears it. `claude --debug` logs the details. |
+| A panel button does nothing | The desktop app may have pressed an old handle while the panel redrew; press again. Right after `/reload-plugins` the app refuses presses on buttons drawn before the reload until it redraws the panel. |
+| `could not be drawn` in a part of the panel | That part threw; the rest still draws. `/reload-plugins`, and report it with the line's text. |
+| Check the install | `claude plugin validate <folder>` on a clone must end with `✔ Validation passed`. |
+
+## Development
+
+```sh
+git clone https://github.com/paavu/flowdeck-mod
+cd flowdeck-mod
+claude plugin validate .        # ✔ Validation passed
+claude plugin test .            # the whole suite
+sh scripts/check-version.sh     # the three version places agree
+```
+
+To run your working copy, add the folder as a marketplace (`claude plugin marketplace add ./flowdeck-mod`, then install `flowdeck@flowdeck-mod`): a folder marketplace is read in place, so `/reload-plugins` picks up edits. Or start a session with `claude --plugin-dir ./flowdeck-mod`.
+
+| Path | What |
+|---|---|
+| `hooks/register.tsx` | The hooks module: events, tools, the band and the panel |
+| `hooks/*.ts`, `hooks/*.tsx` | Pure parts: archive store and index, cache and keep warm, notes, plans, tasks, usage, context |
+| `skills/flowdeck/SKILL.md`, `agents/` | The orchestrator skill and the five worker agents |
+| `tests/` | The suite (`claude plugin test .`) |
+| `types/index.d.ts` | The `$.state` contract |
+| `docs/` | Design notes and the build ledger (history, not user documentation) |
+
+**Versions** are `M.m.xxxx`: every build raises the 4-digit build number. A release changes three places together: `version` in `.claude-plugin/plugin.json`, `VERSION` in `hooks/version.ts` and a new top heading in `CHANGELOG.md`. `tests/version.test.tsx` fails when the first two differ; `scripts/check-version.sh` checks all three.
+
+**Releasing**: bump the version, run `claude plugin test .`, `claude plugin validate .` and `sh scripts/check-version.sh`, commit, tag `v<version>` and push the tag.
+
+### Screenshots
+
+`sh scripts/screenshots.sh` renders the images in `docs/images/`. It runs `scripts/screenshots/shots.tsx` through the engine's test kit (sample flows, a warm and a cold cache, archive sessions; no real session data), prints each drawn tree, and `scripts/screenshots/render.mjs` lays the trees out as HTML and captures them with [agent-browser](https://github.com/vercel-labs/agent-browser), light and dark. The mod's own SVG drawings are used as drawn; the desktop app's native elements (text, buttons, boxes) are approximated with plain CSS. `docs/images/src/` keeps each page's HTML and the band and cache-card SVGs. Times in the images are in the local time zone of the machine that rendered them.
+
+## Credits and license
+
+flowdeck is MIT-licensed: see [LICENSE](LICENSE). It is built from these MIT-licensed mods, whose notices are in [NOTICE.md](NOTICE.md):
+
+- savvy-flow and savvy-progress (claude-kit, johnnyvizz): the orchestrated flow, the worker agents, the band and the agents panel
+- context-bar (claude-code-mods, Hamza Zafar): the context window section
+- plan-progress (zycck-mods, Kirill Serditov): the plan model and the `plan` tool
+- ribbon (RoboNuggets): the prompt-cache WARM/COLD idea and its cost method, reimplemented
+
+Keep warm's renewal method follows the idea of Cache Bell (claude-mods.com/cache-bell); no code was taken from it.

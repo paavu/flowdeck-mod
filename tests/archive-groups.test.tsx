@@ -726,7 +726,7 @@ describe('archive groups in the panel', () => {
   })
 
   test('keyOf makes a short, stable key of any id', () => {
-    const ids = ['1792904027277-/Users/user/www/paavu/claude/server-setup/', '1792904027277-/Users/user/www/paavu/claude/server-setup', 'gA', '', 'a b/c_d', 'café über 日本', '1-/work/app', '2-/work/app']
+    const ids = ['1792904027277-/Users/me/work/project/', '1792904027277-/Users/me/work/project', 'gA', '', 'a b/c_d', 'café über 日本', '1-/work/app', '2-/work/app']
     const keys = ids.map(keyOf)
     for (const k of keys) expect(k).toMatch(/^k[a-z0-9]+$/)
     for (const k of keys) expect(k).not.toMatch(/[/_\s]|[^\x00-\x7f]/)
@@ -737,8 +737,8 @@ describe('archive groups in the panel', () => {
   })
 
   test('an entry id with a path and spaces gives every Button a safe key, and its fold still toggles', async ($, on) => {
-    const odd = { ...groupA(), id: '1792904027277-/Users/user/www/my app/' } as ArchiveEntry
-    const other = { ...groupB(), id: '1700000000000-/Users/user/other proj/' } as ArchiveEntry
+    const odd = { ...groupA(), id: '1792904027277-/Users/me/www/my app/' } as ArchiveEntry
+    const other = { ...groupB(), id: '1700000000000-/Users/me/other proj/' } as ArchiveEntry
     engine(on, { store: { historyShown: true, history: [odd, other] } })
     await start($)
     await settle()

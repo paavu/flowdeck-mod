@@ -1,0 +1,3 @@
+# Security
+
+flowdeck runs inside Claude Code with the user's permissions; [README.md](README.md#privacy-what-it-reads-writes-and-runs) lists every file path it writes, the one process it can start (`Empty Trash`) and its one model request (Keep warm). To report a security problem, open an issue at https://github.com/paavu/flowdeck-mod/issues with the version (`v…` in the panel's top row), what happened and how to reproduce it; leave out tokens, transcripts and other private data. For a problem that should not be public before a fix, open an issue asking for a private contact, without the details.

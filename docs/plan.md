@@ -1,5 +1,7 @@
 # flowdeck Implementation Plan
 
+> The first implementation plan (2026-10-24), kept as history: the mod has grown well past it, and README.md is the user documentation. Paths name the owner's mods repository the mod first lived in; "the owner" is the mod's author.
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Build the personal mod `flowdeck`: savvy-flow + savvy-progress with a context section and button in the agents panel, a `/flowdeck` skill that adopts and keeps linking the session's tasks, and `/flowdeck-agents` to toggle the panel.
@@ -12,7 +14,7 @@
 
 ## Global Constraints
 
-- Location: `/Users/user/www/paavu/claude/server-setup/claude-mods/flowdeck/`, listed in `claude-mods/.claude-plugin/marketplace.json` (marketplace `paavu-mods`), row added to `claude-mods/README.md`.
+- Location: `claude-mods/flowdeck/` in the owner's mods repository, listed in `claude-mods/.claude-plugin/marketplace.json`, row added to `claude-mods/README.md` (the mod has its own repository and marketplace since 1.0.0021).
 - Commands exactly `/flowdeck` (skill, `argument-hint: [task]`) and `/flowdeck-agents` (command). No `/context-bar`, no `/agents-info`, never `/context`.
 - Tools `mcp__flowdeck__progress` and `mcp__flowdeck__step`; pane id `flowdeck-agents`, pane title `flowdeck` (shown on the side panel's tab, in every language); atom plugin key `flowdeck`; store key `contextShown` (global, default shown).
 - Agents renamed `flowdeck-fable|heavy|careful|medium|light` with unchanged models and efforts.
@@ -43,7 +45,7 @@
 **Interfaces:**
 - Produces: tools `mcp__flowdeck__progress` / `mcp__flowdeck__step`, pane id `flowdeck-agents`, `command flowdeck-agents`, worker type prefix `flowdeck-`.
 
-- [ ] **Step 1: Write the failing test** in `tests/rename.test.tsx`: a `flowdeck-light` Agent spawn is tracked as a worker (appears in the agents state), a `savvy-light` spawn is not; calling the `progress` tool with `{title:'T', total:2, tasks:[...]}` sets the flow title `T`. Reuse the harness style of `safety-guard/guard.test.ts`.
+- [ ] **Step 1: Write the failing test** in `tests/rename.test.tsx`: a `flowdeck-light` Agent spawn is tracked as a worker (appears in the agents state), a `savvy-light` spawn is not; calling the `progress` tool with `{title:'T', total:2, tasks:[...]}` sets the flow title `T`. Reuse the harness style of the owner's other mod tests.
 - [ ] **Step 2: Run** `claude plugin test claude-mods/flowdeck` and see it fail (no mod yet).
 - [ ] **Step 3: Copy and rename.** Copy the files above. In `register.tsx` change: atom `plugin` keys to `'flowdeck'`, `TOOL`/`STEP_TOOL` to the `mcp__flowdeck__*` names, `PANE` to `'flowdeck-agents'`, the `/^savvy-/` and `startsWith('savvy-')` checks (lines near 132, 333-334, 747, 785) to `flowdeck-`, command name `agents-info` to `flowdeck-agents` (both `command.register` and `command.run`), the default flow title and tool descriptions, and the `pane` string in the English and Russian text tables (`tr().pane`, currently "Agents") to `flowdeck`; the first test also checks that opening the pane uses the title `flowdeck`. `plugin.json`: name `flowdeck`, version `0.1.0`, `types` path, keep `userConfig.language`. In the agents change `name:`, descriptions and the `mcp__savvy-progress__step` mention to `flowdeck`. Copy `SKILL.md` renamed (`name: flowdeck`, `argument-hint: [task]`) with the tool name and `savvy-` tier prefixes changed; adoption comes in Task 4. Write `NOTICE.md` with both MIT notices (hamzafer text is at `~/.claude/plugins/cache/claude-code-mods/context-bar/`, upstream LICENSE at github.com/hamzafer/claude-code-mods).
 - [ ] **Step 4: Register** `flowdeck` in `marketplace.json` (`"source": "./flowdeck"`) and add its row to the README table.
@@ -100,9 +102,9 @@
 ### Task 5: Rollout
 
 **Files:**
-- Modify: `~/.claude/settings.json` (`enabledPlugins`), `~/.claude/projects/-Users-user-www-paavu-claude-server-setup/memory/reference_claude_inventory.md`, `reference_claude_mods.md`
+- Modify: `~/.claude/settings.json` (`enabledPlugins`) and the owner's own notes of installed mods
 
 - [ ] **Step 1: Back up** `~/.claude/settings.json` to `settings.json.pre-flowdeck`.
-- [ ] **Step 2: Install** `claude plugin marketplace add /Users/user/www/paavu/claude/server-setup/claude-mods` (if not already added) then `claude plugin disable savvy-flow@claude-kit savvy-progress@claude-kit context-bar@claude-code-mods` one at a time, then `claude plugin install flowdeck@paavu-mods --scope user`.
-- [ ] **Step 3: Verify** in a new session (user): `/flowdeck-agents` opens the panel with the context section at the top, the Context button hides and shows it and the choice survives a restart, `/flowdeck <task>` starts a flow, a bare `/flowdeck` adopts the running tasks, a task added afterwards appears in the panel, both desktop and terminal views, and `/remote-control` still connects.
-- [ ] **Step 4: After the user's go-ahead**, uninstall the three originals (`claude plugin uninstall ...`) and log flowdeck as kept and the three as replaced in the mod ledger; add flowdeck to `reference_claude_mods.md`.
+- [ ] **Step 2: Install** `claude plugin marketplace add <path to claude-mods>` (if not already added) then `claude plugin disable savvy-flow@claude-kit savvy-progress@claude-kit context-bar@claude-code-mods` one at a time, then `claude plugin install flowdeck@<that marketplace> --scope user`.
+- [ ] **Step 3: Verify** in a new session (the owner): `/flowdeck-agents` opens the panel with the context section at the top, the Context button hides and shows it and the choice survives a restart, `/flowdeck <task>` starts a flow, a bare `/flowdeck` adopts the running tasks, a task added afterwards appears in the panel, both desktop and terminal views, and `/remote-control` still connects.
+- [ ] **Step 4: After the owner's go-ahead**, uninstall the three originals (`claude plugin uninstall ...`) and log flowdeck as kept and the three as replaced in the mod ledger; add flowdeck to the owner's notes of installed mods.
