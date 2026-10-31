@@ -1,0 +1,50 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1100" height="1290" viewBox="0 0 1100 1290" font-family="-apple-system,BlinkMacSystemFont,'SF Pro Text','Helvetica Neue',Arial,sans-serif" role="img" aria-labelledby="t d">
+<title id="t">How FlowDeck works</title>
+<desc id="d">You run /flowdeck with a task. The orchestrator, the main session, plans and reviews, and delegates each task to worker subagents. The orchestrator reports to the flowdeck mod with the progress tool and the workers report their own steps with the step tool. The mod feeds the band above the prompt, the side panel and the archive files.</desc>
+<rect width="1100" height="1290" fill="#17161c"/>
+<rect x="100" y="30" width="600" height="100" rx="18" fill="#26242f" stroke="#8f8cf4" stroke-width="3"/>
+<text x="400.0" y="92.0" text-anchor="middle" font-size="34" font-weight="700" fill="#f3f2f8">You</text>
+<line x1="400" y1="130" x2="400" y2="218" stroke="#9a98b8" stroke-width="4"/>
+<path d="M389 214 L400 230 L411 214 Z" fill="#9a98b8"/>
+<text x="424" y="188" text-anchor="start" font-size="26" font-weight="600" fill="#b8b6c6">/flowdeck &lt;task&gt;</text>
+<rect x="100" y="230" width="600" height="190" rx="18" fill="#26242f" stroke="#8f8cf4" stroke-width="3"/>
+<text x="400.0" y="303.0" text-anchor="middle" font-size="34" font-weight="700" fill="#f3f2f8">Orchestrator</text>
+<text x="400.0" y="343.0" text-anchor="middle" font-size="26" fill="#b8b6c6">the main session plans,</text>
+<text x="400.0" y="377.0" text-anchor="middle" font-size="26" fill="#b8b6c6">designs and reviews</text>
+<line x1="400" y1="420" x2="400" y2="508" stroke="#9a98b8" stroke-width="4"/>
+<path d="M389 504 L400 520 L411 504 Z" fill="#9a98b8"/>
+<text x="424" y="478" text-anchor="start" font-size="26" font-weight="600" fill="#b8b6c6">Agent: #n title</text>
+<rect x="100" y="520" width="600" height="210" rx="18" fill="#26242f" stroke="#8f8cf4" stroke-width="3"/>
+<text x="400.0" y="603.0" text-anchor="middle" font-size="34" font-weight="700" fill="#f3f2f8">Worker subagents</text>
+<text x="400.0" y="643.0" text-anchor="middle" font-size="26" fill="#b8b6c6">light, medium, careful, heavy,</text>
+<text x="400.0" y="677.0" text-anchor="middle" font-size="26" fill="#b8b6c6">fable (after your approval)</text>
+<line x1="400" y1="730" x2="400" y2="818" stroke="#9a98b8" stroke-width="4"/>
+<path d="M389 814 L400 830 L411 814 Z" fill="#9a98b8"/>
+<text x="424" y="788" text-anchor="start" font-size="26" font-weight="600" fill="#b8b6c6">step tool: their own steps</text>
+<rect x="100" y="830" width="600" height="140" rx="18" fill="#8f8cf4" stroke="#8f8cf4" stroke-width="3"/>
+<text x="400.0" y="895.0" text-anchor="middle" font-size="34" font-weight="700" fill="#17161c">flowdeck mod</text>
+<text x="400.0" y="935.0" text-anchor="middle" font-size="26" fill="#17161c">records every task, run and note</text>
+<polyline points="700,325 790,325 790,900 712,900" fill="none" stroke="#9a98b8" stroke-width="4"/>
+<path d="M714 889 L700 900 L714 911 Z" fill="#9a98b8"/>
+<text x="818" y="520" text-anchor="start" font-size="26" font-weight="600" fill="#b8b6c6">progress tool:</text>
+<text x="818" y="552" text-anchor="start" font-size="26" font-weight="600" fill="#b8b6c6">tasks, done,</text>
+<text x="818" y="584" text-anchor="start" font-size="26" font-weight="600" fill="#b8b6c6">notes</text>
+<line x1="400" y1="970" x2="400" y2="1030" stroke="#9a98b8" stroke-width="4"/>
+<line x1="250" y1="1030" x2="910" y2="1030" stroke="#9a98b8" stroke-width="4"/>
+<line x1="250" y1="1030" x2="250" y2="1078" stroke="#9a98b8" stroke-width="4"/>
+<path d="M239 1074 L250 1090 L261 1074 Z" fill="#9a98b8"/>
+<line x1="580" y1="1030" x2="580" y2="1078" stroke="#9a98b8" stroke-width="4"/>
+<path d="M569 1074 L580 1090 L591 1074 Z" fill="#9a98b8"/>
+<line x1="910" y1="1030" x2="910" y2="1078" stroke="#9a98b8" stroke-width="4"/>
+<path d="M899 1074 L910 1090 L921 1074 Z" fill="#9a98b8"/>
+<rect x="100" y="1090" width="300" height="160" rx="18" fill="#1f2a25" stroke="#5fbf8f" stroke-width="3"/>
+<text x="250.0" y="1165.0" text-anchor="middle" font-size="34" font-weight="700" fill="#f3f2f8">Band</text>
+<text x="250.0" y="1205.0" text-anchor="middle" font-size="26" fill="#b8b6c6">above the prompt</text>
+<rect x="430" y="1090" width="300" height="160" rx="18" fill="#1f2a25" stroke="#5fbf8f" stroke-width="3"/>
+<text x="580.0" y="1148.0" text-anchor="middle" font-size="34" font-weight="700" fill="#f3f2f8">Side panel</text>
+<text x="580.0" y="1188.0" text-anchor="middle" font-size="26" fill="#b8b6c6">context, usage,</text>
+<text x="580.0" y="1222.0" text-anchor="middle" font-size="26" fill="#b8b6c6">your flows</text>
+<rect x="760" y="1090" width="300" height="160" rx="18" fill="#1f2a25" stroke="#5fbf8f" stroke-width="3"/>
+<text x="910.0" y="1165.0" text-anchor="middle" font-size="34" font-weight="700" fill="#f3f2f8">Archive</text>
+<text x="910.0" y="1205.0" text-anchor="middle" font-size="26" fill="#b8b6c6">.claude/flowdeck/</text>
+</svg>

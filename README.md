@@ -11,7 +11,7 @@
 </p>
 
 <p align="center">
-  <img alt="Version 1.0.0060" src="https://img.shields.io/badge/version-1.0.0060-8f8cf4">
+  <img alt="Version 1.0.0061" src="https://img.shields.io/badge/version-1.0.0061-8f8cf4">
   <img alt="MIT license" src="https://img.shields.io/badge/license-MIT-5fbf8f">
   <img alt="Claude Code 2.1.295 or later" src="https://img.shields.io/badge/Claude%20Code-%E2%89%A5%202.1.295-8f8cf4">
   <img alt="Terminal and desktop" src="https://img.shields.io/badge/surfaces-terminal%20%2B%20desktop-5fbf8f">
@@ -595,16 +595,12 @@ Without a project folder, or when the folder cannot be written, saves go to Clau
 
 ## How it works
 
-```mermaid
-flowchart LR
-  user([User]) -- "/flowdeck task" --> orch[Orchestrator:<br/>the main session plans, designs, reviews]
-  orch -- "Agent: #n title" --> workers[Worker subagents:<br/>light, medium, careful, heavy, fable]
-  orch -- "progress tool:<br/>tasks, done, notes" --> mod[(flowdeck mod)]
-  workers -- "step tool:<br/>their own steps" --> mod
-  mod --> band[Band above the prompt]
-  mod --> panel[Side panel]
-  mod --> files[".claude/flowdeck/<br/>archive"]
-```
+<p align="center">
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/images/how-it-works-dark.png">
+  <img alt="How FlowDeck works, top to bottom: you run /flowdeck with a task; the orchestrator, the main session, plans, designs and reviews and delegates each task to worker subagents (light, medium, careful, heavy, and fable after your approval); the orchestrator reports to the flowdeck mod with the progress tool and the workers report their own steps with the step tool; the mod feeds the band above the prompt, the side panel and the archive files in .claude/flowdeck/" src="docs/images/how-it-works-light.png" width="620">
+</picture>
+</p>
 
 The session model is the orchestrator: it reads the code, splits the work into self-contained tasks, picks a worker tier for each, delegates, and reviews every result before accepting it. It reports the plan and each accepted task through the `progress` tool; each worker reports its own steps through the `step` tool. The mod draws all of it and saves finished flows per project.
 
@@ -693,6 +689,8 @@ To run your working copy, add the folder as a marketplace (`claude plugin market
 `sh scripts/screenshots.sh` renders the images in `docs/images/`. It runs `scripts/screenshots/shots.tsx` through the engine's test kit (sample flows, a warm and a cold cache, archive sessions; no real session data), prints each drawn tree, and `scripts/screenshots/render.mjs` lays the trees out as HTML and captures them with [agent-browser](https://github.com/vercel-labs/agent-browser), light and dark. The mod's own SVG drawings are used as drawn; the desktop app's native elements (text, buttons, boxes) are approximated with plain CSS. `docs/images/src/` keeps each page's HTML and the band and cache-card SVGs. Times in the images are in the local time zone of the machine that rendered them. Smaller PNG files come from ImageMagick (`magick`, a 96-colour palette) when it is installed.
 
 **Callouts.** The numbered circles are data, not drawing code: `scripts/screenshots/callouts.tsv` has one line per circle (image name, number, the part it points at, which side it sits on, a nudge). A part is found by the key of the element the mod drew, by its text, or, for what the mod draws as one picture (the band, the context bar, a step row), by a point in that picture. `render.mjs` places the circles in the page before the capture and adds a thin leader line to a nudged one. The text of each legend is in this README; `sh scripts/check-readme.sh` fails when a legend has a different number of items than the data has circles. To move or add a callout, edit the `.tsv` and run `sh scripts/screenshots.sh`.
+
+**The "How it works" diagram** is drawn by `scripts/diagrams/how-it-works.py` (an SVG in a light and a dark theme, with `scripts/diagrams/how-it-works.sh` rendering the PNGs with `rsvg-convert`). Edit the Python file and run `sh scripts/diagrams/how-it-works.sh`.
 
 ## Requirements
 

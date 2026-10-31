@@ -2,6 +2,9 @@
 
 Versions are `M.m.xxxx`; every build bumps the 4-digit build number. Details and rulings: `docs/ledger.md`, `docs/design.md`.
 
+## 1.0.0061 (2026-10-31)
+- README: the "How it works" diagram is now a vertical image with larger text (light and dark), drawn by `scripts/diagrams/how-it-works.py`, instead of a small left-to-right Mermaid chart.
+
 ## 1.0.0060 (2026-10-31)
 - The selected tab is marked in its label (`● Active (3)`), so the desktop shows it too; the terminal keeps the bold, accent and underline as well.
 - The Keep warm dot is drawn apart from its button, in the cache's colour while on (warm, cold, or the plain text colour before any request) and a hollow grey ring when off: a tiny drawing on the desktop, a coloured `Text` in the terminal. The button's label is `Keep warm`.
