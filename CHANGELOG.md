@@ -2,6 +2,10 @@
 
 Versions are `M.m.xxxx`; every build bumps the 4-digit build number. Details and rulings: `docs/ledger.md`, `docs/design.md`.
 
+## 1.0.0039 (2026-10-31)
+- Fable approval guard (`hooks/fable-guard.ts`): a `tool.call` hook on the Agent tool holds every Fable launch (`subagent_type` ending in `flowdeck-fable`, or `model: fable`) and asks the user through `$.ui.ask`, showing the task and the start of the brief as the reason. Approve allows that one launch; decline, dismissal, a run with nobody to ask, or a failing guard denies it, with a message telling the orchestrator to keep the task on Opus heavy or report to the user. Other Agent calls are untouched. Always on, no setting.
+- SKILL.md (Escalation order) and the flow rule tell the orchestrator to state at the top of the Fable brief which task failed on Opus heavy and why; `scripts/check-rules.sh` checks it.
+
 ## 1.0.0038 (2026-10-31)
 - Model routing: `flowdeck-light` and `flowdeck-medium` run on Sonnet (low and medium effort); careful and heavy stay on Opus. Queued rows read `Sonnet · low` and `Sonnet · medium` for those tiers.
 - The orchestrator can pick a model per task: `progress` `tasks[]` and `add[]` take an optional `model` (`sonnet`, `opus`, `haiku`), kept across restarts and in the archive, shown on the queued row as `<tier> · <Model> · <effort>`.

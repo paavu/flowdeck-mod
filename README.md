@@ -72,7 +72,7 @@ To see what the mod hooks and calls before you install it, clone the repository 
 claude plugin update flowdeck@flowdeck-mod
 ```
 
-then `/reload-plugins` in open sessions. Every release raises `version` in `.claude-plugin/plugin.json`, so `update` always sees the new one. The panel's top row shows the version of the code that is running (`v1.0.0038`); after an update without a reload it still names the old one. [CHANGELOG.md](CHANGELOG.md) lists what each version changed.
+then `/reload-plugins` in open sessions. Every release raises `version` in `.claude-plugin/plugin.json`, so `update` always sees the new one. The panel's top row shows the version of the code that is running (`v1.0.0039`); after an update without a reload it still names the old one. [CHANGELOG.md](CHANGELOG.md) lists what each version changed.
 
 From 1.0.0036 or earlier: task tracking became a choice in 1.0.0037. An install that already ran flowdeck keeps its rule (`on`); see [Task tracking](#task-tracking) for how that is decided. `/flowdeck-agents` still opens the panel for this release; its new name is `/flowdeck-panel`.
 
@@ -128,6 +128,8 @@ The skill (`skills/flowdeck/SKILL.md`) tells the orchestrator how to plan, how t
 Each tier has a default model (the table above). The orchestrator may pick another per task, with the Agent tool's `model` argument: `sonnet` for clear-spec work a test can check, `opus` for judgement and delicate or unfamiliar work, `haiku` only for pure search-and-run jobs. It sends the same value as the task's `model` in the plan (`sonnet`, `opus` or `haiku`; Fable is not selectable there), and a queued row then reads `<tier> · <Model> · <effort>` with that model instead of the tier's default. A running or finished row shows the worker's real model.
 
 A task that fails review on Sonnet goes to Opus careful (Opus heavy if the cause is unclear), one that fails on Opus careful to Opus heavy. One that fails on Opus heavy is never sent to Fable automatically: the orchestrator tells the user which task failed and why, and uses `flowdeck-fable` only after the user says yes. The orchestrator itself may run on any model.
+
+**Fable approval guard.** The rule above is also enforced in code, so it holds even if a model ignores the text. Every Agent launch that names `flowdeck-fable` (or `flowdeck:flowdeck-fable`) as `subagent_type`, or `fable` as `model`, is held while the mod asks the user, in Claude Code's own question dialog: `flowdeck wants to use Fable (the reserve tier) for: <task description>. Reason: <the start of the brief>. Approve?` with `Approve` and `Decline`. The orchestrator is told to state at the top of the Fable brief which task failed on Opus heavy and why; that text is the reason shown (first 300 characters). Approving lets that one launch run; the next Fable launch asks again. Declining, dismissing the question, or running where nobody can be asked (such as `claude -p`) denies the launch, and the orchestrator is told to keep the task on Opus heavy or report to the user, not to retry Fable. If the guard itself fails, the launch is denied. Every other Agent call passes through unchanged. The guard is always on, independent of task tracking, and has no setting to turn it off.
 
 Tasks that edit the same files are chained with `after` and never run in parallel. Workers never make design decisions unless the brief gives them one.
 
@@ -186,7 +188,7 @@ Keeps the prompt cache warm through a long idle stretch so the next message read
 
 The panel opens with `/flowdeck-panel`, the band's `×N` button, or by itself when the first worker of a flow starts.
 
-**Top row**: `▼ Context`, `▼ Usage`, `● Band`, `● Keep warm` and `● Track tasks`, with the running version (`v1.0.0038`) at the far end. Context and Usage fold their sections and remember the choice (`▼` open, `▶︎` folded, the same glyphs as every fold in the panel); Band, Keep warm and Track tasks are dot switches (`●` on or shown, `○` off or hidden). Band shows or hides the band; Track tasks turns task tracking on or off (`○` until it is on).
+**Top row**: `▼ Context`, `▼ Usage`, `● Band`, `● Keep warm` and `● Track tasks`, with the running version (`v1.0.0039`) at the far end. Context and Usage fold their sections and remember the choice (`▼` open, `▶︎` folded, the same glyphs as every fold in the panel); Band, Keep warm and Track tasks are dot switches (`●` on or shown, `○` off or hidden). Band shows or hides the band; Track tasks turns task tracking on or off (`○` until it is on).
 
 | Section | Shows |
 |---|---|
@@ -338,6 +340,7 @@ flowdeck makes **no network calls of its own**: there is no `fetch`, no HTTP and
 | Files read | The same folder (`$.fs.read`, `$.fs.list`, `$.fs.stat`, `$.fs.exists`). |
 | Session data | Context breakdown and rate limits (`$.session.usage`), the session's model and id, agent launches with their description and prompt (the first ~600 characters of a worker's prompt become its brief), the name of each tool a worker calls (the live `Running · <tool>` word), TodoWrite, TaskCreate and Agent calls, permission requests (to show `Needs approval`), whether a prompt was typed by the user (keep warm's count), turn usage (tokens and cost), and the transcript path from `SessionStart` (kept to recognise the session after a restart). |
 | Settings and env | `language` from Claude Code's settings, `LC_ALL`, `LC_MESSAGES`, `LANG`; only to pick the panel language. |
+| User prompts | The Fable approval guard (see [Model routing](#model-routing)) asks one question through `$.ui.ask` before a Fable launch, with the task description and the first 300 characters of the brief. Nothing is stored or sent. It is always on and cannot be disabled. |
 | System prompt | Adds the flow rule only while task tracking is on, or in a session that ran `/flowdeck:flowdeck` (see [Task tracking](#task-tracking)). |
 
 What it saves (task titles, goals, briefs, results and feedback, costs and times) is what the user and the orchestrator wrote during the session. It stays in the project folder, git-ignored.

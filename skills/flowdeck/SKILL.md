@@ -104,7 +104,7 @@ The default is the tier's model (table above). Pass the Agent tool's `model` arg
 
 Send the same value as the task's `model` in the plan (`tasks` or `add`), so the queue shows it before the worker starts.
 
-Escalation order: a task that fails review on Sonnet goes to Opus careful (Opus heavy if the cause is unclear); one that fails on Opus careful goes to Opus heavy; one that fails on Opus heavy is not sent to Fable on your own. Tell the user which task failed, why, and that Fable is the next step, then wait for the answer. Use `flowdeck-fable` only after an explicit yes.
+Escalation order: a task that fails review on Sonnet goes to Opus careful (Opus heavy if the cause is unclear); one that fails on Opus careful goes to Opus heavy; one that fails on Opus heavy is not sent to Fable on your own. Tell the user which task failed, why, and that Fable is the next step, then wait for the answer. Use `flowdeck-fable` only after an explicit yes. When you launch it, state at the top of the Fable brief which task failed on Opus heavy and why: the mod shows that to the user and asks for approval on every Fable launch, and a launch the user declines is denied.
 
 ## 4. Delegate
 

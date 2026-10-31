@@ -12,6 +12,7 @@ import { dataDir, emptyTrash, getFile, loadArchive, parseJson, readSession, rest
 import type { Emptied, Io, Moved } from './archive-store'
 import { archiveSection, groupKey, isGroupOpen } from './archive-view'
 import type { ArchiveWords, FlowDrawing, FlowView, Planned } from './archive-view'
+import { fableRefusal, GUARD_FAILED, isFable } from './fable-guard'
 import { foldGlyph } from './fold'
 import { applyNotes, briefOf, cleanText, fallbackBrief, hasNote, NOTE_ICON, NOTE_MAX, noteAlt, noteOf, noteParts, noteRows, noteSvgBody } from './notes'
 import type { TaskNote } from './notes'
@@ -114,7 +115,7 @@ const TICK_MS = 5000
 const PHASES: readonly Phase[] = ['plan', 'design', 'delegate', 'review', 'close']
 // The flow rule, in the system prompt only while task tracking is on (rule.ts) or in a session that ran /flowdeck:flowdeck.
 const FLOW_RULE = `# flowdeck
-Track each task with ${TOOL} (ToolSearch \`select:${TOOL}\` if deferred; workers use only ${STEP_TOOL}). Plan once: title, tasks [{title, tier, after, goal}] from 1; chain tasks editing the same files with \`after\`. New task: \`add\` with its goal. Accepted: \`done: [n]\` with notes [{task, result, feedback}]. Worker Agent description: \`#<n> <title>\`. Pick the Agent \`model\` per task and send it as the task's \`model\`. Fable only after the user approves, once Opus heavy failed. No flow for a question or a one-step edit; never leave another task unreported.`
+Track each task with ${TOOL} (ToolSearch \`select:${TOOL}\` if deferred; workers use only ${STEP_TOOL}). Plan once: title, tasks [{title, tier, after, goal}] from 1; chain tasks editing the same files with \`after\`. New task: \`add\` with its goal. Accepted: \`done: [n]\` with notes [{task, result, feedback}]. Worker Agent description: \`#<n> <title>\`. Pick the Agent \`model\` per task and send it as the task's \`model\`. Fable only after the user approves, once Opus heavy failed; state why atop its brief. No flow for a question or a one-step edit; never leave another task unreported.`
 const GOAL_TEXT = "The user's request for this task in a sentence; plain text, at most 300 characters."
 // The pane keeps its id from before the command's rename, so a pane the desktop app placed still opens.
 const PANE = 'flowdeck-agents'
@@ -2241,7 +2242,10 @@ export const register: Register = (on, options) => {
 
   // A worker launch with no open flow starts one, named after its description; every launch moves the faint layer even if
   // the orchestrator forgets to report.
+  // A Fable launch is always put to the user first (fable-guard.ts); it is not tied to task tracking and has no setting.
   on('tool.call', { tool: 'Agent' }, async ($, e, next) => {
+    const refusal = await fableRefusal($, e)
+    if (refusal) return { deny: refusal }
     const type = String(e.subagent_type ?? '')
     if (!isWorker(type)) return next(e)
 
@@ -2261,7 +2265,7 @@ export const register: Register = (on, options) => {
     } finally {
       await updateFlow($, prev => (prev ? { ...prev, running: Math.max(0, prev.running - 1) } : prev))
     }
-  })
+  }).catch(async ($, e, next) => (!next.called && isFable(e) ? { deny: GUARD_FAILED } : next(e)))
 
   on('agent.spawn', async ($, e, next) => {
     const started = await next(e)

@@ -21,6 +21,7 @@ check 'never leaving a task unreported' 'never leave a task unreported'
 check 'the per-task model sent in the plan' 'Send the same value as the task'"'"'s `model` in the plan'
 check 'the escalation order' 'Escalation order: a task that fails review on Sonnet goes to Opus careful'
 check 'Fable only after the user approved' 'Use `flowdeck-fable` only after an explicit yes.'
+check 'the failure reason atop the Fable brief' 'state at the top of the Fable brief which task failed on Opus heavy and why'
 agent() {
   f="agents/flowdeck-$1.md"
   if ! grep -qx "model: $2" "$f" || ! grep -qx "effort: $3" "$f"; then
