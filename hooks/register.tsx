@@ -809,8 +809,23 @@ const INK = '#1F1E1D'
 // costume, `la`/`lb` the leg pairs, anything else a prop with its own motion.
 type Fill = (x: number, y: number, w: number, h: number, c: string, cls?: string) => void
 
-const stamp = (f: Fill, x: number, y: number, rows: string[], map: Record<string, string>, cls?: string): void =>
-  rows.forEach((row, dy) => [...row].forEach((ch, dx) => map[ch] && f(x + dx, y + dy, 1, 1, map[ch] ?? '', cls)))
+// A stamp's cells never overlap, so its pixels go colour by colour, a row's run of one colour as one rect (one path in
+// `crab`): the same pixels in a fraction of the markup, which every row of the desktop panel carries.
+const stamp = (f: Fill, x: number, y: number, rows: string[], map: Record<string, string>, cls?: string): void => {
+  for (const [ch, color] of Object.entries(map)) {
+    if (!color) continue
+    rows.forEach((row, dy) => {
+      const cells = [...row]
+      for (let dx = 0; dx < cells.length; dx++) {
+        if (cells[dx] !== ch) continue
+        let w = 1
+        while (cells[dx + w] === ch) w++
+        f(x + dx, y + dy, w, 1, color, cls)
+        dx += w - 1
+      }
+    })
+  }
+}
 
 // `armCls` lets a raised claw travel with the prop it holds.
 const crabBody = (f: Fill, armFront = 0, armCls?: string): void => {
@@ -908,16 +923,22 @@ const CRAB_SCALE = 1.1
 // Body and props nest inside `bd` so a prop rides the bob and adds its own motion;
 // legs stay outside it and step on their own.
 const crab = (x: number, y: number, costume: string, dim = false, isWalking = false, scale = CRAB_SCALE): string => {
-  const groups = new Map<string, string[]>([['bd', []]])
+  // Per group, its rects in drawing order; consecutive ones of one opaque colour share a path (painted the same).
+  const groups = new Map<string, { c: string; d: string }[]>([['bd', []]])
   const f: Fill = (cx, cy, w, h, c, cls = 'bd') => {
     if (!groups.has(cls)) groups.set(cls, [])
-    groups.get(cls)?.push(`<rect x="${cx}" y="${cy}" width="${w}" height="${h}" fill="${c}"/>`)
+    const list = groups.get(cls) ?? []
+    const rect = `M${cx} ${cy}h${w}v${h}h${-w}z`
+    const last = list.at(-1)
+    if (last && last.c === c && c.startsWith('#')) last.d += rect
+    else list.push({ c, d: rect })
   }
   const draw = COSTUMES[costume] ?? ((g: Fill) => crabBody(g))
   draw(f, colorOf(costume))
-  const group = (cls: string) => `<g class="${cls}">${(groups.get(cls) ?? []).join('')}</g>`
+  const paths = (cls: string) => (groups.get(cls) ?? []).map(p => `<path d="${p.d}" fill="${p.c}"/>`).join('')
+  const group = (cls: string) => `<g class="${cls}">${paths(cls)}</g>`
   const props = [...groups.keys()].filter(k => k !== 'bd' && k !== 'la' && k !== 'lb')
-  const body = `<g class="bd">${(groups.get('bd') ?? []).join('')}${props.map(group).join('')}</g>`
+  const body = `<g class="bd">${paths('bd')}${props.map(group).join('')}</g>`
   return `<g transform="translate(${x},${y}) scale(${scale})" opacity="${dim ? 0.45 : 1}" shape-rendering="crispEdges"><g class="c-${costume}${isWalking ? ' run' : ''}">${body}${group('la')}${group('lb')}</g></g>`
 }
 
@@ -930,8 +951,21 @@ const statusMark = (x: number, y: number, status: string, color: string): string
   return `<circle cx="${x}" cy="${y}" r="5" fill="none" stroke="#9a9a96" stroke-width="1.4"/><path d="M${x} ${y - 2.5}v2.8l1.8 1.2" fill="none" stroke="#9a9a96" stroke-width="1.4" stroke-linecap="round"/>`
 }
 
+// The crab's motion CSS goes only where a crab walks (its rules match nothing else).
 const svg = (W: number, H: number, body: string): string =>
-  `<svg xmlns="http://www.w3.org/2000/svg" width="${W}" height="${H}" viewBox="0 0 ${W} ${H}">${PANE_CSS}${CRAB_CSS}${body}</svg>`
+  `<svg xmlns="http://www.w3.org/2000/svg" width="${W}" height="${H}" viewBox="0 0 ${W} ${H}">${PANE_CSS}${body.includes(' run"') ? CRAB_CSS : ''}${body}</svg>`
+
+// The most a desktop panel tree may hold, in characters of its JSON. In the desktop app (Claude Code 2.1.309) a panel of
+// about 240,000 to 250,000 was no longer taken: its presses came back `ui_press not handled` and the reopened panel stayed
+// blank; 206,000 still drew. The engine draws such a tree without an error, so the panel measures its own.
+const PANE_MAX_CHARS = 200_000
+const treeChars = (tree: RenderChildren): number => {
+  try {
+    return JSON.stringify(tree)?.length ?? 0
+  } catch {
+    return 0
+  }
+}
 
 // The flow's header: the three tiles only. The flow's title is never shown in the panel (it is named after the first request).
 const HEADER_H = 44
@@ -2508,7 +2542,8 @@ export const register: Register = (on, options) => {
       />
     )
 
-    const Svg = e.surface === 'desktop' && 'Svg' in ui ? ui.Svg : null
+    // Set to null when the drawings make the panel too large for the desktop (PANE_MAX_CHARS): the tab then draws its text rows.
+    let Svg = e.surface === 'desktop' && 'Svg' in ui ? ui.Svg : null
     const W = Math.max(240, Math.min(900, (e.props.bodyColumns || 40) * 8 - 8))
     const cols = Math.max(24, e.props.bodyColumns || 40)
     const barW = Math.max(6, Math.min(20, cols - 34))
@@ -3100,27 +3135,42 @@ export const register: Register = (on, options) => {
     }
     const tabs = await safe('Tabs', () => tabRow($, { Box, Text, Button }, p, counts, tabGap(e.surface)))
     const isFlowTab = p.tab === 'active' || p.tab === 'finished'
-    const shown = isFlowTab
-      ? await safe(TAB_LABEL[p.tab], () => drawFlow(p.tab === 'finished' ? 'finished' : 'active'))
-      : await safe(TAB_LABEL[p.tab], archivePart(p.tab === 'trash' ? 'trash' : 'archive'))
+    const drawShown = () =>
+      isFlowTab
+        ? safe(TAB_LABEL[p.tab], () => drawFlow(p.tab === 'finished' ? 'finished' : 'active'))
+        : safe(TAB_LABEL[p.tab], archivePart(p.tab === 'trash' ? 'trash' : 'archive'))
     const strip = isFlowTab ? await safe('Task tracking', () => ruleStrip($, { Box, Text, Button }, p.rule)) : null
-    const group = (
-      <Box key="flowdeck-group" flexDirection="column" marginTop={1}>
-        {tabs}
-        {strip}
-        {shown}
-      </Box>
-    )
-
-    return (
+    const pane = (shown: RenderChildren) => (
       <Box flexDirection="column">
         {topToggles}
         {bandLine}
         {liveLine}
         {contextSection}
         {usageSection}
-        {group}
+        <Box key="flowdeck-group" flexDirection="column" marginTop={1}>
+          {tabs}
+          {strip}
+          {shown}
+        </Box>
       </Box>
+    )
+
+    // A tree past PANE_MAX_CHARS is one the desktop does not take: the panel stays as it was and blank when reopened, with
+    // no error here to catch. Such a tab draws its text rows instead, and says so; still past it, a line says why.
+    const drawn = pane(await drawShown())
+    if (!Svg || treeChars(drawn) <= PANE_MAX_CHARS) return drawn
+    Svg = null
+    const asText = pane([
+      <Text key="pane-as-text" dimColor>
+        {`${TAB_LABEL[p.tab]} is drawn as text: its drawing is too large for the panel`}
+      </Text>,
+      await drawShown(),
+    ])
+    if (treeChars(asText) <= PANE_MAX_CHARS) return asText
+    return pane(
+      <Text key="pane-too-large" dimColor>
+        {`${TAB_LABEL[p.tab]} is too large to draw in the panel`}
+      </Text>,
     )
   }).catch(async ($, e) => {
     // The worst case still draws the top buttons and the tabs (without counts) and says so: never a blank pane.

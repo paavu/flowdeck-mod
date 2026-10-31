@@ -2,6 +2,9 @@
 
 Versions are `M.m.xxxx`; every build bumps the 4-digit build number. Details and rulings: `docs/ledger.md`, `docs/design.md`.
 
+## 1.0.0048 (2026-10-31)
+- Desktop panel no longer freezes or reopens blank with a big flow: the panel's tree for a 19-task flow had grown to about 270,000 characters (each row's drawing about 12,000), past what the desktop app takes, so it kept the old panel (presses answered `ui_press not handled`) and a reopened panel stayed blank. Each crab is now drawn as a few paths (a row's run of one colour as one shape) and its motion CSS goes only into drawings where a crab walks: the same pixels, and a row's drawing is about 2,500 characters, so the same flow draws in about 80,000. A desktop tab still past 200,000 characters draws its text rows, with a dim line saying so, instead of a panel the app will not show.
+
 ## 1.0.0047 (2026-10-31)
 - Step reporting that workers follow: the Progress reporting paragraph of all five worker agents is now a numbered procedure (plan once, do step 1, call `step` with `next: true` as soon as it is finished, only then start step 2) with an explicit "never batch" rule, and SKILL.md has every brief start with the line "Update your step list after each finished step, before starting the next." (the mod leaves that line out of the handoff-note brief). `scripts/check-rules.sh` checks the wording in SKILL.md and in each agent file.
 - Step nudge (`hooks/nudge.ts`): a worker whose step list has an active step and that makes 8 tool calls without a `step` call gets one line added to that call's result (the `context` a `tool.call` result carries, which the model reads and the user does not): "update your step list now"; again only after 8 more calls without a step call. A step call resets the count. Never for the orchestrator, never for a worker without a step list; any error leaves the result as it was.

@@ -563,10 +563,13 @@ describe('archive groups in the panel', () => {
     engine(on, { store: { historyShown: true, history: [e] } })
     await start($)
     await settle()
+    // 60 drawn rows are past the panel's size limit (panel-size.test.tsx): the desktop draws the group's text rows and says so.
     const d = await desktop($)
-    const rows = d.svgs.filter((s: any) => /^task \d+ /.test(String(s.props.alt)))
-    expect(rows.length).toBe(60)
-    expect(String(rows[0].props.alt)).toMatch(/^task 59 /)
+    expect(d.texts.some((t: any) => /^Archive is drawn as text/.test(String(t.text)))).toBe(true)
+    expect(d.svgs.filter((s: any) => /^task \d+ /.test(String(s.props.alt)))).toHaveLength(0)
+    const drawnText = d.texts.map((t: any) => String(t.text)).join('\n')
+    expect(drawnText.split('d'.repeat(10)).length - 1).toBeGreaterThanOrEqual(60)
+    expect(drawnText.indexOf('task 59 ')).toBeLessThan(drawnText.indexOf('task 58 '))
     for (const s of d.svgs) expect(Number(s.props.width)).toBeLessThanOrEqual(900)
     for (const cols of [24, 40, 80]) {
       const p = await pane($, 'terminal', cols)
