@@ -4,6 +4,7 @@
 import type { AgentRun, AgentStatus, ArchiveDetail, ArchiveEntry, ArchiveLists, CacheFacts, CacheFold, Flow, KeepWarm, LiveState, Panel, PanelTab, Phase, PlannedTask, Reading, Sample, Samples, UsageWindow } from '../types'
 import { parseArchive, stampsOf } from './archive'
 import { parseRecords } from './archive-index'
+import { noteOf } from './notes'
 
 /** How many Archive or Trash rows are drawn at first; `Show more` adds as many. */
 export const ARCHIVE_PAGE = 50
@@ -21,6 +22,7 @@ export const PANEL_DEFAULT: Panel = {
   isArchiveShown: true,
   openEntries: [],
   openAgents: [],
+  openNotes: [],
   closedEntries: [],
   archiveLimit: ARCHIVE_PAGE,
   trashLimit: ARCHIVE_PAGE,
@@ -53,6 +55,7 @@ export function asPanel(v: unknown): Panel {
     isArchiveShown: bool(o.isArchiveShown, d.isArchiveShown),
     openEntries: strings(o.openEntries),
     openAgents: strings(o.openAgents),
+    openNotes: strings(o.openNotes),
     closedEntries: strings(o.closedEntries),
     // A page is never smaller than the default (a panel held from before 1.0.0025 had 10).
     archiveLimit: Math.max(ARCHIVE_PAGE, num(o.archiveLimit) ?? d.archiveLimit),
@@ -73,7 +76,8 @@ const PHASES: readonly Phase[] = ['plan', 'design', 'delegate', 'review', 'close
 
 const asTask = (t: unknown): PlannedTask[] => {
   if (!isObj(t) || typeof t.title !== 'string') return []
-  const task: PlannedTask = { title: t.title, tier: text(t.tier, ''), after: Array.isArray(t.after) ? t.after.filter((n): n is number => Number.isInteger(n) && n > 0) : [] }
+  // A task held from before 1.0.0033 has no note; a part of the wrong kind is no part.
+  const task: PlannedTask = { title: t.title, tier: text(t.tier, ''), after: Array.isArray(t.after) ? t.after.filter((n): n is number => Number.isInteger(n) && n > 0) : [], ...noteOf(t) }
   if (typeof t.mirrored === 'boolean') task.mirrored = t.mirrored
   if (typeof t.counted === 'boolean') task.counted = t.counted
   return [task]
@@ -96,7 +100,7 @@ export function asFlow(v: unknown): Flow | null {
 }
 
 const STATUSES: readonly AgentStatus[] = ['running', 'done', 'failed']
-const OPTIONAL_TEXT = ['agentId', 'effort', 'stepNote', 'tool'] as const
+const OPTIONAL_TEXT = ['agentId', 'effort', 'stepNote', 'tool', 'brief'] as const
 const OPTIONAL_NUM = ['endedAt', 'stepDone', 'stepTotal'] as const
 const OPTIONAL_BOOL = ['isAsked', 'archived'] as const
 

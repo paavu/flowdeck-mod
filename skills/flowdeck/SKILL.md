@@ -18,7 +18,7 @@ Task from the user: $ARGUMENTS
 
 ## Every task goes through flowdeck
 
-With the mod installed, every task of every session goes through flowdeck (its `flowdeck:flow-rule` in the system prompt says the same in every session): report it with `progress` (plan with `tasks` and `after`, `add` for a new task, `done: [numbers]` when accepted), and never leave a task unreported. A task list (TodoWrite) or a worker launch with no open flow starts one by itself; your plan then joins it.
+With the mod installed, every task of every session goes through flowdeck (its `flowdeck:flow-rule` in the system prompt says the same in every session): report it with `progress` (plan with `tasks` and `after`, `add` for a new task, each with its `goal`; `done: [numbers]` with `result` and `feedback` notes when accepted), and never leave a task unreported. A task list (TodoWrite) or a worker launch with no open flow starts one by itself; your plan then joins it.
 
 ## Linked for the whole session
 
@@ -32,10 +32,11 @@ From the first `progress` report on, this flow stays linked to the session. A fl
 ## Progress bar
 
 Keep the tool `mcp__flowdeck__progress` current (when it is deferred, load it first with ToolSearch `select:mcp__flowdeck__progress`; skip silently only if it is absent). Call it:
-- after presenting the plan: `title` (a few words), `total` (number of worker tasks), `tasks` (`[{ title, tier, after }]` in plan order; `tier` without the `flowdeck-` prefix, `after` the numbers (from 1) of the tasks it waits for: give it to every task that depends on another, leave it out for a task that can start at once), `phase: "delegate"` (or `"design"` while in section 2);
+- after presenting the plan: `title` (a few words), `total` (number of worker tasks), `tasks` (`[{ title, tier, after, goal }]` in plan order; `goal` a short summary of what the user asked for in this task; `tier` without the `flowdeck-` prefix, `after` the numbers (from 1) of the tasks it waits for: give it to every task that depends on another, leave it out for a task that can start at once), `phase: "delegate"` (or `"design"` while in section 2);
 - each time a task is accepted in review: `done: [<its number>]` (the numbers, from 1, of the tasks accepted now; they add to those accepted before), including a task you did yourself or one a single worker run covered together with another; a task accepted without a worker run shows as `Accepted · no worker run`. A plain count still works but means the first N tasks, so name them. Switch `phase` to `"review"` while reviewing;
 - if re-planning changes the tasks: the new `tasks` and `total`;
-- when a new task appears later in the session: `add: [{ title, tier }]` (appends; keeps `done`; a title already in the flow is ignored);
+- when a new task appears later in the session: `add: [{ title, tier, goal }]` (appends; keeps `done`; a title already in the flow is ignored);
+- handoff notes: every task's row carries a note the user reads to review the list: `goal`, `brief`, `result`, `feedback`. Send `goal` on every task you create or add (in `tasks` and `add`). When you accept a task, send `result` (what it delivered) and `feedback` (your review: what you checked, what is left or risky) in `notes: [{ task: <n>, result, feedback }]` together with its `done: [<n>]`. `notes` updates any task by number at any time (a part sent again replaces it, `""` clears it). Each part is short plain text, no markdown: `goal`, `result` and `feedback` at most 300 characters, the rest is cut. The `brief` is taken by the mod from your Agent `prompt` when the worker starts (its standard preamble and the step-list closing line left out, about 600 characters kept from the start), so write the brief for the worker, with the task's real substance first;
 - when the current work is complete: `phase: "close"`. Do not send `finished: true` to close finished work: a flow whose tasks are all done finishes by itself when your turn ends. Send it only when the user asks you to end the flow;
 
 The flow's worker tasks stay on `progress`. For work outside a flow, or a checklist of your own orchestrator steps, use `mcp__flowdeck__plan`: create it once with `id`, `title` and `stages` (or `kind: "todo"`), then move it with short ops (`{id, next:true}`, `{id, done:[...], active:"..."}`, `{id, failed:"...", note}`, `{id, state:"needs_input", note}`, `{id, state:"done"}`).
@@ -116,7 +117,7 @@ For each returned task:
 4. Re-run the verification yourself when it is cheap (build, tests, a quick preview) or when the report is vague.
 5. Check the run's row: a returned run that shows `Incomplete` (its step list not closed) is a defect. Return it to the worker with the open steps listed; if you verified the work is complete, tell the worker to close its list. Never accept it silently: the mod does not override Incomplete, and an accepted task whose run stays Incomplete reads `Incomplete · accepted`.
 6. Outcome per task:
-   - **Accept** (report it with `progress` `done: [<task number>]`);
+   - **Accept** (report it with `progress` `done: [<task number>]` and `notes: [{ task: <task number>, result, feedback }]`);
    - **Return** to the same or a higher tier with a precise list of defects (not a re-explanation of the task);
    - **Escalate**: take over only for design fixes or one-line corrections where a round trip would cost more than the fix.
 

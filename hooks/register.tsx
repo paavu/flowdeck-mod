@@ -13,6 +13,8 @@ import type { Emptied, Io, Moved } from './archive-store'
 import { archiveSection, groupKey, isGroupOpen } from './archive-view'
 import type { ArchiveWords, FlowDrawing, FlowView, Planned } from './archive-view'
 import { foldGlyph } from './fold'
+import { applyNotes, briefOf, cleanText, fallbackBrief, hasNote, NOTE_ICON, NOTE_MAX, noteAlt, noteOf, noteParts, noteRows, noteSvgBody } from './notes'
+import type { TaskNote } from './notes'
 import { sortNewest } from './order'
 import { doneText } from './time'
 import { importPlan, isFinished, isStoredStep, normalize, percent, PLAN_ID, placeBar, planId, str, where } from './plan'
@@ -115,7 +117,8 @@ const PLAN_RULE = `# Progress plans
 A task needing more than ~3 edits or commands gets a plan via ${PLAN_TOOL}: create it once with the full breakdown (2-7 stages of steps {title}, or kind: "todo" for one flat list; titles of at most 4 words, in the user's language; one id per task; the first open step becomes active). Move it with short calls: {id, next:true}, {id, done:["A"], active:"B"}, {id, failed:"B", note}, {id, state:"needs_input", note} before asking the user, {id, state:"done"} to finish. When the plan changes, resend stages under the same id. The tasks themselves always go to ${TOOL} (the flow rule), never into a second plan of the same work. No edit is ever blocked for lack of a plan.`
 // Every task goes through flowdeck: this rule is in every session's system prompt, so the mod alone sets it.
 const FLOW_RULE = `# flowdeck flows
-Every task goes through flowdeck: report it with ${TOOL} (load it with ToolSearch \`select:${TOOL}\` when it is deferred; a flowdeck worker reports only its own steps, with ${STEP_TOOL}). Send the plan once: title, \`tasks\` [{title, tier, after}] numbered from 1 (tasks that edit the same files are chained with \`after\`; independent ones get none), phase "delegate". Add each new task with \`add\`; send \`done: [numbers]\` as tasks are accepted. Begin every worker's Agent description with \`#<n> <title>\`. Never leave a task unreported. A flow finishes by itself once every task is done and no worker runs; send \`finished: true\` only when the user asks to end it.`
+Every task goes through flowdeck: report it with ${TOOL} (load it with ToolSearch \`select:${TOOL}\` when it is deferred; a flowdeck worker reports only its own steps, with ${STEP_TOOL}). Send the plan once: title, \`tasks\` [{title, tier, after, goal}] numbered from 1 (tasks that edit the same files are chained with \`after\`; independent ones get none), phase "delegate". Add each new task with \`add\` (goal too); send \`done: [numbers]\` as tasks are accepted, with \`notes: [{task, result, feedback}]\`. goal (the user's request), result and feedback are the task row's handoff note, plain text; its brief is your Agent prompt. Begin every worker's Agent description with \`#<n> <title>\`. Never leave a task unreported. A flow finishes by itself once every task is done and no worker runs; send \`finished: true\` only when the user asks to end it.`
+const GOAL_TEXT = "A short summary of the user's request for this task, plain text, at most 300 characters; shown on the task's row."
 const PANE = 'flowdeck-agents'
 const PHASES: readonly Phase[] = ['plan', 'design', 'delegate', 'review', 'close']
 const ACCENT = '#8f8cf4'
@@ -129,8 +132,10 @@ type ProgressInput = {
   phase?: Phase
   finished?: boolean
   restart?: boolean
-  tasks?: { title?: string; tier?: string; after?: number[] }[]
-  add?: { title?: string; tier?: string; after?: number[] }[]
+  tasks?: { title?: string; tier?: string; after?: number[]; goal?: string }[]
+  add?: { title?: string; tier?: string; after?: number[]; goal?: string }[]
+  /** Handoff notes by task number (from 1): `{ task, goal?, result?, feedback? }` (hooks/notes.ts applyNotes). */
+  notes?: unknown
 }
 
 // ---------------------------------------------------------------------------
@@ -305,17 +310,22 @@ const isNewFlow = (prev: Flow | null, input: ProgressInput): boolean =>
 const cleanTasks = (tasks: ProgressInput['tasks']): PlannedTask[] | undefined =>
   tasks
     ?.filter(t => t.title?.trim())
-    .map(t => ({
-      title: (t.title ?? '').trim(),
-      tier: (t.tier ?? '').replace(/^flowdeck-/, '').trim().toLowerCase(),
-      after: (t.after ?? []).filter(n => Number.isInteger(n) && n > 0),
-    }))
+    .map(t => {
+      const goal = cleanText(t.goal, NOTE_MAX.goal)
+      return {
+        title: (t.title ?? '').trim(),
+        tier: (t.tier ?? '').replace(/^flowdeck-/, '').trim().toLowerCase(),
+        after: (t.after ?? []).filter(n => Number.isInteger(n) && n > 0),
+        ...(goal ? { goal } : {}),
+      }
+    })
 
+// A re-planned task keeps its note; a goal sent with it replaces the goal.
 const unionTasks = (kept: PlannedTask[], incoming: PlannedTask[]): PlannedTask[] => {
   const byTitle = new Map(incoming.map(t => [t.title.toLowerCase(), t]))
   const old = kept.map(t => {
     const next = byTitle.get(t.title.toLowerCase())
-    return next ? { ...t, tier: next.tier || t.tier, after: next.after } : t
+    return next ? { ...t, tier: next.tier || t.tier, after: next.after, ...(next.goal ? { goal: next.goal } : {}) } : t
   })
   const have = new Set(kept.map(t => t.title.toLowerCase()))
   return [...old, ...incoming.filter(t => !have.has(t.title.toLowerCase()))]
@@ -330,8 +340,8 @@ const merge = (prev: Flow | null, input: ProgressInput, at: number | null = null
   const planned = !incoming ? base.tasks : base.isLinked ? unionTasks(base.tasks, incoming) : incoming
   const known = new Set(planned.map(t => t.title.toLowerCase()))
   const fresh = (cleanTasks(input.add) ?? []).filter(t => !known.has(t.title.toLowerCase()) && known.add(t.title.toLowerCase()))
-  // Waits on unknown tasks, on the task itself or closing a cycle are dropped.
-  const tasks = cleanAfter([...planned, ...fresh])
+  // Waits on unknown tasks, on the task itself or closing a cycle are dropped; the notes sent name tasks of the new list.
+  const tasks = applyNotes(cleanAfter([...planned, ...fresh]), input.notes).tasks
   const asked = Math.max(0, Math.round(input.total ?? (fresh.length && !input.tasks ? base.total + fresh.length : input.tasks ? tasks.length : base.total)))
   const total = base.isLinked ? Math.max(asked, tasks.length) : asked
   // Task numbers name which tasks were accepted, on top of those accepted before (a count before it means the first ones);
@@ -894,7 +904,15 @@ const INDENT_W = TITLE_INDENT - CHEVRON_W
 const INDENT_SVG = `<svg xmlns="http://www.w3.org/2000/svg" width="${INDENT_W}" height="1" viewBox="0 0 ${INDENT_W} 1"/>`
 
 // A planned row: the tier and its model, what it waits for, and `ready` once that is done (the wait goes first when short).
-const plannedSvg = (W: number, p: Planned): string => {
+// A task row with a note draws its title natively above the drawing (`titleOutside`, so the note button can sit beside
+// it, as on an agent row): the drawing drops its title line and is TASK_OUT_H tall.
+const TASK_H = 46
+const TASK_OUT_H = 32
+const TASK_INDENT_SVG = `<svg xmlns="http://www.w3.org/2000/svg" width="${TITLE_INDENT}" height="1" viewBox="0 0 ${TITLE_INDENT} 1"/>`
+
+const plannedSvg = (W: number, p: Planned, titleOutside = false): string => {
+  const out = titleOutside
+  const H = out ? TASK_OUT_H : TASK_H
   const tier = p.tier in TIER_COLOR ? p.tier : 'other'
   const color = colorOf(tier)
   const textW = W - 42 - 22
@@ -906,19 +924,22 @@ const plannedSvg = (W: number, p: Planned): string => {
   const metaText = fitText(meta.filter(Boolean).join('  ·  '), 11, Math.max(0, textW - textWidth(`${tier}  `, 11) - readyW))
   return svg(
     W,
-    46,
-    `${crab(0, 6, tier, true)}
-<text class="s" x="42" y="18" font-family="${FONT}" font-size="13" font-weight="600">${xml(fitText(`${p.n}. ${p.title}`, 13, textW))}</text>
-<text x="42" y="34" font-family="${FONT}" font-size="11"><tspan fill="${color}">${xml(tier)}</tspan><tspan class="m">  ${xml(metaText)}</tspan>${ready ? `<tspan class="m">  ·  </tspan><tspan fill="${STATE_COLOR.running}" font-weight="600">${xml(ready)}</tspan>` : ''}</text>
-${statusMark(W - 8, 16, 'planned', color)}
-<line class="ln" x1="0" y1="45.5" x2="${W}" y2="45.5"/>`,
+    H,
+    `${crab(0, out ? 1 : 6, tier, true)}
+${out ? '' : `<text class="s" x="42" y="18" font-family="${FONT}" font-size="13" font-weight="600">${xml(fitText(`${p.n}. ${p.title}`, 13, textW))}</text>`}
+<text x="42" y="${out ? 16 : 34}" font-family="${FONT}" font-size="11"><tspan fill="${color}">${xml(tier)}</tspan><tspan class="m">  ${xml(metaText)}</tspan>${ready ? `<tspan class="m">  ·  </tspan><tspan fill="${STATE_COLOR.running}" font-weight="600">${xml(ready)}</tspan>` : ''}</text>
+${statusMark(W - 8, out ? 12 : 16, 'planned', color)}
+<line class="ln" x1="0" y1="${H - 0.5}" x2="${W}" y2="${H - 0.5}"/>`,
   )
 }
 
 // An accepted task no worker run belongs to: its number and title, its tier, `Accepted · no worker run` in green and the
 // tick; no step bar and no archive icon.
 const ACCEPTED_H = 46
-const acceptedSvg = (W: number, p: Planned, done = ''): string => {
+// `titleOutside`: the title and when it was accepted are drawn natively above (a row with a note), so neither is here.
+const acceptedSvg = (W: number, p: Planned, done = '', titleOutside = false): string => {
+  const out = titleOutside
+  const H = out ? TASK_OUT_H : ACCEPTED_H
   const tier = p.tier in TIER_COLOR ? p.tier : 'other'
   const textW = W - 42 - 22
   const word = `${tr().acceptedRow} · ${tr().noRun}`
@@ -926,13 +947,13 @@ const acceptedSvg = (W: number, p: Planned, done = ''): string => {
   const doneW = done ? textWidth(done, 11) + 10 : 0
   return svg(
     W,
-    ACCEPTED_H,
-    `${crab(0, 6, tier, true)}
-<text class="t" x="42" y="18" font-family="${FONT}" font-size="13" font-weight="600">${xml(fitText(`${p.n}. ${p.title}`, 13, Math.max(0, textW - doneW)))}</text>
-${done ? `<text class="s" x="${42 + textW}" y="18" text-anchor="end" font-family="${FONT}" font-size="11" font-variant-numeric="tabular-nums">${xml(done)}</text>` : ''}
-<text x="42" y="34" font-family="${FONT}" font-size="11"><tspan fill="${colorOf(tier)}">${xml(tier)}</tspan><tspan fill="${STATE_COLOR.done}">  ${xml(fitText(word, 11, Math.max(0, textW - textWidth(`${tier}  `, 11))))}</tspan></text>
-${statusMark(W - 8, 16, 'done', colorOf(tier))}
-<line class="ln" x1="0" y1="${ACCEPTED_H - 0.5}" x2="${W}" y2="${ACCEPTED_H - 0.5}"/>`,
+    H,
+    `${crab(0, out ? 1 : 6, tier, true)}
+${out ? '' : `<text class="t" x="42" y="18" font-family="${FONT}" font-size="13" font-weight="600">${xml(fitText(`${p.n}. ${p.title}`, 13, Math.max(0, textW - doneW)))}</text>`}
+${done && !out ? `<text class="s" x="${42 + textW}" y="18" text-anchor="end" font-family="${FONT}" font-size="11" font-variant-numeric="tabular-nums">${xml(done)}</text>` : ''}
+<text x="42" y="${out ? 16 : 34}" font-family="${FONT}" font-size="11"><tspan fill="${colorOf(tier)}">${xml(tier)}</tspan><tspan fill="${STATE_COLOR.done}">  ${xml(fitText(word, 11, Math.max(0, textW - textWidth(`${tier}  `, 11))))}</tspan></text>
+${statusMark(W - 8, out ? 12 : 16, 'done', colorOf(tier))}
+<line class="ln" x1="0" y1="${H - 0.5}" x2="${W}" y2="${H - 0.5}"/>`,
   )
 }
 
@@ -1323,7 +1344,26 @@ async function startFlow($: EngineInterface, prev: Flow | null, name: string): P
   await updateFlow($, p => (p && !p.isFinished ? p : merge(null, { title: shortTitle(taskTag(name).rest) || 'flowdeck', phase: 'delegate' }, at)))
 }
 
-type SavedPlans = Record<string, TaskPlan[]>
+// A run just started: its delegation prompt becomes the brief of the task it is linked to (a return round's prompt
+// replaces it until the task is accepted), else the run's own. Without a prompt, a linked run's description stands in when
+// it says more than the task's title (an unlinked run's row already shows its description).
+async function keepBrief($: EngineInterface, id: string, prompt: unknown, description: unknown): Promise<void> {
+  const f = await readFlow($)
+  const list = await readAgents($)
+  if (!list.some(a => a.id === id)) return
+  const tasks = f && !f.isFinished ? f.tasks : []
+  const i = linkRuns(tasks, list).get(id)
+  const task = i === undefined ? undefined : tasks[i]
+  const brief = briefOf(prompt) || (task ? fallbackBrief(description, task.title) : '')
+  if (!brief) return
+  if (f && task && i !== undefined && !acceptedOf(f).includes(i + 1)) {
+    await updateFlow($, p => (p && !p.isFinished && p.tasks[i]?.title === task.title ? { ...p, tasks: p.tasks.map((t, k) => (k === i ? { ...t, brief } : t)) } : p))
+    return
+  }
+  await updateAgents($, l => l.map(a => (a.id === id ? { ...a, brief } : a)))
+}
+
+type SavedPlans =Record<string, TaskPlan[]>
 
 const isStoredStage = (s: unknown): s is PlanStage =>
   !!s && typeof s === 'object' && typeof (s as { name?: unknown }).name === 'string' && Array.isArray((s as { steps?: unknown }).steps) && (s as { steps: unknown[] }).steps.every(isStoredStep)
@@ -1864,7 +1904,7 @@ function topToggleRow($: EngineInterface, ui: Pick<Elements['desktop'], 'Box' | 
   const toggleKeepWarm = (
     <Button
       key="keep-warm"
-      label={`${p.isKeepWarm ? '▾' : '▸'} Keep warm`}
+      label={p.isKeepWarm ? '▾ Keep warm (on)' : '▸ Keep warm (off)'}
       plain
       onPress={async () => {
         const on = !p.isKeepWarm
@@ -1969,7 +2009,9 @@ export const register: Register = (on, options) => {
         'Call it after presenting the plan (title, total, tasks, phase "delegate"), each time a task is accepted (done: [its number]), ' +
         'when switching phase or re-planning (tasks), phase "close" when the current work is done, and finished: true only when the user ends the flow ' +
         '(a flow whose tasks are all done finishes by itself when your turn ends). ' +
-        'For a new /flowdeck <task> while a flow is linked, send the new plan with restart: true: the open flow is finished first and the new one starts. Fields left out keep their previous value.',
+        'For a new /flowdeck <task> while a flow is linked, send the new plan with restart: true: the open flow is finished first and the new one starts. Fields left out keep their previous value. ' +
+        'Every task carries a handoff note the user reads on its row: send `goal` with every task you create or add, and `notes` with `result` and `feedback` for a task when you accept it (with its `done`). ' +
+        'Notes are short plain text, no markdown; the brief is taken from your Agent prompt by itself.',
       inputSchema: {
         type: 'object',
         properties: {
@@ -1996,6 +2038,7 @@ export const register: Register = (on, options) => {
                 title: { type: 'string' },
                 tier: { type: 'string', enum: ['fable', 'heavy', 'careful', 'medium', 'light'] },
                 after: { type: 'array', items: { type: 'integer' }, description: 'Numbers of the tasks this one waits for (1-based, in the whole task list).' },
+                goal: { type: 'string', description: GOAL_TEXT },
               },
               required: ['title'],
             },
@@ -2015,8 +2058,24 @@ export const register: Register = (on, options) => {
                   description:
                     'Numbers (from 1) of the tasks this one waits for; leave out for a task that can start at once. Unknown numbers, the task itself and waits that close a cycle are ignored.',
                 },
+                goal: { type: 'string', description: GOAL_TEXT },
               },
               required: ['title', 'tier'],
+            },
+          },
+          notes: {
+            type: 'array',
+            description:
+              'Handoff notes of tasks by number, at any time: a part sent replaces the one before, an empty string clears it, a part left out stays. Send result and feedback when you accept a task, together with its done. Unknown task numbers are ignored.',
+            items: {
+              type: 'object',
+              properties: {
+                task: { type: 'integer', minimum: 1, description: 'The task number (from 1).' },
+                goal: { type: 'string', description: GOAL_TEXT },
+                result: { type: 'string', description: 'What the task delivered, plain text, at most 300 characters.' },
+                feedback: { type: 'string', description: 'Your review of it: what was checked, what is left or risky; plain text, at most 300 characters.' },
+              },
+              required: ['task'],
             },
           },
         },
@@ -2137,7 +2196,9 @@ export const register: Register = (on, options) => {
     // Finishing a flow that is already finished changes nothing; it would otherwise open a blank one. So does a call on a
     // finished flow that names no new work (a late `done` or phase after the flow finished by itself).
     const isNewWork = input.title !== undefined || !!input.tasks?.length || !!input.add?.length || input.restart === true
-    if (prev?.isFinished && (input.finished === true || !isNewWork)) return { result: `ok: ${label(prev)}` }
+    if (prev?.isFinished && (input.finished === true || !isNewWork)) {
+      return { result: `ok: ${label(prev)}${Array.isArray(input.notes) && input.notes.length ? '\nnotes ignored: the flow is finished' : ''}` }
+    }
     // A restart ends the open flow as finished: true does; the rest of the input then starts the new one.
     if (input.restart === true && prev && !prev.isFinished) prev = await finishFlow($)
     // The flow being replaced goes to the archive first, with its own agents; a finished one is there already.
@@ -2146,7 +2207,8 @@ export const register: Register = (on, options) => {
     const next = input.finished === true ? await finishFlow($, input) : await updateFlow($, p => merge(p, input, at))
     if (next && (input.tasks?.length || input.add?.length)) await autoOpen($, next.title)
     await persistLive($)
-    return { result: `ok: ${label(next ?? blank())}` }
+    const unknown = applyNotes(next?.tasks ?? [], input.notes).unknown
+    return { result: `ok: ${label(next ?? blank())}${unknown.length ? `\nnotes ignored for unknown tasks: ${unknown.join(', ')}` : ''}` }
   })
 
   // Every task the session adds goes into the flow: the model's task list items are mirrored as planned tasks, and a list
@@ -2401,6 +2463,7 @@ export const register: Register = (on, options) => {
       }
       return [...list.filter(a => a.id !== run.id), run].slice(-200)
     })
+    await keepBrief($, started.agentId ?? e.tool_use_id, e.prompt, e.description).catch(() => {}) // a failing store costs the brief, not the launch
     await update($, now, () => at)
     if (isWorker(e.subagentType)) {
       const f = await readFlow($)
@@ -2616,6 +2679,23 @@ export const register: Register = (on, options) => {
       />
     )
 
+    // A row's handoff note opens under it by its note button; `k` is the row's key, prefixed as fold states are.
+    const isNoteOpen = (k: string) => (p.openNotes ?? []).includes(k)
+    const noteButton = (k: string, key: string) => (
+      <Button
+        key={key}
+        label={NOTE_ICON}
+        plain
+        dimColor
+        onPress={() =>
+          updatePanel($, prev => {
+            const open = prev.openNotes ?? []
+            return { ...prev, openNotes: open.includes(k) ? open.filter(x => x !== k) : [...open, k] }
+          })
+        }
+      />
+    )
+
     const Svg = e.surface === 'desktop' && 'Svg' in ui ? ui.Svg : null
     const W = Math.max(240, Math.min(900, (e.props.bodyColumns || 40) * 8 - 8))
     const cols = Math.max(24, e.props.bodyColumns || 40)
@@ -2658,6 +2738,18 @@ export const register: Register = (on, options) => {
       ]
       const archiveButton = (a: AgentRun) =>
         v.archive?.can(a) ? <Button key={`archive-item-${a.id}`} label={ARCHIVE_ICON} plain dimColor onPress={() => v.archive?.press(a)} /> : null
+      // A row's handoff note: its task's (a run linked to none: its own brief); a task without a brief shows its run's.
+      const runNote = (a: AgentRun): TaskNote => {
+        const t = taskFor(a)
+        const own = t ? noteOf(tasks[t.n - 1]) : {}
+        const brief = own.brief || cleanText(a.brief, NOTE_MAX.brief)
+        return brief ? { ...own, brief } : own
+      }
+      const taskNote = (pl: Planned): TaskNote => noteOf(tasks[pl.n - 1])
+      const runNoteKey = (a: AgentRun) => `${fp}${a.id}`
+      const taskNoteKey = (pl: Planned) => `${fp}task-${pl.n}-${keyOf(pl.title)}`
+      const runNoteButton = (a: AgentRun, n: TaskNote) => (hasNote(n) ? noteButton(runNoteKey(a), `${kp}note-${a.id}`) : null)
+      const taskNoteButton = (pl: Planned, n: TaskNote) => (hasNote(n) ? noteButton(taskNoteKey(pl), `${kp}note-task-${pl.n}`) : null)
       // A row that throws draws one dim line in its place; the other rows still draw.
       const guard = (a: AgentRun, draw: () => RenderChildren): RenderChildren => {
         try {
@@ -2693,14 +2785,22 @@ export const register: Register = (on, options) => {
       }
       if (Svg) {
         const viewSummary = `≈${fmtCost(v.t.cost)}, ${fmtTokens(v.t.tokens)} ${s.tokensWord}, ${fmtTime(v.t.time)}`
+        // The opened note: its parts under their dim labels, wrapped to the panel's width.
+        const notePanel = (key: string, n: TaskNote) => {
+          const parts = noteParts(n)
+          const d = noteSvgBody(W, parts)
+          return <Svg key={key} source={svg(W, d.height, d.body)} alt={noteAlt(parts)} width={W} height={d.height} />
+        }
         // Every row: line 1 is native (a Button cannot sit inside a drawing): the fold chevron at the far left, the indent
-        // that puts the task name at the drawing's text column, the archive icon after the name and when it finished at
-        // the far end; then the drawing at the full width without its title line.
+        // that puts the task name at the drawing's text column, the note and archive icons after the name and when it
+        // finished at the far end; then the drawing at the full width without its title line.
         const agentRow = (a: AgentRun, word: string) => {
           const alt = `${a.description}: ${modelName(a.model)}, ${word}`
           const items = timedItems(itemsOf(a.items), a)
           const toArchive = archiveButton(a)
           const done = doneOf(a)
+          const note = runNote(a)
+          const toNote = runNoteButton(a, note)
           return (
             <Box key={`${kp}${a.id}`} flexDirection="column">
               <Box flexDirection="row" alignItems="center">
@@ -2712,6 +2812,7 @@ export const register: Register = (on, options) => {
                       {nameOf(a)}
                     </Text>
                   </Box>
+                  {toNote && <Box flexShrink={0}>{toNote}</Box>}
                   {toArchive && <Box flexShrink={0}>{toArchive}</Box>}
                   <Box flexGrow={1} />
                   {done && (
@@ -2731,19 +2832,65 @@ export const register: Register = (on, options) => {
                 detailLines(a).map((line, i) => (
                   <Svg key={`${kp}agent-detail-${a.id}-${i}`} source={svg(W, ITEM_H, noteSvg(W, line, fitText))} alt={line} width={W} height={ITEM_H} />
                 ))}
+              {toNote && isNoteOpen(runNoteKey(a)) && notePanel(`${kp}agent-note-${a.id}`, note)}
             </Box>
           )
         }
-        const acceptedRow = (pl: Planned) => (
-          <Svg key={`${kp}accepted-${pl.n}`} source={acceptedSvg(W, pl, acceptedDone(pl))} alt={`${pl.n}. ${pl.title}: ${s.acceptedRow} · ${s.noRun}`} width={W} height={ACCEPTED_H} />
-        )
+        // A task row with a note: its title natively at the drawing's text column with the note button beside it (and
+        // when it was accepted at the far end), the drawing without its title below, the note under it when open. A task
+        // row without a note is the one drawing it always was.
+        const taskRow = (key: string, pl: Planned, title: RenderChildren, drawing: (out: boolean) => { source: string; alt: string; height: number }, done = '') => {
+          const note = taskNote(pl)
+          const toNote = taskNoteButton(pl, note)
+          if (!toNote) {
+            const d = drawing(false)
+            return <Svg key={key} source={d.source} alt={d.alt} width={W} height={d.height} />
+          }
+          const d = drawing(true)
+          return (
+            <Box key={key} flexDirection="column">
+              <Box flexDirection="row" alignItems="center">
+                <Svg source={TASK_INDENT_SVG} alt="" width={TITLE_INDENT} height={1} />
+                <Box flexDirection="row" alignItems="center" gap={1} flexGrow={1} flexShrink={1} minWidth={0}>
+                  <Box flexShrink={1} minWidth={0} overflow="hidden">
+                    {title}
+                  </Box>
+                  <Box flexShrink={0}>{toNote}</Box>
+                  <Box flexGrow={1} />
+                  {done && (
+                    <Box flexShrink={0}>
+                      <Text dimColor>{done}</Text>
+                    </Box>
+                  )}
+                </Box>
+              </Box>
+              <Svg source={d.source} alt={d.alt} width={W} height={d.height} />
+              {isNoteOpen(taskNoteKey(pl)) && notePanel(`${key}-note`, note)}
+            </Box>
+          )
+        }
+        const acceptedRow = (pl: Planned) =>
+          taskRow(
+            `${kp}accepted-${pl.n}`,
+            pl,
+            <Text bold wrap="truncate-end">{`${pl.n}. ${pl.title}`}</Text>,
+            out => ({ source: acceptedSvg(W, pl, acceptedDone(pl), out), alt: `${pl.n}. ${pl.title}: ${s.acceptedRow} · ${s.noRun}`, height: out ? TASK_OUT_H : ACCEPTED_H }),
+            acceptedDone(pl),
+          )
+        const plannedRow = (pl: Planned) =>
+          taskRow(
+            `${kp}plan-${pl.n}`,
+            pl,
+            <Text bold dimColor wrap="truncate-end">{`${pl.n}. ${pl.title}`}</Text>,
+            out => ({ source: plannedSvg(W, pl, out), alt: `${pl.n}. ${pl.title}: ${s.isPlanned}`, height: out ? TASK_OUT_H : TASK_H }),
+          )
         return {
           header: <Svg source={headerSvg(W, v.t)} alt={viewSummary} width={W} height={HEADER_H} />,
           body: () =>
             listOf({
               agent: agentRow,
               accepted: acceptedRow,
-              planned: pl => <Svg key={`${kp}plan-${pl.n}`} source={plannedSvg(W, pl)} alt={`${pl.n}. ${pl.title}: ${s.isPlanned}`} width={W} height={46} />,
+              planned: plannedRow,
             }),
         }
       }
@@ -2770,8 +2917,10 @@ export const register: Register = (on, options) => {
         const [lead, rest] = splitHead(clip(steps ? `${head} · ${steps}` : head, room), head)
         const items = timedItems(itemsOf(a.items), a)
         const done = doneOf(a)
-        // The fold chevron right before the name (dim on a row with no step list yet), the archive icon and the state
-        // glyph after it, when it finished at the far end.
+        const note = runNote(a)
+        const toNote = runNoteButton(a, note)
+        // The fold chevron right before the name (dim on a row with no step list yet), the note and archive icons and the
+        // state glyph after it, when it finished at the far end.
         return (
           <Box key={`${kp}${a.id}`} flexDirection="column" marginBottom={1}>
             <Box flexDirection="row" gap={1}>
@@ -2782,6 +2931,7 @@ export const register: Register = (on, options) => {
                   {nameOf(a)}
                 </Text>
               </Box>
+              {toNote}
               {archiveButton(a)}
               <Text color={glyphColor(a, color)}>{STATUS_GLYPH[markOf(a)]}</Text>
               {done ? <Box flexGrow={1} /> : null}
@@ -2819,11 +2969,21 @@ export const register: Register = (on, options) => {
                   {line}
                 </Text>
               ))}
+            {toNote && isNoteOpen(runNoteKey(a)) && noteLines(`${kp}agent-note-${a.id}`, note)}
           </Box>
         )
       }
+      // The opened note: a dim label line per part, its text wrapped to the panel's columns.
+      const noteLines = (key: string, n: TaskNote) =>
+        noteRows(noteParts(n), cols).map((r, i) => (
+          <Text key={`${key}-${i}`} dimColor={r.isLabel} wrap="truncate-end">
+            {r.text}
+          </Text>
+        ))
       const acceptedLine = (pl: Planned) => {
         const tier = pl.tier in TIER_COLOR ? pl.tier : 'other'
+        const note = taskNote(pl)
+        const toNote = taskNoteButton(pl, note)
         return (
           <Box key={`${kp}accepted-${pl.n}`} flexDirection="column" marginBottom={1}>
             <Box flexDirection="row" gap={1}>
@@ -2834,6 +2994,7 @@ export const register: Register = (on, options) => {
                   {pl.n}. {pl.title}
                 </Text>
               </Box>
+              {toNote}
               {acceptedDone(pl) ? <Box flexGrow={1} /> : null}
               {acceptedDone(pl) ? <Text dimColor>{acceptedDone(pl)}</Text> : null}
             </Box>
@@ -2843,6 +3004,7 @@ export const register: Register = (on, options) => {
               {' · '}
               <Text color={STATE_COLOR.done}>{`${s.acceptedRow} · ${s.noRun}`}</Text>
             </Text>
+            {toNote && isNoteOpen(taskNoteKey(pl)) && noteLines(`${kp}accepted-note-${pl.n}`, note)}
           </Box>
         )
       }
@@ -2853,13 +3015,30 @@ export const register: Register = (on, options) => {
         const head = `  ${tier} · ${TIER_MODEL[tier] ?? ''}`
         // The wait goes first when the line is short; `ready` stays.
         const shownWaits = (head + waits + ready).length <= cols ? waits : ''
+        const note = taskNote(pl)
+        const toNote = taskNoteButton(pl, note)
         return (
           <Box key={`${kp}plan-${pl.n}`} flexDirection="column" marginBottom={1}>
-            <Text dimColor wrap="truncate-end">
-              <Text color={colorOf(tier)}>▢</Text>
-              {'   '}
-              {pl.n}. {pl.title} ◷
-            </Text>
+            {toNote ? (
+              // The note button right after the title, before the planned glyph, as on every other row.
+              <Box flexDirection="row" gap={1}>
+                <Box flexShrink={1} minWidth={0}>
+                  <Text dimColor wrap="truncate-end">
+                    <Text color={colorOf(tier)}>▢</Text>
+                    {'   '}
+                    {pl.n}. {pl.title}
+                  </Text>
+                </Box>
+                {toNote}
+                <Text dimColor>◷</Text>
+              </Box>
+            ) : (
+              <Text dimColor wrap="truncate-end">
+                <Text color={colorOf(tier)}>▢</Text>
+                {'   '}
+                {pl.n}. {pl.title} ◷
+              </Text>
+            )}
             <Text wrap="truncate-end">
               <Text dimColor>
                 {head}
@@ -2872,6 +3051,7 @@ export const register: Register = (on, options) => {
                 </Text>
               ) : null}
             </Text>
+            {toNote && isNoteOpen(taskNoteKey(pl)) && noteLines(`${kp}plan-note-${pl.n}`, note)}
           </Box>
         )
       }

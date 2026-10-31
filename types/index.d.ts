@@ -21,7 +21,19 @@ export type Samples = Record<string, Sample[]>
 
 export type Phase = 'plan' | 'design' | 'delegate' | 'review' | 'close'
 
-export type PlannedTask = {
+/** A task's handoff note (hooks/notes.ts): plain text, cleaned and capped by the mod; every part is optional. */
+export type TaskNoteParts = {
+  /** The user's request for this task, from the orchestrator (at most 300 characters). */
+  goal?: string
+  /** From the worker's delegation prompt, taken by the mod when the worker starts (at most 600). */
+  brief?: string
+  /** What came of it, from the orchestrator when it accepts the task (at most 300). */
+  result?: string
+  /** The orchestrator's review of it, sent with the result (at most 300). */
+  feedback?: string
+}
+
+export type PlannedTask = TaskNoteParts & {
   title: string
   tier: string
   after: number[]
@@ -78,9 +90,11 @@ export type AgentRun = {
   isAsked?: boolean
   /** A finished run moved into the archive from the live panel; it leaves the live Finished list but still counts in the flow's totals. */
   archived?: boolean
+  /** Its delegation prompt as a brief, when no task took it (the run was linked to none when it started). */
+  brief?: string
 }
 
-export type ArchiveTask = { title: string; tier: string; after?: number[] }
+export type ArchiveTask = TaskNoteParts & { title: string; tier: string; after?: number[] }
 
 /** An agent run as it was when its flow was saved, without the live-only fields. */
 export type ArchiveAgent = Omit<AgentRun, 'tool' | 'isAsked' | 'archived'>
@@ -164,6 +178,8 @@ export type Panel = {
   openEntries: string[]
   /** Agent rows unfolded to show their items; this session only. */
   openAgents: string[]
+  /** Rows whose handoff note is open (a run's id, a task row's `task-<n>-<key>`; an archive group's prefixed as openAgents are); this session only. */
+  openNotes: string[]
   /** Archive and Trash groups the user folded, the default-open first one included; this session only. */
   closedEntries: string[]
   /** How many Archive rows are drawn (`Show more` adds a page); this session only. */

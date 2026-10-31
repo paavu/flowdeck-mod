@@ -3,6 +3,7 @@
 import type { AgentRun, AgentStatus, ArchiveAgent, ArchiveEntry, ArchiveTask, Flow, PlanStage, PlanState, PlanStep, StepStatus, TaskPlan } from '../types'
 import { itemsOf } from './agent-items'
 import { sortNewest } from './order'
+import { cleanText, NOTE_MAX, noteOf } from './notes'
 import { isFinished, isStoredStep } from './plan'
 import { acceptedOf } from './tasks'
 import { dayParts } from './time'
@@ -102,6 +103,8 @@ function agentOf(v: unknown, end?: number): ArchiveAgent | null {
   if (stepDone !== null) a.stepDone = stepDone
   if (stepTotal !== null) a.stepTotal = stepTotal
   if (typeof o.stepNote === 'string') a.stepNote = cap(o.stepNote)
+  const brief = cleanText(o.brief, NOTE_MAX.brief)
+  if (brief) a.brief = brief
   const items = itemsOf(o.items)
   if (items.length) a.items = items
   return a
@@ -133,7 +136,7 @@ export function snapshot(input: {
     status,
     done: flow.done,
     total: flow.total,
-    tasks: flow.tasks.slice(0, MAX_TASKS).map(t => ({ title: cap(t.title), tier: cap(t.tier), after: afterOf(t.after).slice(0, MAX_TASKS) })),
+    tasks: flow.tasks.slice(0, MAX_TASKS).map(t => ({ title: cap(t.title), tier: cap(t.tier), after: afterOf(t.after).slice(0, MAX_TASKS), ...noteOf(t) })),
     ...(flow.accepted ? { accepted: afterOf(flow.accepted).slice(0, MAX_TASKS) } : {}),
     ...(stampsOf(flow.acceptedAt) ? { acceptedAt: stampsOf(flow.acceptedAt) } : {}),
     cost: agents.reduce((s, a) => s + a.costUsd, 0),
@@ -263,7 +266,7 @@ function parseEntry(v: unknown): ArchiveEntry | null {
       const tt = text(r.title)
       const tier = text(r.tier)
       if (tt === null || tier === null) return []
-      const task: ArchiveTask = { title: tt, tier }
+      const task: ArchiveTask = { title: tt, tier, ...noteOf(r) }
       if (Array.isArray(r.after)) task.after = afterOf(r.after)
       return [task]
     })

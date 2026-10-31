@@ -361,11 +361,11 @@ describe('the Keep warm switch', () => {
       const band = await p.find({ type: 'Button', key: 'band' })
       const keep = await p.find({ type: 'Button', key: 'keep-warm' })
       await p.unmount()
-      expect(keep?.props?.label).toBe('▾ Keep warm')
+      expect(keep?.props?.label).toBe('▾ Keep warm (on)')
       expect(keep?.props?.plain).toBe(band?.props?.plain)
       expect(keep?.props?.dimColor).toBeUndefined()
       await pressKeepWarm($, surface)
-      expect(await keepWarmLabel($, surface)).toBe('▸ Keep warm')
+      expect(await keepWarmLabel($, surface)).toBe('▸ Keep warm (off)')
     })
   }
 
@@ -383,20 +383,20 @@ describe('the Keep warm switch', () => {
     fakeFs(on)
     engine(on, { store: { keepWarm: { '/work/app': false } } })
     await start($, '/work/app')
-    for (const surface of SURFACES) expect(await keepWarmLabel($, surface)).toBe('▸ Keep warm')
+    for (const surface of SURFACES) expect(await keepWarmLabel($, surface)).toBe('▸ Keep warm (off)')
   })
 
   test('another project is on unless it was switched off there', async ($, on) => {
     fakeFs(on)
     engine(on, { store: { keepWarm: { '/work/app': false } } })
     await start($, '/work/other')
-    expect(await keepWarmLabel($, 'terminal')).toBe('▾ Keep warm')
+    expect(await keepWarmLabel($, 'terminal')).toBe('▾ Keep warm (on)')
   })
 
   test('a store value of the wrong kind reads as on', async ($, on) => {
     engine(on, { store: { keepWarm: { '': 'no' } } })
     await start($)
-    expect(await keepWarmLabel($, 'desktop')).toBe('▾ Keep warm')
+    expect(await keepWarmLabel($, 'desktop')).toBe('▾ Keep warm (on)')
   })
 
   test('a panel held from before 1.0.0030 reads as on, and its press works', async ($, on) => {
@@ -408,9 +408,9 @@ describe('the Keep warm switch', () => {
     const old: Record<string, unknown> = { ...PANEL_DEFAULT }
     delete old.isKeepWarm
     held(on, 'panel', old)
-    for (const surface of SURFACES) expect(await keepWarmLabel($, surface)).toBe('▾ Keep warm')
+    for (const surface of SURFACES) expect(await keepWarmLabel($, surface)).toBe('▾ Keep warm (on)')
     await pressKeepWarm($)
-    expect(await keepWarmLabel($, 'terminal')).toBe('▸ Keep warm')
+    expect(await keepWarmLabel($, 'terminal')).toBe('▸ Keep warm (off)')
   })
 })
 
