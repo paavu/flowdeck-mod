@@ -4,6 +4,7 @@ import type { Elements, EngineInterface, Register, RenderChildren } from 'claude
 import type { AgentRun, ArchiveDetail, ArchiveEntry, ArchiveLists, ArchiveRecord, Flow, Panel, PanelTab, Phase, PlannedTask, Reading, Rule, Samples, TaskPlan, UsageWindow } from '../types'
 import { derive, finishItems, hasItemOps, ITEM_H, itemAlt, itemLine, itemsOf, itemSvg, noteSvg, stepItems, timedItems } from './agent-items'
 import type { StepInput } from './agent-items'
+import { countCall, withNudgeLine } from './nudge'
 import { agentState, HOUSEKEEPING, isComplete, isIncomplete, isLive, markOf, progressOf, splitHead, stateText, stepCount } from './agent-state'
 import { contextRows, contextSvg, toReading } from './context'
 import { isWorthKeeping, keyOf, snapshot } from './archive'
@@ -1632,9 +1633,24 @@ let flightCount = 0
 // Kept here rather than read back: a hook held open across a call may read an older list than another hook has since written.
 const shown = new Map<string, { tool?: string; isAsked: boolean }>()
 
+// Tool calls a worker made since its last step call (nudge.ts).
+const quiet = new Map<string, number>()
+
 const forgetFlights = (agentId: string): void => {
   for (const [id, f] of flights) if (f.agentId === agentId) flights.delete(id)
   shown.delete(agentId)
+  quiet.delete(agentId)
+}
+
+// The result with the step nudge added when the worker has an active step and has gone quiet; never throws.
+async function nudged<R>($: EngineInterface, agentId: string, result: R): Promise<R> {
+  try {
+    if (!countCall(quiet, agentId)) return result
+    const run = (await readAgents($)).find(a => a.agentId === agentId && a.status === 'running')
+    return run?.items?.some(it => it.status === 'active') ? withNudgeLine(result) : result
+  } catch {
+    return result
+  }
 }
 
 // A running agent's tool word and approval flag from its calls in flight.
@@ -2113,7 +2129,7 @@ export const register: Register = (on, options) => {
       // A failing read costs the word, not the call.
     }
     try {
-      return await next(e)
+      return await nudged($, agentId, await next(e))
     } finally {
       flights.delete(useId)
       await showAgent($, agentId, e.tool).catch(() => {})
@@ -2160,6 +2176,7 @@ export const register: Register = (on, options) => {
     const input = e as unknown as StepInput
     const agentId = e.agentId
     if (!agentId) return { result: 'ignored: only subagents report steps' }
+    quiet.delete(agentId)
     const num = (v: unknown) => (typeof v === 'number' && Number.isFinite(v) ? v : undefined)
     // Sent counts and note win for this call; otherwise a list gives them.
     const sent = { done: num(input.done), total: num(input.total), note: typeof input.note === 'string' ? input.note.trim() : '' }

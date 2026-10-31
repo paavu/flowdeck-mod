@@ -72,7 +72,7 @@ To see what the mod hooks and calls before you install it, clone the repository 
 claude plugin update flowdeck@flowdeck-mod
 ```
 
-then `/reload-plugins` in open sessions. Every release raises `version` in `.claude-plugin/plugin.json`, so `update` always sees the new one. The panel's top row shows the version of the code that is running (`v1.0.0046`); after an update without a reload it still names the old one. [CHANGELOG.md](CHANGELOG.md) lists what each version changed.
+then `/reload-plugins` in open sessions. Every release raises `version` in `.claude-plugin/plugin.json`, so `update` always sees the new one. The panel's top row shows the version of the code that is running (`v1.0.0047`); after an update without a reload it still names the old one. [CHANGELOG.md](CHANGELOG.md) lists what each version changed.
 
 From 1.0.0036 or earlier: task tracking became a choice in 1.0.0037. An install that already ran flowdeck keeps its rule (`on`); see [Task tracking](#task-tracking) for how that is decided. `/flowdeck-agents` still opens the panel for this release; its new name is `/flowdeck-panel`.
 
@@ -188,7 +188,7 @@ Keeps the prompt cache warm through a long idle stretch so the next message read
 
 The panel opens with `/flowdeck-panel`, the band's `×N` button, or by itself when the first worker of a flow starts.
 
-**Top row**: `▼ Context`, `▼ Usage`, `● Band`, `● Keep warm` and `● Track tasks`, with the running version (`v1.0.0046`) at the far end. Context and Usage fold their sections and remember the choice (`▼` open, `▶︎` folded, the same glyphs as every fold in the panel); Band, Keep warm and Track tasks are dot switches (`●` on or shown, `○` off or hidden). Band shows or hides the band; Track tasks turns task tracking on or off (`○` until it is on).
+**Top row**: `▼ Context`, `▼ Usage`, `● Band`, `● Keep warm` and `● Track tasks`, with the running version (`v1.0.0047`) at the far end. Context and Usage fold their sections and remember the choice (`▼` open, `▶︎` folded, the same glyphs as every fold in the panel); Band, Keep warm and Track tasks are dot switches (`●` on or shown, `○` off or hidden). Band shows or hides the band; Track tasks turns task tracking on or off (`○` until it is on).
 
 | Section | Shows |
 |---|---|
@@ -216,7 +216,7 @@ Each worker run is a row: its tier's pixel crab, the task number and title, mode
 | Incomplete (ended, steps left) | amber |
 | Error | red |
 
-The chevron before the name folds out the worker's steps, each with its mark and how long it took. A queued task shows `ready` once everything it waits for is done: those can start now, in parallel. A finished row shows when it finished (`14:07`, or `Oct 29 · 14:07` on an earlier day).
+The chevron before the name folds out the worker's steps, each with its mark and how long it took. A worker sends its plan once and moves it as each step finishes, so the bar fills as the work goes. A step shows `–` instead of a time when the worker closed it in the same call as other steps it never started (a batch close at the end): the mod does not guess how long those took. To keep the list current, the mod adds one line to a worker's tool result ("update your step list now") after 8 tool calls without a step call; the user never sees that line. A queued task shows `ready` once everything it waits for is done: those can start now, in parallel. A finished row shows when it finished (`14:07`, or `Oct 29 · 14:07` on an earlier day).
 
 The mod links each run to its planned task by itself: by the `#n` at the start of the Agent description, else the exact title, else the closest title, else the only open task of the worker's tier.
 

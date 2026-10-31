@@ -86,6 +86,7 @@ export function applyNotes<T extends object>(tasks: T[], notes: unknown): { task
 // preamble (repo line, tool, delete, commit, comment and time-format rules). Only whole sentences that start so are dropped.
 const BOILERPLATE: readonly RegExp[] = [
   /close your step list\b/i,
+  /^update your step list\b/i,
   /^repo(sitory)?\s*:/i,
   /^(working directory|cwd)\s*:/i,
   /^read\s+(readme|claude\.md|changelog)\b/i,

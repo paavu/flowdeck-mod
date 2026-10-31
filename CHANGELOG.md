@@ -2,6 +2,11 @@
 
 Versions are `M.m.xxxx`; every build bumps the 4-digit build number. Details and rulings: `docs/ledger.md`, `docs/design.md`.
 
+## 1.0.0047 (2026-10-31)
+- Step reporting that workers follow: the Progress reporting paragraph of all five worker agents is now a numbered procedure (plan once, do step 1, call `step` with `next: true` as soon as it is finished, only then start step 2) with an explicit "never batch" rule, and SKILL.md has every brief start with the line "Update your step list after each finished step, before starting the next." (the mod leaves that line out of the handoff-note brief). `scripts/check-rules.sh` checks the wording in SKILL.md and in each agent file.
+- Step nudge (`hooks/nudge.ts`): a worker whose step list has an active step and that makes 8 tool calls without a `step` call gets one line added to that call's result (the `context` a `tool.call` result carries, which the model reads and the user does not): "update your step list now"; again only after 8 more calls without a step call. A step call resets the count. Never for the orchestrator, never for a worker without a step list; any error leaves the result as it was.
+- Batch-closed steps show `–`: when one `step` call closes two or more steps that had no start time, the mod does not invent times for them; they are marked `batch` and draw `–` instead of `0s` (desktop, terminal and alt text). Steps closed one at a time keep their times.
+
 ## 1.0.0046 (2026-10-31)
 - Band crew control: the worker icon moved out of the title row's drawing to sit right before the crew button, and the button reads `×N` with N = the workers running now (it used to count every run plus queued tasks). The icon walks while a worker runs and stands still at `×0`. The panel's counts and `Tasks X/Y` are unchanged.
 

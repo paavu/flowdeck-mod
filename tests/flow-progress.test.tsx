@@ -375,7 +375,7 @@ describe('every done or failed step shows a time', () => {
     expect(itemElapsed(timedItems([it('a', 'done')], { startedAt: NOW })[0]!, NOW)).toBe(0)
   })
 
-  test('in the panel: steps closed out of order, in a batch and without a clock all show a time, desktop and terminal', async ($, on) => {
+  test('in the panel: steps closed out of order and without a clock show a time, the two closed in one batch call show –, desktop and terminal', async ($, on) => {
     let broken = false
     const { clock } = engine(on, { clockFails: () => broken })
     await start($)
@@ -401,11 +401,13 @@ describe('every done or failed step shows a time', () => {
     const lines = (await p.findAll({ type: 'Text' })).map((x: any) => String(x.text)).filter((t: string) => /^ {3}✓ [a-e]\b/.test(t))
     await p.unmount()
     expect(lines.length).toBe(5)
-    for (const l of lines) expect(l).toMatch(/\d+s$/)
+    for (const l of lines) expect(l).toMatch(/^ {3}✓ [ce]\s+–$|\d+s$/)
+    expect(lines.filter(l => /–$/.test(l)).length).toBe(2)
     p = await pane($, 'desktop', 'finished')
     const alts = (await p.findAll({ type: 'Svg' })).map((s: any) => String(s.props.alt)).filter((a: string) => /^[a-e]: Done /.test(a))
     await p.unmount()
     expect(alts.length).toBe(5)
-    for (const a of alts) expect(a).toMatch(/ \d+s$/)
+    for (const a of alts) expect(a).toMatch(/^[ce]: Done –$| \d+s$/)
+    expect(alts.filter(a => /–$/.test(a)).length).toBe(2)
   })
 })

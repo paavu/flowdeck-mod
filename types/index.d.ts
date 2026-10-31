@@ -62,7 +62,14 @@ export type AgentStatus = 'running' | 'done' | 'failed'
 
 /** One step of a worker's own list, sent through the `step` tool. */
 export type AgentItemStatus = 'pending' | 'active' | 'done' | 'error'
-export type AgentItem = { title: string; status: AgentItemStatus; startedAt?: number; doneAt?: number }
+export type AgentItem = {
+  title: string
+  status: AgentItemStatus
+  startedAt?: number
+  doneAt?: number
+  /** Closed in one `step` call together with another step that had no start: its own times are unknown and draw as `–`. */
+  batch?: true
+}
 
 export type AgentRun = {
   id: string

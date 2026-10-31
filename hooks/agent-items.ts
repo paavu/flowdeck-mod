@@ -57,6 +57,7 @@ export const itemsOf = (v: unknown): AgentItem[] =>
       const doneAt = time(x.doneAt)
       if (startedAt !== undefined) item.startedAt = startedAt
       if (doneAt !== undefined) item.doneAt = doneAt
+      if (x.batch === true && isEnded(item.status)) item.batch = true
       return [item]
     })
     .slice(0, MAX_ITEMS)
@@ -156,11 +157,17 @@ export function applyItemOps(items: AgentItem[], input: StepInput, now?: number)
 export const hasItemOps = (input: StepInput): boolean =>
   Array.isArray(input.steps) || input.next === true || Array.isArray(input.done) || typeof input.active === 'string' || typeof input.failed === 'string'
 
-// The agent's items after a `step` call, or null when the call carries no list and no op.
+// The agent's items after a `step` call, or null when the call carries no list and no op. When one call closes two or
+// more steps that never had a start, no time is invented for them: they are marked `batch` and draw `–`.
 export function stepItems(prev: unknown, input: StepInput, now?: number): { items: AgentItem[]; unknown: string[] } | null {
   if (!hasItemOps(input)) return null
   const kept = itemsOf(prev)
-  return applyItemOps(parseSteps(input.steps, kept, now) ?? kept, input, now)
+  const out = applyItemOps(parseSteps(input.steps, kept, now) ?? kept, input, now)
+  if (now === undefined) return out
+  const unstarted = new Set(kept.filter(it => it.startedAt === undefined && !isEnded(it.status)).map(it => it.title.toLowerCase()))
+  const closed = out.items.filter(it => it.status === 'done' && it.startedAt === undefined && it.doneAt === now && unstarted.has(it.title.toLowerCase()))
+  if (closed.length >= 2) for (const it of closed) it.batch = true
+  return out
 }
 
 // The row's `3/6 · note` from the items: done ones, all of them, the active one's title.
@@ -192,6 +199,10 @@ export function timedItems(items: AgentItem[], run: { startedAt?: number; endedA
       return it
     }
     const out: AgentItem = { ...it }
+    if (out.batch) {
+      ends.push(out.doneAt)
+      return out
+    }
     if (out.startedAt === undefined) {
       const before = [...ends].reverse().find(e =>e !== undefined && (it.doneAt === undefined || e <= it.doneAt))
       const from = before ?? run.startedAt
@@ -214,7 +225,10 @@ export const itemElapsed = (it: AgentItem, now: number): number | null => {
   return null
 }
 
+const UNKNOWN_TIME = '–'
+
 const timeText = (it: AgentItem, now: number): string => {
+  if (it.batch && isEnded(it.status)) return UNKNOWN_TIME
   const ms = itemElapsed(it, now)
   return ms === null ? '' : fmtElapsed(ms)
 }

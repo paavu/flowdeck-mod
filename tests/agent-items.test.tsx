@@ -443,3 +443,61 @@ describe('agent items in the panel', () => {
     expect(d.svgs.filter((s: any) => Number(s.props.height) === 22).length).toBe(SIX.length)
   })
 })
+
+describe('steps closed in one batch call', () => {
+  const ALL = SIX.map(s => s.title)
+
+  test('one call closing two or more unstarted steps marks them batch; the started one and a lone close do not', () => {
+    const made = stepItems(undefined, { steps: SIX }, NOW)!.items
+    const batch = stepItems(made, { done: ALL }, NOW + 30_000)!.items
+    expect(batch.map(i => !!i.batch)).toEqual([false, true, true, true, true, true])
+    expect(batch[0]).toMatchObject({ startedAt: NOW, doneAt: NOW + 30_000 })
+    const lone = stepItems(made, { done: ['write tests'] }, NOW + 5000)!.items
+    expect(lone.some(i => i.batch)).toBe(false)
+    const stepwise = stepItems(stepItems(made, { next: true }, NOW + 5000)!.items, { next: true }, NOW + 9000)!.items
+    expect(stepwise.some(i => i.batch)).toBe(false)
+    expect(stepItems(made, { done: ALL }, undefined)!.items.some(i => i.batch)).toBe(false)
+  })
+
+  test('the flag survives a stored round trip and a later call', () => {
+    const batch = stepItems(stepItems(undefined, { steps: SIX }, NOW)!.items, { done: ALL }, NOW + 30_000)!.items
+    const again = stepItems(itemsOf(JSON.parse(JSON.stringify(batch))), { note: 'x', done: ['commit'] }, NOW + 40_000)!.items
+    expect(again.filter(i => i.batch).length).toBe(5)
+  })
+
+  test('terminal and desktop draw – for batch-closed steps and the time for the others', async ($, on) => {
+    const { clock } = engine(on)
+    await start($)
+    await spawn($)
+    await step($, { steps: SIX })
+    clock.now = NOW + 30_000
+    await step($, { done: ALL })
+    await fold($)
+    const t = await terminal($)
+    expect(t.text).toMatch(/read code\s+30s/)
+    for (const title of ALL.slice(1)) expect(t.text).toMatch(new RegExp(`${title}\\s+–`))
+    expect(t.text).not.toMatch(/write tests\s+0s/)
+    const d = await desktop($)
+    const kids = d.svgs.filter((s: any) => Number(s.props.height) === 22)
+    expect(String(kids[0].props.alt)).toBe('read code: Done 30s')
+    expect(String(kids[1].props.alt)).toBe('write tests: Done –')
+    expect(String(kids[1].props.source)).toMatch(/text-anchor="end"[^>]*>–</)
+    expect(String(kids[0].props.source)).toMatch(/text-anchor="end"[^>]*>30s</)
+  })
+
+  test('steps closed one at a time keep their own times', async ($, on) => {
+    const { clock } = engine(on)
+    await start($)
+    await spawn($)
+    await step($, { steps: SIX })
+    clock.now = NOW + 4000
+    await step($, { next: true })
+    clock.now = NOW + 11_000
+    await step($, { next: true })
+    await fold($)
+    const t = await terminal($)
+    expect(t.text).toMatch(/read code\s+4s/)
+    expect(t.text).toMatch(/write tests\s+7s/)
+    expect(t.text).not.toContain('–')
+  })
+})

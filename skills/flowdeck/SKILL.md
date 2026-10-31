@@ -110,6 +110,7 @@ Escalation order: a task that fails review on Sonnet goes to Opus careful (Opus 
 
 - Use the Agent tool with `subagent_type` = the tier agent name exactly as the Agent tool lists it (`flowdeck-careful` or `flowdeck:flowdeck-careful`). Run independent tasks in parallel in one message; chain dependent ones. Tasks that edit the same files must be chained with `after` (they never run in parallel); give every waiting task its `after`; independent tasks get none. The panel marks a planned task `ready` when everything in its `after` is done (and every task without `after`): launch every `ready` task at once, in parallel, then the next ones as they become ready.
 - Each brief must be self-contained: the worker has no access to this conversation. Include file paths, the decided design specs, constraints from CLAUDE.md that matter, and the exact verification expected.
+- Every brief starts with this line, at the very top: "Update your step list after each finished step, before starting the next." Workers that close all their steps in one call at the end leave the progress bar empty and every step at 0s.
 - Every brief ends with this line: "Before your final report, close your step list with `mcp__flowdeck__step`: every step `done` or `failed` (a skipped step too, with a note saying so); none left pending or active."
 - Keep briefs tight. Do not paste the whole plan; paste this task.
 - Do not implement in parallel with workers. While they run, prepare the next briefs or the review checklist.
@@ -123,7 +124,7 @@ For each returned task:
 2. Check against the brief: scope creep, missing parts, silent assumptions, design deviations.
 3. Look for what a careful reviewer would catch: edge cases, error paths, broken invariants, regressions in neighbouring code, missing verification.
 4. Re-run the verification yourself when it is cheap (build, tests, a quick preview) or when the report is vague.
-5. Check the run's row: a returned run that shows `Incomplete` (its step list not closed) is a defect. Return it to the worker with the open steps listed; if you verified the work is complete, tell the worker to close its list. Never accept it silently: the mod does not override Incomplete, and an accepted task whose run stays Incomplete reads `Incomplete · accepted`.
+5. Check the run's row: a returned run that shows `Incomplete` (its step list not closed) is a defect. A row whose steps show `–` for their time was closed in one batch call at the end, not as the work went: tell the worker to update its list after each finished step. Return an Incomplete run to the worker with the open steps listed; if you verified the work is complete, tell the worker to close its list. Never accept it silently: the mod does not override Incomplete, and an accepted task whose run stays Incomplete reads `Incomplete · accepted`.
 6. Outcome per task:
    - **Accept** (report it with `progress` `done: [<task number>]` and `notes: [{ task: <task number>, result, feedback }]`);
    - **Return** to the same or a higher tier with a precise list of defects (not a re-explanation of the task);
