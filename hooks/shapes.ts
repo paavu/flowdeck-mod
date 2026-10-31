@@ -14,7 +14,6 @@ export const PANEL_DEFAULT: Panel = {
   isUsageShown: true,
   // The reset lines count down to the reset unless the user switched to the exact time (the store key `usageRemaining` wins at session start).
   isUsageRemaining: true,
-  isPlansShown: true,
   isBandHidden: false,
   // On unless the user switched it off in this project (the store key `keepWarm` wins at session start).
   isKeepWarm: true,
@@ -31,7 +30,7 @@ export const PANEL_DEFAULT: Panel = {
   tab: 'active',
 }
 
-const TABS: readonly PanelTab[] = ['active', 'finished', 'plans', 'archive', 'trash']
+const TABS: readonly PanelTab[] = ['active', 'finished', 'archive', 'trash']
 
 type Obj = Record<string, unknown>
 const isObj = (v: unknown): v is Obj => !!v && typeof v === 'object' && !Array.isArray(v)
@@ -43,12 +42,12 @@ const strings = (v: unknown): string[] => (Array.isArray(v) ? v.filter((x): x is
 export function asPanel(v: unknown): Panel {
   const o = isObj(v) ? v : {}
   const d = PANEL_DEFAULT
-  // `isCompact` (the Collapse button, gone in 1.0.0029) is dropped like any field no longer used.
+  // `isCompact` (the Collapse button, gone in 1.0.0029) and `isPlansShown` (gone in 1.0.0035) are dropped like any field
+  // no longer used.
   return {
     isContextShown: bool(o.isContextShown, d.isContextShown),
     isUsageShown: bool(o.isUsageShown, d.isUsageShown),
     isUsageRemaining: bool(o.isUsageRemaining, d.isUsageRemaining),
-    isPlansShown: bool(o.isPlansShown, d.isPlansShown),
     isBandHidden: bool(o.isBandHidden, d.isBandHidden),
     // A panel held from before 1.0.0030 has no switch: keep warm is on.
     isKeepWarm: bool(o.isKeepWarm, d.isKeepWarm),
@@ -68,6 +67,7 @@ export function asPanel(v: unknown): Panel {
           ? { list: o.confirm.list, id: o.confirm.id }
           : null,
     autoOpenedFor: text(o.autoOpenedFor, d.autoOpenedFor),
+    // A panel held from before 1.0.0035 may have the Plans tab selected: it reads as Active, as any unknown tab does.
     tab: TABS.includes(o.tab as PanelTab) ? (o.tab as PanelTab) : d.tab,
   }
 }

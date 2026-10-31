@@ -120,7 +120,7 @@ export type ArchiveEntry = {
   agents?: ArchiveAgent[]
   /** Saved while the flow runs, with only the runs archived so far; the flow's next full save replaces it. */
   partial?: boolean
-  /** A finished plan's own entry (id `plan-<plan id>-<startedAt>-<project>`): the plan as it finished; no tasks or runs. */
+  /** A finished plan's own entry (id `plan-<plan id>-<startedAt>-<project>`), saved by a flowdeck before 1.0.0035 and still shown: the plan as it finished; no tasks or runs. */
   plan?: TaskPlan
 }
 
@@ -168,7 +168,6 @@ export type Panel = {
   isUsageShown: boolean
   /** The usage reset lines say the time left (true) or the exact 24-hour time (false); one global choice, stored under the engine-store key `usageRemaining`. */
   isUsageRemaining: boolean
-  isPlansShown: boolean
   isBandHidden: boolean
   /** Keep warm renews an idle session's prompt cache (default on); saved per project under the engine-store key `keepWarm`. */
   isKeepWarm: boolean
@@ -193,9 +192,9 @@ export type Panel = {
   tab: PanelTab
 }
 
-export type PanelTab = 'active' | 'finished' | 'plans' | 'archive' | 'trash'
+export type PanelTab = 'active' | 'finished' | 'archive' | 'trash'
 
-// The task plan, a model beside Flow for any task: stages of steps (ported from plan-progress 0.8.2).
+// A task plan as an older flowdeck saved it in the Archive: stages of steps (ported from plan-progress 0.8.2).
 export type StepStatus = 'pending' | 'active' | 'done' | 'error' | 'skipped'
 export type PlanSubstep = { title: string; status: StepStatus }
 export type PlanStep = { title: string; status: StepStatus; substeps: PlanSubstep[]; doneAt?: number }
@@ -250,7 +249,6 @@ declare module 'claude-code' {
       /** The session files read for open groups, at most 10. */
       archiveDetails: ArchiveDetail[]
       flowMeta: { startedAt: number; project: string } | null
-      plans: TaskPlan[]
       /** Why the band above the prompt last failed in this load (the panel's `band error` line), '' when it has not. */
       bandError: string
       /** The prompt cache's facts for this session, null until the main thread made a request (or a resume seeded them). */

@@ -81,7 +81,7 @@ export type ArchiveView = {
   /** A project folder holds the archive: sessions can move to the trash and back. */
   canMove: boolean
   flowView: (v: FlowView) => FlowDrawing
-  /** One plan drawn as the Plans section draws it; `kp` prefixes its keys, `at` is its clock. */
+  /** One archived plan's drawing; `kp` prefixes its keys, `at` is its clock. */
   plan: (pl: TaskPlan, kp: string, at: number) => RenderChildren
   on: {
     entry: (rec: ArchiveRecord, isOpen: boolean) => unknown
@@ -117,8 +117,8 @@ export function summaryLine(v: Pick<ArchiveView, 'fmt' | 'words'>, rec: ArchiveR
   return rec.missing ? `${line} · ${v.words.fileMissing}` : line
 }
 
-// An opened group's body: the session as it ended (its rows, latest completion first; a plan as the Plans section draws
-// it; the task list of a flow saved without runs), or why it is not there.
+// An opened group's body: the session as it ended (its rows, latest completion first; an archived plan's
+// drawing; the task list of a flow saved without runs), or why it is not there.
 function groupBody(v: ArchiveView, rec: ArchiveRecord, key: string): RenderChildren {
   const { Box, Text } = v.ui
   const d = v.details.find(x => x.list === v.list && x.id === rec.id)

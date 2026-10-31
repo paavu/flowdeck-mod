@@ -167,10 +167,10 @@ describe('linked session flow', () => {
     expect(state.ticked).toBe(true) // the clock ticker is set up after the registration
   })
 
-  test('a refused step tool registration still registers the plan tool, the command and the clock', async ($, on) => {
+  test('a refused step tool registration still registers the progress tool, the command and the clock', async ($, on) => {
     const state = engine(on, { refuseTool: 'step' })
     await start($)
-    expect(state.tools).toEqual(['progress', 'plan'])
+    expect(state.tools).toEqual(['progress'])
     expect(state.commands).toEqual(['flowdeck-agents'])
     expect(state.ticked).toBe(true)
   })

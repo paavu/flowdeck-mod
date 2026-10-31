@@ -138,7 +138,7 @@ const entry = (i: number) => ({
 // The held Archive list of these entries, as a load leaves it: one index record each, newest first (e1 ended last).
 const listsOf = (...entries: any[]) => ({ records: byNewest(entries.map(e => recordOf(parseSession(e)!, fileOf(e), 0))), trash: [], warnings: [] })
 
-const TOP = ['context', 'usage', 'tab-active', 'tab-finished', 'tab-plans', 'tab-archive', 'tab-trash', 'band']
+const TOP = ['context', 'usage', 'tab-active', 'tab-finished', 'tab-archive', 'tab-trash', 'band']
 const hasTop = async (p: any) => {
   for (const key of TOP) expect(await p.find({ type: 'Button', key })).toBeDefined()
 }
@@ -235,7 +235,6 @@ describe('a panel held from an older flowdeck', () => {
     ['usage', 'usage', undefined, p => p.find({ type: 'Button', key: 'usage', text: /▾ Usage/ }), p => p.find({ type: 'Button', key: 'usage', text: /▸ Usage/ })],
     ['band', 'band', undefined, p => p.find({ type: 'Button', key: 'band', text: /▾ Band/ }), p => p.find({ type: 'Button', key: 'band', text: /▸ Band/ })],
     ['finished tab', 'tab-finished', undefined, p => selected(p, 'Active (1)'), p => selected(p, 'Finished (1)')],
-    ['plans tab', 'tab-plans', undefined, p => selected(p, 'Active (1)'), p => selected(p, 'Plans (0)')],
     ['archive tab', 'tab-archive', undefined, p => selected(p, 'Active (1)'), p => p.find({ type: 'Button', key: `archive-${keyOf('e1')}` })],
     ['agent fold', 'agent-fold-w1', 'finished', p => p.find({ type: 'Button', key: 'agent-fold-w1', text: '▸' }), p => p.find({ type: 'Button', key: 'agent-fold-w1', text: '▾' })],
     // the newest group (e1) is open by default
@@ -278,20 +277,26 @@ describe('a failing part leaves the rest drawn', () => {
   test('the selected list that throws draws one dim line; the tabs, Context and Usage still draw', async ($, on) => {
     engine(on)
     holdOld(on)
-    // the reads themselves fail: the flow's start (only the Active list reads it) and the plans (the Plans list and count)
+    // the reads themselves fail: the flow's start (only the Active list reads it) and the Archive and Trash lists (their
+    // lists and counts; the Archive tab's press reads them too, so they fail only once the tab is selected)
     on('state.get', { plugin: 'flowdeck', key: 'flowMeta' }, () => ({ deny: 'meta down' }))
-    on('state.get', { plugin: 'flowdeck', key: 'plans' }, () => ({ deny: 'plans down' }))
+    let isListsDown = true
+    on('state.get', { plugin: 'flowdeck', key: 'archiveLists' }, (_$: any, e: any, next: any) => (isListsDown ? { deny: 'lists down' } : next(e)))
     for (const surface of SURFACES) {
+      isListsDown = true
       let p = await pane($, surface, 'active')
       expect(await p.find({ type: 'Text', text: 'Active could not be drawn' })).toBeDefined()
       await hasTop(p)
       // the count that could not be read is left out, the others stay
       expect(await p.find({ type: 'Button', key: 'tab-active', text: 'Active (1)' })).toBeDefined()
-      expect(await p.find({ type: 'Button', key: 'tab-plans', text: 'Plans' })).toBeDefined()
+      expect(await p.find({ type: 'Button', key: 'tab-archive', text: 'Archive' })).toBeDefined()
       expect(await p.find({ type: 'Text', text: /no context data yet/ })).toBeDefined()
       await p.unmount()
-      p = await pane($, surface, 'plans')
-      expect(await p.find({ type: 'Text', text: 'Plans could not be drawn' })).toBeDefined()
+      isListsDown = false
+      await showTab($, 'archive')
+      isListsDown = true
+      p = await pane($, surface)
+      expect(await p.find({ type: 'Text', text: 'Archive could not be drawn' })).toBeDefined()
       await hasTop(p)
       await p.unmount()
       await showTab($, 'active')
@@ -342,7 +347,7 @@ describe('the panel without a flow', () => {
     for (const surface of SURFACES) {
       let p = await pane($, surface)
       await hasTop(p)
-      for (const label of ['Active (0)', 'Finished (0)', 'Plans (0)', 'Archive (0)', 'Trash (0)']) expect(await p.find({ type: 'Button', text: label })).toBeDefined()
+      for (const label of ['Active (0)', 'Finished (0)', 'Archive (0)', 'Trash (0)']) expect(await p.find({ type: 'Button', text: label })).toBeDefined()
       expect(await p.find({ type: 'Text', text: /no context data yet/ })).toBeDefined()
       expect(await p.find({ type: 'Text', text: /no usage data yet/ })).toBeDefined()
       expect(await p.find({ type: 'Text', text: 'Nothing running or queued' })).toBeDefined()

@@ -3,7 +3,7 @@ import type { AgentRun } from '../types'
 import { STATE_COLOR } from './plan-view'
 
 // flowdeck's own bookkeeping calls: they never become the tool word
-export const HOUSEKEEPING: ReadonlySet<string> = new Set(['mcp__flowdeck__step', 'mcp__flowdeck__progress', 'mcp__flowdeck__plan'])
+export const HOUSEKEEPING: ReadonlySet<string> = new Set(['mcp__flowdeck__step', 'mcp__flowdeck__progress'])
 
 export type AgentState = { name: string; color: string }
 

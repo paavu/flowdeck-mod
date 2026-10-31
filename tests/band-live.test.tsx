@@ -39,6 +39,10 @@ const held = (on: any, key: string, value: unknown) =>
     return r?.value?.version > 0 ? r : { value: { value, version: r?.value?.version ?? 0 } }
   })
 
+// The held runs cannot be read while `isDown` says so.
+const agentsDown = (on: any, isDown: () => boolean) =>
+  on('state.get', { plugin: 'flowdeck', key: 'agents' }, async (_$: any, e: any, next: any) => (isDown() ? { deny: 'agents down' } : next(e)))
+
 const settle = () => new Promise(done => (globalThis as any).setTimeout(done, 30))
 const start = ($: any, surface: 'desktop' | 'terminal' = 'desktop') => $.session.start({ surface, isInteractive: true, cwd: '' } as any)
 const progress = async ($: any, input: Record<string, unknown>) => String((await $.tool.call({ tool: 'mcp__flowdeck__progress', ...input } as any)).result)
@@ -207,12 +211,12 @@ describe('the band when what is beneath it fails', () => {
 describe('a band that fails says why', () => {
   test('it gives way to what is below and logs the reason once, as a transcript line', async ($, on) => {
     let isDown = false
-    const { logs } = engine(on, { isClockDown: () => isDown })
+    const { logs } = engine(on)
+    agentsDown(on, () => isDown)
     await start($)
-    // No worker left running: the panel's clock tick would fail on the same clock outside the band.
+    // No worker left running: nothing outside the band reads the runs while they are down.
     await progress($, { title: 'Band fix', phase: 'delegate', tasks: PLAN })
-    await $.tool.call({ tool: 'mcp__flowdeck__plan', id: 'p1', title: 'Side plan', stages: [{ name: 'One', steps: [{ title: 'a' }, { title: 'b' }] }] } as any)
-    isDown = true // the clock the band reads for its open plan row fails from now on
+    isDown = true // the runs the band reads for its flow row fail from now on
     for (const s of SURFACES) {
       for (let i = 0; i < 3; i++) {
         const r = await rowOf($, s)
@@ -223,12 +227,13 @@ describe('a band that fails says why', () => {
     const lines = logs.filter(l => /band above the prompt could not be drawn/.test(l.text))
     expect(lines.length).toBe(1) // once per reason, however often the band redraws
     expect(lines[0]!.to).toBe('transcript')
-    expect(lines[0]!.text).toMatch(/^flowdeck: the band above the prompt could not be drawn: .*clock down/)
+    expect(lines[0]!.text).toMatch(/^flowdeck: the band above the prompt could not be drawn: .*agents down/)
     // The panel says it too, under its buttons, on both surfaces; the band itself never reads it.
     await settle()
+    isDown = false
     for (const s of SURFACES) {
       const p = await pane($, s)
-      expect(await p.find({ type: 'Text', text: /^band error: .*clock down/ })).toBeDefined()
+      expect(await p.find({ type: 'Text', text: /^band error: .*agents down/ })).toBeDefined()
       expect(await p.find({ type: 'Button', key: 'band' })).toBeDefined()
       await p.unmount()
     }
@@ -236,10 +241,10 @@ describe('a band that fails says why', () => {
 
   test('a reload clears the band error line; one that happens again is said again', async ($, on) => {
     let isDown = false
-    const { logs } = engine(on, { isClockDown: () => isDown })
+    const { logs } = engine(on)
+    agentsDown(on, () => isDown)
     await start($)
     await progress($, { title: 'Band fix', phase: 'delegate', tasks: PLAN })
-    await $.tool.call({ tool: 'mcp__flowdeck__plan', id: 'p1', title: 'Side plan', stages: [{ name: 'One', steps: [{ title: 'a' }] }] } as any)
     isDown = true
     await rowOf($, 'desktop')
     await settle()
@@ -256,7 +261,7 @@ describe('a band that fails says why', () => {
     expect(logs.filter(l => /could not be drawn/.test(l.text)).length).toBe(2)
     isDown = false
     const again = await pane($, 'terminal')
-    expect(await again.find({ type: 'Text', text: /^band error: .*clock down/ })).toBeDefined()
+    expect(await again.find({ type: 'Text', text: /^band error: .*agents down/ })).toBeDefined()
     await again.unmount()
   })
 

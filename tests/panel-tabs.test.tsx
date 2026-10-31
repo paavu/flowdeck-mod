@@ -7,13 +7,13 @@ import { fileOf } from './archive-files'
 import { showTab } from './tabs'
 import type { Tab } from './tabs'
 
-// The flowdeck group under Context and Usage: the tabs Active, Finished, Plans, Archive and Trash with their counts, the
+// The flowdeck group under Context and Usage: the tabs Active, Finished, Archive and Trash with their counts, the
 // Band button at the end, and the one list of the selected tab below them.
 
 const NOW = Date.UTC(2026, 9, 30, 13, 0)
 const HOUR = 3_600_000
 const SURFACES = ['terminal', 'desktop'] as const
-const TABS: Tab[] = ['active', 'finished', 'plans', 'archive', 'trash']
+const TABS: Tab[] = ['active', 'finished', 'archive', 'trash']
 
 function engine(on: any, opts: { store?: Record<string, unknown> } = {}) {
   const store = opts.store ?? {}
@@ -76,14 +76,13 @@ const entry = (i: number) => ({
 const recordsOf = (entries: any[], trashed = false) =>
   byNewest(entries.map(e => ({ ...recordOf(parseSession(e)!, fileOf(e), 0), ...(trashed ? { trashedAt: NOW, originalFile: fileOf(e) } : {}) })))
 
-// One of everything: a running run, a finished run, a queued task, a plan and a saved session.
+// One of everything: a running run, a finished run, a queued task and a saved session.
 async function everything($: any) {
   await start($)
   await progress($, { title: 'Ship', phase: 'delegate', tasks: [{ title: 'run a', tier: 'medium' }, { title: 'done b', tier: 'medium' }, { title: 'queued c', tier: 'light' }] })
   await spawn($, 'w2', 'done b')
   await complete($, 'w2')
   await spawn($, 'w1', 'run a')
-  await $.tool.call({ tool: 'mcp__flowdeck__plan', id: 'alpha', title: 'Alpha rollout', stages: [{ name: 'S', steps: [{ title: 'one' }] }] } as any)
 }
 
 // Everything a pane shows as words: its Texts, its drawings' alts and its Buttons' text.
@@ -97,7 +96,6 @@ const seen = async (p: any): Promise<string> => {
 const MARK: Record<Tab, RegExp> = {
   active: /queued c/,
   finished: /done b/,
-  plans: /Alpha rollout/,
   archive: new RegExp(`archive-${keyOf('e1')}`),
   trash: new RegExp(`trash-${keyOf('e9')}`),
 }
@@ -119,17 +117,43 @@ describe('the tabs', () => {
     for (const surface of SURFACES) {
       let p = await mount($, surface)
       expect((await p.find({ type: 'Text', text: 'Active (0)' }))?.props).toMatchObject({ bold: true, underline: true })
-      for (const tab of ['finished', 'plans', 'archive'] as const) {
+      for (const tab of ['finished', 'archive', 'trash'] as const) {
         const b = await p.find({ type: 'Button', key: `tab-${tab}` })
         expect(b?.props.dimColor).toBe(true)
       }
-      await p.press({ key: 'tab-plans' })
+      await p.press({ key: 'tab-trash' })
       await p.unmount()
       p = await mount($, surface)
-      expect((await p.find({ type: 'Text', text: 'Plans (0)' }))?.props).toMatchObject({ bold: true, underline: true })
-      expect(await p.find({ type: 'Text', text: 'No plans' })).toBeDefined()
+      expect((await p.find({ type: 'Text', text: 'Trash (0)' }))?.props).toMatchObject({ bold: true, underline: true })
+      expect(await p.find({ type: 'Text', text: 'Trash is empty' })).toBeDefined()
       await p.unmount()
       await showTab($, 'active')
+    }
+  })
+
+  test('there is no Plans tab: four tabs, none of them says Plans, on both surfaces', async ($, on) => {
+    engine(on)
+    await start($)
+    for (const surface of SURFACES) {
+      const p = await mount($, surface)
+      const keys = (await p.findAll({ type: 'Button' })).map((b: any) => String(b.props.key)).filter((k: string) => k.startsWith('tab-'))
+      expect(keys).toEqual(['tab-active', 'tab-finished', 'tab-archive', 'tab-trash'])
+      expect(await p.find({ type: 'Button', key: 'tab-plans' })).toBeUndefined()
+      expect(await seen(p)).not.toMatch(/Plans|No plans/)
+      await p.unmount()
+    }
+  })
+
+  test('a panel held from before 1.0.0035 with the Plans tab selected reads and draws as Active', async ($, on) => {
+    expect(asPanel({ tab: 'plans' }).tab).toBe('active')
+    expect('isPlansShown' in asPanel({ isPlansShown: false })).toBe(false)
+    engine(on)
+    held(on, 'panel', { ...PANEL_DEFAULT, tab: 'plans', isPlansShown: true })
+    for (const surface of SURFACES) {
+      const p = await mount($, surface)
+      expect((await p.find({ type: 'Text', text: 'Active (0)' }))?.props).toMatchObject({ bold: true, underline: true })
+      expect(await p.find({ type: 'Text', text: 'Nothing running or queued' })).toBeDefined()
+      await p.unmount()
     }
   })
 
@@ -194,7 +218,7 @@ describe('the tabs', () => {
       const row = (key: string) => walk(root).find(n => keyOfNode(n) === key)
       const keys = (n: any) => walk(n).map(keyOfNode).filter(Boolean)
       expect(keys(row('top-toggles'))).toEqual(['top-toggles', 'context', 'usage', 'band', 'keep-warm'])
-      expect(keys(row('tabs'))).toEqual(['tabs', 'tab-active', 'tab-finished', 'tab-plans', 'tab-archive', 'tab-trash'])
+      expect(keys(row('tabs'))).toEqual(['tabs', 'tab-active', 'tab-finished', 'tab-archive', 'tab-trash'])
       // the group comes after Context, Usage and Band
       const order = walk(root).map(keyOfNode)
       expect(order.indexOf('top-toggles')).toBeLessThan(order.indexOf('flowdeck-group'))
@@ -243,7 +267,7 @@ describe('one list at a time', () => {
     })
   }
 
-  test('the counts: running and queued, finished, plans, saved sessions; on both surfaces and every tab', async ($, on) => {
+  test('the counts: running and queued, finished, saved sessions; on both surfaces and every tab', async ($, on) => {
     engine(on, { store: { history: [entry(2), entry(1)] } })
     await everything($)
     for (const surface of SURFACES) {
@@ -252,7 +276,6 @@ describe('one list at a time', () => {
         const p = await mount($, surface)
         expect(await tabText(p, 'active')).toBe('Active (2)')
         expect(await tabText(p, 'finished')).toBe('Finished (1)')
-        expect(await tabText(p, 'plans')).toBe('Plans (1)')
         expect(await tabText(p, 'archive')).toBe('Archive (2)')
         expect(await tabText(p, 'trash')).toBe('Trash (0)')
         await p.unmount()
@@ -263,7 +286,7 @@ describe('one list at a time', () => {
   test('every count is (0) with nothing to show, and each tab says so', async ($, on) => {
     engine(on)
     await start($)
-    const empty: Record<Tab, string> = { active: 'Nothing running or queued', finished: 'No finished items yet', plans: 'No plans', archive: 'no archive yet', trash: 'Trash is empty' }
+    const empty: Record<Tab, string> = { active: 'Nothing running or queued', finished: 'No finished items yet', archive: 'no archive yet', trash: 'Trash is empty' }
     for (const surface of SURFACES) {
       for (const tab of TABS) {
         await showTab($, tab)

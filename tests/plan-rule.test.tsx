@@ -11,24 +11,20 @@ function engine(on: any, compose: () => unknown = () => ({ sections: [{ id: 'cor
 }
 
 const compose = ($: any) => $.prompt.compose({ model: 'm', promptModel: 'm', surfaces: ['terminal'], tools: [], outputStyle: null, traits: [] } as any)
-const ours = (r: any) => r.sections.filter((s: any) => s.id === 'flowdeck:plan-rule')
 
-describe('plan rule', () => {
-  test('adds exactly one plan-rule session section after the ones already composed, then the flow rule', async ($, on) => {
+// The Plans feature is gone (1.0.0035): the flow rule is flowdeck's only prompt section.
+describe('prompt rules without plans', () => {
+  test('adds only the flow rule after the sections already composed, no plan-rule', async ($, on) => {
     engine(on)
     const r = await compose($)
-    expect(ours(r).length).toBe(1)
-    expect(ours(r)[0].scope).toBe('session')
-    expect(r.sections.map((s: any) => s.id)).toEqual(['core', 'other:rule', 'flowdeck:plan-rule', 'flowdeck:flow-rule'])
+    expect(r.sections.map((s: any) => s.id)).toEqual(['core', 'other:rule', 'flowdeck:flow-rule'])
+    expect(r.sections.some((s: any) => s.id === 'flowdeck:plan-rule')).toBe(false)
   })
 
-  test('names the tool and the short ops, stays short and adds no gate', async ($, on) => {
+  test('no section names the plan tool', async ($, on) => {
     engine(on)
-    const text: string = ours(await compose($))[0].text
-    for (const word of ['mcp__flowdeck__plan', 'mcp__flowdeck__progress', 'next:true', 'done:', 'active:', 'failed:', 'needs_input', 'state:"done"', 'kind: "todo"', 'stages']) {
-      expect(text).toContain(word)
-    }
-    expect(text.length).toBeLessThan(1200)
+    const r = await compose($)
+    for (const s of r.sections) expect(String(s.text)).not.toContain('mcp__flowdeck__plan')
   })
 
   test('a failing composition below is not masked: the engine\'s sections are never replaced by ours alone', async ($, on) => {
@@ -40,6 +36,7 @@ describe('plan rule', () => {
       error = err
       return null
     })
+    const ours = (x: any) => x.sections.filter((s: any) => String(s.id).startsWith('flowdeck:'))
     expect(r === null || ours(r).length === 0 || (r as any).sections.length > 1).toBe(true)
     expect(error !== null || r === null || (r as any).sections.length > 1).toBe(true)
   })

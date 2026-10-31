@@ -60,7 +60,7 @@ First run:
 
 To see what the mod hooks and calls before you install it, clone the repository and run `claude plugin validate <folder>`: its `hooks:` and `calls:` lines list every event and engine call.
 
-**Overlapping mods.** flowdeck was built from savvy-flow, savvy-progress, context-bar and plan-progress and does what they do. Running them side by side gives two progress bands and two sets of tools; disable them first (`claude plugin disable <name>@<marketplace>`, or `/plugin`).
+**Overlapping mods.** flowdeck was built from savvy-flow, savvy-progress, context-bar and plan-progress and does what the first three do; plan-progress's separate plans are replaced by the flow's own task list. Running them side by side gives two progress bands and two sets of tools; disable them first (`claude plugin disable <name>@<marketplace>`, or `/plugin`).
 
 **Optional: panel language.** `auto` (default), `en` or `ru`: `claude plugin configure flowdeck@flowdeck-mod`, or `/plugin configure flowdeck@flowdeck-mod` in a session. `auto` follows Claude Code's `language` setting, then `LC_ALL`, `LC_MESSAGES` and `LANG`.
 
@@ -70,7 +70,9 @@ To see what the mod hooks and calls before you install it, clone the repository 
 claude plugin update flowdeck@flowdeck-mod
 ```
 
-then `/reload-plugins` in open sessions. Every release raises `version` in `.claude-plugin/plugin.json`, so `update` always sees the new one. The panel's top row shows the version of the code that is running (`v1.0.0034`); after an update without a reload it still names the old one. [CHANGELOG.md](CHANGELOG.md) lists what each version changed.
+then `/reload-plugins` in open sessions. Every release raises `version` in `.claude-plugin/plugin.json`, so `update` always sees the new one. The panel's top row shows the version of the code that is running (`v1.0.0035`); after an update without a reload it still names the old one. [CHANGELOG.md](CHANGELOG.md) lists what each version changed.
+
+From 1.0.0034 or earlier: the Plans tab and the `plan` tool are gone (1.0.0035). An old `plans.json` is ignored and never deleted, and a panel left on the Plans tab opens on Active.
 
 ## Uninstall
 
@@ -79,7 +81,7 @@ claude plugin uninstall flowdeck@flowdeck-mod
 claude plugin marketplace remove flowdeck-mod
 ```
 
-Saved flows and plans stay in each project's `.claude/flowdeck/` folder (git-ignored). Move that folder to your system's trash if you want them gone.
+Saved flows stay in each project's `.claude/flowdeck/` folder (git-ignored), with any `plans.json` an older version left there. Move that folder to your system's trash if you want them gone.
 
 ## How it works
 
@@ -91,7 +93,7 @@ flowchart LR
   workers -- "step tool:<br/>their own steps" --> mod
   mod --> band[Band above the prompt]
   mod --> panel[Side panel]
-  mod --> files[".claude/flowdeck/<br/>archive, plans"]
+  mod --> files[".claude/flowdeck/<br/>archive"]
 ```
 
 The session model is the orchestrator: it reads the code, splits the work into self-contained tasks, picks a worker tier for each, delegates, and reviews every result before accepting it. It reports the plan and each accepted task through the `progress` tool; each worker reports its own steps through the `step` tool. The mod draws all of it and saves finished flows per project.
@@ -124,11 +126,12 @@ Tasks that edit the same files are chained with `after` and never run in paralle
 |---|---|---|
 | `mcp__flowdeck__progress` | the main session | The flow's title and phase, its tasks (`title`, `tier`, `after`, `goal`), `add` for a new task, `done: [numbers]` for accepted tasks, `notes` for handoff notes, `finished` and `restart`. |
 | `mcp__flowdeck__step` | workers | A worker's own plan as a `steps` list, then `next`, `done`, `active`, `failed`. |
-| `mcp__flowdeck__plan` | the main session | A task plan for work outside a flow: stages of steps, or `kind: "todo"` for a flat list, moved with short operations. Calls from subagents are ignored. |
 
-### The prompt rules
+The flow's task list is the only task list: there is no separate plan tool.
 
-The mod adds two short sections to the system prompt of every session (about 1,600 characters together, no CLAUDE.md or setting needed): `flowdeck:plan-rule` says when to make a plan and how to move it; `flowdeck:flow-rule` says that every task goes through flowdeck, how to report it with `progress`, and to begin each worker's Agent description with `#<n> <title>`. Neither blocks an edit or a tool call. Disable the plugin to remove them.
+### The prompt rule
+
+The mod adds one short section to the system prompt of every session (about 950 characters, no CLAUDE.md or setting needed): `flowdeck:flow-rule` says that every task goes through flowdeck, how to report it with `progress`, and to begin each worker's Agent description with `#<n> <title>`. It blocks no edit or tool call. Disable the plugin to remove it.
 
 ### The band above the prompt
 
@@ -144,8 +147,6 @@ One row for the open flow:
 - **Cache chip**: `WARM` or `COLD` with the time left or the idle time and cost (see below).
 - **`×N`**: the number of agents and planned tasks; pressing it opens or closes the panel.
 - **`✕`**: hides the band only. The panel's `Band` button, or a new flow, brings it back.
-
-Up to two open plans (running, needing input or in error) draw as rows below the flow row.
 
 ### The prompt cache chip and card
 
@@ -178,20 +179,19 @@ Keeps the prompt cache warm through a long idle stretch so the next message read
 
 The panel opens with `/flowdeck-agents`, the band's `×N` button, or by itself when the first worker of a flow starts.
 
-**Top row**: `Context`, `Usage`, `Band` and `Keep warm (on)` / `Keep warm (off)`, with the running version (`v1.0.0034`) at the far end. Context and Usage fold their sections and remember the choice; Band shows or hides the band.
+**Top row**: `Context`, `Usage`, `Band` and `Keep warm (on)` / `Keep warm (off)`, with the running version (`v1.0.0035`) at the far end. Context and Usage fold their sections and remember the choice; Band shows or hides the band.
 
 | Section | Shows |
 |---|---|
 | Context | The context window as a stacked bar by category, tokens per category and where auto-compaction runs. Folded, it keeps the head line and the bar. |
 | Usage | The five-hour and weekly limits: a bar that drains with use, percent left, an even-pace mark, a forecast to the reset (`on pace`, or when the limit would run out), and the reset as time left (`Resets in 2h 20m`). The `◷` button switches to the exact time (`Resets at 14:40`) for all projects. |
 
-**Tabs**: `Active (n)`, `Finished (n)`, `Plans (n)`, `Archive (n)`, `Trash (n)`. One list shows at a time; each count is live.
+**Tabs**: `Active (n)`, `Finished (n)`, `Archive (n)`, `Trash (n)`. One list shows at a time; each count is live.
 
 | Tab | Lists |
 |---|---|
 | Active | The flow's cost, tokens and time, then the running workers (newest first) and the queued tasks in plan order. |
 | Finished | Done, Error and Incomplete runs and `Accepted · no worker run` rows, latest first. Done and Error rows have an archive icon (`⤓`). |
-| Plans | The `plan` tool's plans with state and percent; `Clear finished` clears done plans from the list. |
 | Archive | Saved sessions of this project, newest first, one foldable row each. |
 | Trash | Sessions moved to the trash, with `Restore` and `Empty Trash (n)`. |
 
@@ -251,7 +251,7 @@ There are no Start or Finish buttons.
   <img alt="The Trash tab: Empty Trash (2) and two trashed sessions, each with Restore" src="docs/images/panel-trash-light.png" width="520">
 </picture>
 
-- **Archive**: one file per saved session (a flow, or a finished plan) in `.claude/flowdeck/archive/`, listed by `archive-index.json`. The list draws from the index alone; a session's file is read only when its row is opened. The archive icon (`⤓`) on a finished row archives it and every older finished row early, while the flow runs.
+- **Archive**: one file per saved session (a flow, or a finished plan an older version saved) in `.claude/flowdeck/archive/`, listed by `archive-index.json`. The list draws from the index alone; a session's file is read only when its row is opened. The archive icon (`⤓`) on a finished row archives it and every older finished row early, while the flow runs.
 - **Move to trash** (`✕` on a session row): asks first, then copies the session to `.claude/flowdeck/.trash/` and hides it from the Archive. Nothing is erased.
 - **Restore**: asks first, then moves the session back to the Archive.
 - **Empty Trash (n)**: asks `Erase n sessions for good? This cannot be undone.` with `Erase` / `Cancel`, then erases each trashed session's files permanently, with no system trash and no undo. This is the only place flowdeck deletes a file. It erases only files whose names the archive itself gives the trashed sessions, directly inside `.trash/` or `archive/`, never a link, one file at a time; a session that cannot be erased whole stays in the Trash and the tab says how many failed.
@@ -275,10 +275,9 @@ All times are 24-hour `HH:MM`.
 
 | File | Holds |
 |---|---|
-| `archive/<key>-<start>.json` | One saved session: a flow (up to 60 runs, 12 steps per run, 100 tasks with their notes) or a finished plan |
+| `archive/<key>-<start>.json` | One saved session: a flow (up to 60 runs, 12 steps per run, 100 tasks with their notes), or a finished plan an older version saved |
 | `archive-index.json` | One small record per session (about 330 bytes); the Archive tab draws from it |
 | `flow-live.json` | Each running session's open flow, for restoring it after a restart |
-| `plans.json`, `plans-extra-<session>.json` | The `plan` tool's plans, up to 3 per session |
 | `.trash/` | Copies of trashed sessions and `trash-index.json`; `.trash/damaged/` keeps an index that could not be parsed before it is rebuilt |
 | `history*.json`, `archive-migrated.json` | The archive format before 1.0.0025, read once by a migration and never written again |
 
@@ -296,17 +295,18 @@ flowdeck makes **no network calls of its own**: there is no `fetch`, no HTTP and
 | Processes | `$.process.run`, only from `Empty Trash` (`eraseSessionFile` in `hooks/archive-store.ts`): `unlink <file>` on macOS and Linux, `powershell.exe -NoProfile -NonInteractive -Command Remove-Item -LiteralPath …` on Windows (the path passed in the environment). No shell, one file per call, 15-second timeout. |
 | Files written | Only under `<project>/.claude/flowdeck/` (`$.fs.write`): the files listed above and the folder's `.gitignore`. |
 | Files read | The same folder (`$.fs.read`, `$.fs.list`, `$.fs.stat`, `$.fs.exists`). |
-| Session data | Context breakdown and rate limits (`$.session.usage`), the session's model and id, agent launches with their description and prompt (the first ~600 characters of a worker's prompt become its brief), the name of each tool a worker calls (the live `Running · <tool>` word), TodoWrite, TaskCreate, Agent, ExitPlanMode and AskUserQuestion calls, permission requests (to show `Needs approval`), whether a prompt was typed by the user (keep warm's count), turn usage (tokens and cost), and the transcript path from `SessionStart` (kept to recognise the session after a restart). |
+| Session data | Context breakdown and rate limits (`$.session.usage`), the session's model and id, agent launches with their description and prompt (the first ~600 characters of a worker's prompt become its brief), the name of each tool a worker calls (the live `Running · <tool>` word), TodoWrite, TaskCreate and Agent calls, permission requests (to show `Needs approval`), whether a prompt was typed by the user (keep warm's count), turn usage (tokens and cost), and the transcript path from `SessionStart` (kept to recognise the session after a restart). |
 | Settings and env | `language` from Claude Code's settings, `LC_ALL`, `LC_MESSAGES`, `LANG`; only to pick the panel language. |
-| System prompt | Adds the two rules described in [The prompt rules](#the-prompt-rules). |
+| System prompt | Adds the rule described in [The prompt rule](#the-prompt-rule). |
 
 What it saves (task titles, goals, briefs, results and feedback, costs and times) is what the user and the orchestrator wrote during the session. It stays in the project folder, git-ignored.
 
 ## Known limits
 
 - The terminal text is English only; the `ru` language covers part of the panel.
-- No sounds, and plan-progress's hover and clock overlays are not ported.
-- No edit gate: work is never blocked for lack of a plan.
+- No sounds.
+- No edit gate: work is never blocked by the mod.
+- No separate plans (removed in 1.0.0035): the flow's task list is the only task list. A `plans.json` or `plans-extra-<session>.json` an older version left in `.claude/flowdeck/` is ignored and never deleted; plans an older version saved to the Archive still show there.
 - A worker still running when its flow is saved is kept as `Running at finish`; what it spends after that is not recorded.
 - Handoff notes sent after a flow finished are ignored: send `result` and `feedback` with the `done` that accepts the task.
 - The archive index is one file: past about 7,500 sessions it warns, and past 3,900,000 bytes it can no longer be written (the session files are kept). Index volumes would fix this; they are not built.
@@ -345,7 +345,7 @@ To run your working copy, add the folder as a marketplace (`claude plugin market
 | Path | What |
 |---|---|
 | `hooks/register.tsx` | The hooks module: events, tools, the band and the panel |
-| `hooks/*.ts`, `hooks/*.tsx` | Pure parts: archive store and index, cache and keep warm, notes, plans, tasks, usage, context |
+| `hooks/*.ts`, `hooks/*.tsx` | Pure parts: archive store and index, cache and keep warm, notes, archived plans, tasks, usage, context |
 | `skills/flowdeck/SKILL.md`, `agents/` | The orchestrator skill and the five worker agents |
 | `tests/` | The suite (`claude plugin test .`) |
 | `types/index.d.ts` | The `$.state` contract |
@@ -365,7 +365,7 @@ flowdeck is MIT-licensed: see [LICENSE](LICENSE). It is built from these MIT-lic
 
 - savvy-flow and savvy-progress (claude-kit, johnnyvizz): the orchestrated flow, the worker agents, the band and the agents panel
 - context-bar (claude-code-mods, Hamza Zafar): the context window section
-- plan-progress (zycck-mods, Kirill Serditov): the plan model and the `plan` tool
+- plan-progress (zycck-mods, Kirill Serditov): the plan model and its drawing, used for plans an older version archived
 - ribbon (RoboNuggets): the prompt-cache WARM/COLD idea and its cost method, reimplemented
 
 Keep warm's renewal method follows the idea of Cache Bell (claude-mods.com/cache-bell); no code was taken from it.

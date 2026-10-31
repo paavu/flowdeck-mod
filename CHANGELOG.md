@@ -2,6 +2,12 @@
 
 Versions are `M.m.xxxx`; every build bumps the 4-digit build number. Details and rulings: `docs/ledger.md`, `docs/design.md`.
 
+## 1.0.0035 (2026-10-31)
+- Plans removed: the flow's task list (Active, Finished, Archive, Trash) is the only task list. The `mcp__flowdeck__plan` tool, the Plans tab and its `Clear finished`, the plan rows in the band, the `flowdeck:plan-rule` prompt section and the plan-mode (`ExitPlanMode`) and question (`AskUserQuestion`) hooks are gone; the tab row reads `Active`, `Finished`, `Archive`, `Trash`.
+- An existing `.claude/flowdeck/plans.json` or `plans-extra-<session>.json`, and plans kept in the mod store, are no longer read or written and are never deleted; done plans other sessions left are no longer archived at the start. Plans an older version saved to the Archive still show there, drawn as before.
+- A panel held from an older version with the Plans tab selected opens on Active; its `isPlansShown` field is dropped.
+- SKILL.md no longer points to the plan tool; README, the design notes and the screenshots follow.
+
 ## 1.0.0034 (2026-10-31)
 - Public release on GitHub (https://github.com/paavu/flowdeck-mod) under the MIT license: LICENSE, SECURITY.md, CONTRIBUTING.md and a `.gitignore`; NOTICE.md lists each source mod's license and adds Cache Bell (keep warm's renewal method).
 - README.md rewritten for new users: requirements (Claude Code 2.1.295 or later), install from GitHub, update, uninstall, every feature, configuration and data, privacy (what the mod reads, writes and runs), known limits, troubleshooting, development.

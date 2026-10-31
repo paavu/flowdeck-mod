@@ -1,14 +1,14 @@
 import { atom, read, update } from 'claude-code'
 import type { Elements, EngineInterface, Register, RenderChildren } from 'claude-code'
 
-import type { AgentRun, ArchiveDetail, ArchiveEntry, ArchiveLists, ArchiveRecord, Flow, Panel, PanelTab, Phase, PlannedTask, PlanStage, Reading, Samples, TaskPlan, UsageWindow } from '../types'
+import type { AgentRun, ArchiveDetail, ArchiveEntry, ArchiveLists, ArchiveRecord, Flow, Panel, PanelTab, Phase, PlannedTask, Reading, Samples, TaskPlan, UsageWindow } from '../types'
 import { derive, finishItems, hasItemOps, ITEM_H, itemAlt, itemLine, itemsOf, itemSvg, noteSvg, stepItems, timedItems } from './agent-items'
 import type { StepInput } from './agent-items'
 import { agentState, HOUSEKEEPING, isComplete, isIncomplete, isLive, isSettled, markOf, progressOf, splitHead, stateText, stepCount } from './agent-state'
 import { contextRows, contextSvg, toReading } from './context'
-import { isWorthKeeping, keyOf, planEntry, snapshot, VOLUME_MAX } from './archive'
+import { isWorthKeeping, keyOf, snapshot } from './archive'
 import { INDEX_FILE, parseIndexFile, recordOf, TRASH_DIR, TRASH_INDEX } from './archive-index'
-import { dataDir, emptyTrash, getFile, listing, loadArchive, parseJson, readSession, restoreSession, saveSession, saveToStore, trashSession, writeData } from './archive-store'
+import { dataDir, emptyTrash, getFile, loadArchive, parseJson, readSession, restoreSession, saveSession, saveToStore, trashSession } from './archive-store'
 import type { Emptied, Io, Moved } from './archive-store'
 import { archiveSection, groupKey, isGroupOpen } from './archive-view'
 import type { ArchiveWords, FlowDrawing, FlowView, Planned } from './archive-view'
@@ -17,8 +17,8 @@ import { applyNotes, briefOf, cleanText, fallbackBrief, hasNote, NOTE_ICON, NOTE
 import type { TaskNote } from './notes'
 import { sortNewest } from './order'
 import { doneText } from './time'
-import { importPlan, isFinished, isStoredStep, normalize, percent, PLAN_ID, placeBar, planId, str, where } from './plan'
-import { planBandSvg, planBandText, planRows, planSvg, STATE_COLOR, stateLabel } from './plan-view'
+import { percent, where } from './plan'
+import { planRows, planSvg, STATE_COLOR, stateLabel } from './plan-view'
 import { acceptedOf, acceptedOnly, allTasksDone, cleanAfter, linkRuns, norm, shortTitle, taskOf, taskTag, unstarted, workerTier } from './tasks'
 import type { TaskLike } from './tasks'
 import { ARCHIVE_PAGE, asAgents, asCacheFacts, asCacheFold, asCacheTick, asDetails, asFlow, asKeepWarm, asLists, asLive, asMeta, asNow, asPanel, asReading, asUsage, LIVE_DEFAULT, PANEL_DEFAULT } from './shapes'
@@ -41,7 +41,6 @@ const now = atom({ plugin: 'flowdeck', key: 'now' } as const, 0)
 const archiveLists = atom({ plugin: 'flowdeck', key: 'archiveLists' } as const, { records: [], trash: [], warnings: [] } as ArchiveLists)
 const archiveDetails = atom({ plugin: 'flowdeck', key: 'archiveDetails' } as const, [] as ArchiveDetail[])
 const flowMeta = atom({ plugin: 'flowdeck', key: 'flowMeta' } as const, null as { startedAt: number; project: string } | null)
-const plans = atom({ plugin: 'flowdeck', key: 'plans' } as const, [] as TaskPlan[])
 // Why the band above the prompt last failed in this load, '' when it has not; the panel shows it, the band never reads it.
 const bandError = atom({ plugin: 'flowdeck', key: 'bandError' } as const, '')
 // The prompt cache (cache.ts): its facts, the card's open-or-folded choice, and the texts last shown (the band's minute tick).
@@ -78,9 +77,6 @@ const updateAgents = async ($: EngineInterface, change: (list: AgentRun[]) => Ag
     const next = change(was)
     return next === was ? prev : next
   }))
-const readPlans = async ($: EngineInterface): Promise<TaskPlan[]> => asPlans(await read($, plans))
-const updatePlans = async ($: EngineInterface, change: (list: TaskPlan[]) => TaskPlan[]): Promise<TaskPlan[]> =>
-  asPlans(await update($, plans, prev => change(asPlans(prev))))
 const readMeta = async ($: EngineInterface): Promise<Meta | null> => asMeta(await read($, flowMeta))
 const updateMeta = async ($: EngineInterface, change: (m: Meta | null) => Meta | null): Promise<Meta | null> =>
   asMeta(await update($, flowMeta, prev => {
@@ -111,10 +107,7 @@ const updateKeepWarm = async ($: EngineInterface, change: (k: KeepWarm) => KeepW
 
 const TOOL = 'mcp__flowdeck__progress'
 const STEP_TOOL = 'mcp__flowdeck__step'
-const PLAN_TOOL = 'mcp__flowdeck__plan'
 const TICK_MS = 5000
-const PLAN_RULE = `# Progress plans
-A task needing more than ~3 edits or commands gets a plan via ${PLAN_TOOL}: create it once with the full breakdown (2-7 stages of steps {title}, or kind: "todo" for one flat list; titles of at most 4 words, in the user's language; one id per task; the first open step becomes active). Move it with short calls: {id, next:true}, {id, done:["A"], active:"B"}, {id, failed:"B", note}, {id, state:"needs_input", note} before asking the user, {id, state:"done"} to finish. When the plan changes, resend stages under the same id. The tasks themselves always go to ${TOOL} (the flow rule), never into a second plan of the same work. No edit is ever blocked for lack of a plan.`
 // Every task goes through flowdeck: this rule is in every session's system prompt, so the mod alone sets it.
 const FLOW_RULE = `# flowdeck flows
 Every task goes through flowdeck: report it with ${TOOL} (load it with ToolSearch \`select:${TOOL}\` when it is deferred; a flowdeck worker reports only its own steps, with ${STEP_TOOL}). Send the plan once: title, \`tasks\` [{title, tier, after, goal}] numbered from 1 (tasks that edit the same files are chained with \`after\`; independent ones get none), phase "delegate". Add each new task with \`add\` (goal too); send \`done: [numbers]\` as tasks are accepted, with \`notes: [{task, result, feedback}]\`. goal (the user's request), result and feedback are the task row's handoff note, plain text; its brief is your Agent prompt. Begin every worker's Agent description with \`#<n> <title>\`. Never leave a task unreported. A flow finishes by itself once every task is done and no worker runs; send \`finished: true\` only when the user asks to end it.`
@@ -174,7 +167,6 @@ const STRINGS = {
     noFinished: 'No finished items yet',
     started: 'started',
     noSteps: 'No steps reported yet',
-    noPlans: 'No plans',
     untitled: 'Untitled',
     noArchive: 'no archive yet',
     trashEmpty: 'Trash is empty',
@@ -228,7 +220,6 @@ const STRINGS = {
     noFinished: 'Завершённых пока нет',
     started: 'начат',
     noSteps: 'Шагов пока нет',
-    noPlans: 'Планов нет',
     untitled: 'Без названия',
     noArchive: 'архив пока пуст',
     trashEmpty: 'Корзина пуста',
@@ -260,7 +251,7 @@ let lang: Lang = 'en'
 const tr = () => STRINGS[lang]
 // The session's working folder, the project an archive entry names; set the same way.
 let project = ''
-// The session the task plans and the flow's record are saved under; empty when the engine names none.
+// The session the flow's record is saved under; empty when the engine names none.
 let sessionId = ''
 // The session's transcript file, when classic.SessionStart named it (kept in the flow's record).
 let transcript = ''
@@ -803,9 +794,6 @@ const statusMark = (x: number, y: number, status: string, color: string): string
 const svg = (W: number, H: number, body: string): string =>
   `<svg xmlns="http://www.w3.org/2000/svg" width="${W}" height="${H}" viewBox="0 0 ${W} ${H}">${PANE_CSS}${CRAB_CSS}${body}</svg>`
 
-// A plan row's alt text in the band; the band's handler has its own `percent`.
-const planAlt = (pl: TaskPlan): string => `${pl.title}: ${stateLabel(pl)}, ${percent(pl, where(pl))}%`
-
 // The flow's header: the three tiles only. The flow's title is never shown in the panel (it is named after the first request).
 const HEADER_H = 44
 const headerSvg = (W: number, t: ReturnType<typeof totals>): string => {
@@ -1047,7 +1035,7 @@ async function autoOpen($: EngineInterface, key: string): Promise<void> {
   void $.ui.open({ id: PANE, title: tr().pane })
 }
 
-// The engine calls archive-store.ts makes (the plans' files use them too): `$` itself never crosses an import.
+// The engine calls archive-store.ts makes: `$` itself never crosses an import.
 const io = ($: EngineInterface): Io => ({
   read: path => $.fs.read(path),
   write: (path, text) => $.fs.write(path, text),
@@ -1250,29 +1238,6 @@ const pressArchive = ($: EngineInterface, id: string): Promise<unknown> => {
   return run
 }
 
-// The finished plans kept in the archive this session, so one is saved again only once it changed (reopened and done again).
-const archivedPlans = new Set<string>()
-const planKey = (p: TaskPlan): string => `${p.id}\n${p.startedAt}\n${p.endedAt ?? ''}`
-
-// Every place a plan becomes done calls this: the plan is saved as its own Archive entry, after the archive saves under
-// way, on the flows' path; saving it again replaces the entry. True when it was kept. Never throws into the tool call,
-// the turn or the press.
-function archivePlan($: EngineInterface, plan: TaskPlan): Promise<boolean> {
-  if (plan.state !== 'done') return Promise.resolve(false)
-  if (archivedPlans.has(planKey(plan))) return Promise.resolve(true)
-  const run = archiving.then(async () => {
-    try {
-      const isKept = await saveArchive($, planEntry(plan, project, await $.clock.now()))
-      if (isKept) archivedPlans.add(planKey(plan))
-      return isKept
-    } catch {
-      return false
-    }
-  })
-  archiving = run.catch(() => {})
-  return run
-}
-
 type Meta = { startedAt: number; project: string }
 const isSameMeta = (a: Meta | null, b: Meta | null): boolean => !!a && !!b && a.startedAt === b.startedAt && a.project === b.project
 
@@ -1363,135 +1328,7 @@ async function keepBrief($: EngineInterface, id: string, prompt: unknown, descri
   await updateAgents($, l => l.map(a => (a.id === id ? { ...a, brief } : a)))
 }
 
-type SavedPlans =Record<string, TaskPlan[]>
-
-const isStoredStage = (s: unknown): s is PlanStage =>
-  !!s && typeof s === 'object' && typeof (s as { name?: unknown }).name === 'string' && Array.isArray((s as { steps?: unknown }).steps) && (s as { steps: unknown[] }).steps.every(isStoredStep)
-
-// The stored plans by session; anything that is not an object of plan arrays reads as empty.
-// A broken stage is dropped; a plan left with none of the stages it had is dropped too.
-function parsePlans(v: unknown): SavedPlans {
-  if (!v || typeof v !== 'object' || Array.isArray(v)) return {}
-  const out: SavedPlans = {}
-  for (const [sid, list] of Object.entries(v as Record<string, unknown>)) {
-    if (!Array.isArray(list)) continue
-    const valid = list.flatMap((p): TaskPlan[] => {
-      if (!p || typeof p !== 'object' || typeof p.id !== 'string' || !Array.isArray(p.stages) || typeof p.startedAt !== 'number') return []
-      const stages = (p.stages as unknown[]).filter(isStoredStage)
-      return stages.length || !p.stages.length ? [{ ...(p as TaskPlan), stages }] : []
-    })
-    if (valid.length) out[sid] = valid
-  }
-  return out
-}
-
-// The held plans list, validated as the stored plans are; a plan without a title gets an empty one.
-const asPlans = (v: unknown): TaskPlan[] =>
-  (Array.isArray(v) ? (parsePlans({ list: v }).list ?? []) : []).map(p => (typeof p.title === 'string' ? p : { ...p, title: '' }))
-
 const isPlansObject = (v: unknown): v is Record<string, unknown> => !!v && typeof v === 'object' && !Array.isArray(v)
-
-// This session's plans set in; every other session's entry stays exactly as it was, one that does not parse too. None is
-// ever dropped for age: only this session's own key goes when its list is empty.
-const mergePlans = (all: Record<string, unknown>, list: TaskPlan[]): Record<string, unknown> => {
-  const next = { ...all }
-  if (list.length) next[sessionId] = list
-  else delete next[sessionId]
-  return next
-}
-
-// A session's own plans file, when plans.json cannot take its plans: `plans-extra-<session id>.json`, the id's letters,
-// digits and '-' as they are and any other character as `_` and its four hex digits, so two sessions never share a name.
-const plansSide = (sid: string): string => `plans-extra-${sid.replace(/[^A-Za-z0-9-]/g, c => `_${c.charCodeAt(0).toString(16).padStart(4, '0')}`)}.json`
-
-// The session whose plans live in their side file: from then on only that file is written for it, so it is the newest copy.
-let plansAside = ''
-
-// plans.json takes this session's plans when it is missing or reads as an object of sessions and stays under the limit; one
-// that cannot be read, does not parse, may be there or would pass the limit is never written. The plans then go to the
-// session's side file, never over one that cannot be read or parsed. False when neither could take them.
-async function savePlansToProject($: EngineInterface, list: TaskPlan[]): Promise<boolean> {
-  const dir = dataDir(project)
-  if (plansAside !== sessionId) {
-    const got = await getFile(io($), `${dir}/plans.json`)
-    const raw = got.state === 'ok' ? parseJson(got.text) : got.state === 'missing' ? {} : undefined
-    if (isPlansObject(raw) && (await writeData(io($), dir, 'plans.json', mergePlans(raw, list), VOLUME_MAX))) return true
-  }
-  const file = plansSide(sessionId)
-  const side = await getFile(io($), `${dir}/${file}`)
-  if (side.state === 'unreadable' || (side.state === 'ok' && !Array.isArray(parseJson(side.text)))) return false
-  if (!(await writeData(io($), dir, file, list, VOLUME_MAX))) return false
-  plansAside = sessionId
-  return true
-}
-
-// This session's saved plans: its side file (the newest copy when there is one), else its entry in plans.json, else the store's.
-async function loadPlans($: EngineInterface): Promise<TaskPlan[]> {
-  plansAside = ''
-  if (project) {
-    const side = await getFile(io($), `${dataDir(project)}/${plansSide(sessionId)}`)
-    const raw = side.state === 'ok' ? parseJson(side.text) : undefined
-    if (Array.isArray(raw)) {
-      plansAside = sessionId
-      return parsePlans({ [sessionId]: raw })[sessionId] ?? []
-    }
-    const got = await getFile(io($), `${dataDir(project)}/plans.json`)
-    const all = got.state === 'ok' ? parseJson(got.text) : undefined
-    if (isPlansObject(all) && sessionId in all) return parsePlans(all)[sessionId] ?? []
-  }
-  return parsePlans(await $.store.get('plans').catch(() => undefined))[sessionId] ?? []
-}
-
-// Re-reads the project file first so other sessions' plans stay; a missing file starts empty (plans are not imported).
-// Without a project folder, or when no project file can take them, the store is used: there a failed read skips the write rather than overwrite.
-async function savePlans($: EngineInterface, list: TaskPlan[]): Promise<void> {
-  sessionId = (await currentSessionId($)) || sessionId
-  if (!sessionId) return
-  try {
-    if (project && (await savePlansToProject($, list))) return
-    const all: unknown = await $.store.get('plans')
-    await $.store.set('plans', mergePlans(isPlansObject(all) ? all : {}, list)).catch(() => {})
-  } catch {
-    // A failing store costs the save, not the call.
-  }
-}
-
-// A plan left running with every step finished is done once the main turn ends.
-async function closeFinishedPlans($: EngineInterface): Promise<void> {
-  const list = await readPlans($)
-  const isOpen = (p: TaskPlan) => p.state === 'running' && p.stages.some(s => s.steps.length) && p.stages.every(s => s.steps.every(st => isFinished(st.status)))
-  if (!list.some(isOpen)) return
-  const at = await $.clock.now()
-  const closed = new Set<string>()
-  const next = await updatePlans($, prev =>
-    prev.map(p => {
-      if (!isOpen(p)) return p
-      closed.add(p.id)
-      return { ...p, state: 'done' as const, endedAt: at }
-    }),
-  )
-  await savePlans($, next)
-  for (const p of next) if (closed.has(p.id)) await archivePlan($, p)
-}
-
-// Clear finished: each done plan is archived first (one saved already is not saved again), and only the plans the archive
-// kept leave the list; one whose save failed stays. Never throws into the press.
-async function clearFinishedPlans($: EngineInterface): Promise<void> {
-  try {
-    const kept = new Set<string>()
-    for (const p of (await readPlans($)).filter(pl => pl.state === 'done')) if (await archivePlan($, p)) kept.add(planKey(p))
-    if (!kept.size) return
-    await savePlans($, await updatePlans($, prev => prev.filter(p => !(p.state === 'done' && kept.has(planKey(p))))))
-  } catch {
-    // A failing store leaves the plans where they are.
-  }
-}
-
-const planLine = (p: TaskPlan): string => {
-  const w = where(p)
-  const active = p.stages.flatMap(s => s.steps).find(st => st.status === 'active')
-  return `${p.id}: ${w.pos}/${w.total}, ${p.state}${active ? `, active "${active.title}"` : ''}`
-}
 
 // ---------------------------------------------------------------------------
 // The flow's lifecycle: it starts by itself (startFlow), finishes by itself (autoFinish, idleFinish), is kept in
@@ -1645,30 +1482,6 @@ async function adoptLive($: EngineInterface, cur: string): Promise<void> {
     await sortLive($, cur, closed)
   } catch {
     // A failing clock, store or fs leaves the panel as it is; the next start sorts it out.
-  }
-}
-
-// The finished plans other sessions left (plans.json, their plans-extra files) that the archive does not hold yet are
-// archived as this session's are; running plans of other sessions are left alone, and no plans file is written.
-async function collectPlans($: EngineInterface): Promise<void> {
-  try {
-    if (!project) return
-    const known = await archivedIds($)
-    if (!known) return
-    const dir = dataDir(project)
-    const found: TaskPlan[] = []
-    const got = await getFile(io($), `${dir}/plans.json`)
-    const all = got.state === 'ok' ? parseJson(got.text) : undefined
-    if (isPlansObject(all)) for (const [sid, list] of Object.entries(parsePlans(all))) if (sid !== sessionId) found.push(...list)
-    for (const name of (await listing(io($), dir)) ?? []) {
-      if (!/^plans-extra-.+\.json$/.test(name) || name === plansSide(sessionId)) continue
-      const side = await getFile(io($), `${dir}/${name}`)
-      const raw = side.state === 'ok' ? parseJson(side.text) : undefined
-      if (Array.isArray(raw)) found.push(...(parsePlans({ side: raw }).side ?? []))
-    }
-    for (const p of found) if (p.state === 'done' && !known.has(planEntry(p, project, 0).id)) await archivePlan($, p)
-  } catch {
-    // A failing fs leaves them for the next start.
   }
 }
 
@@ -1930,8 +1743,8 @@ function topToggleRow($: EngineInterface, ui: Pick<Elements['desktop'], 'Box' | 
   )
 }
 
-const TABS: readonly PanelTab[] = ['active', 'finished', 'plans', 'archive', 'trash']
-const TAB_LABEL: Record<PanelTab, string> = { active: 'Active', finished: 'Finished', plans: 'Plans', archive: 'Archive', trash: 'Trash' }
+const TABS: readonly PanelTab[] = ['active', 'finished', 'archive', 'trash']
+const TAB_LABEL: Record<PanelTab, string> = { active: 'Active', finished: 'Finished', archive: 'Archive', trash: 'Trash' }
 
 // The flowdeck group's tabs, one list shown at a time, each with its count (left out when it could not be read). The
 // selected tab is bold in the accent and underlined; pressing it changes nothing.
@@ -1977,8 +1790,6 @@ export const register: Register = (on, options) => {
     if (typeof storedUsage === 'boolean') await updatePanel($, prev => ({ ...prev, isUsageShown: storedUsage }))
     const storedRemaining = await $.store.get('usageRemaining').catch(() => undefined)
     if (typeof storedRemaining === 'boolean') await updatePanel($, prev => ({ ...prev, isUsageRemaining: storedRemaining }))
-    const storedPlansShown = await $.store.get('plansShown').catch(() => undefined)
-    if (typeof storedPlansShown === 'boolean') await updatePanel($, prev => ({ ...prev, isPlansShown: storedPlansShown }))
     const storedArchiveShown = await $.store.get('historyShown').catch(() => undefined)
     if (typeof storedArchiveShown === 'boolean') await updatePanel($, prev => ({ ...prev, isArchiveShown: storedArchiveShown }))
     const storedKeepWarm = await loadKeepWarm($).catch(() => undefined)
@@ -1992,10 +1803,6 @@ export const register: Register = (on, options) => {
     await showLists($, loaded)
     const sid = (started as { sessionId?: unknown }).sessionId
     sessionId = (await currentSessionId($)) || (typeof sid === 'string' ? sid : '')
-    if (sessionId) {
-      const mine = await loadPlans($).catch((): TaskPlan[] => [])
-      await update($, plans, () => mine)
-    }
     void refreshContext($).catch(() => {})
     // A (re)load starts with no band or flow-live.json error: one that still happens is said again.
     faults.band.clear()
@@ -2116,49 +1923,13 @@ export const register: Register = (on, options) => {
         },
       },
     }).catch(() => {})
-    const planStep = {
-      type: 'object',
-      properties: {
-        title: { type: 'string', description: 'At most 4 words.' },
-        status: { type: 'string', enum: ['pending', 'active', 'done', 'error', 'skipped'] },
-      },
-      required: ['title'],
-    }
-    await $.tool.register({
-      name: 'plan',
-      description:
-        'Show a plan for any task as a progress bar: stages of steps, or a flat list with kind "todo". ' +
-        'Create it once with id, title and the whole stages list, then move it with short ops: next, done, active, failed, state, note. ' +
-        'Resend stages under the same id when the plan changes; finished steps are kept. Titles of at most 4 words.',
-      inputSchema: {
-        type: 'object',
-        properties: {
-          id: { type: 'string', description: 'Short id of the plan; every later call names it.' },
-          title: { type: 'string', description: 'At most 4 words.' },
-          kind: { type: 'string', enum: ['plan', 'todo'] },
-          stages: {
-            type: 'array',
-            items: { type: 'object', properties: { name: { type: 'string' }, steps: { type: 'array', items: planStep } }, required: ['name', 'steps'] },
-          },
-          next: { type: 'boolean', description: 'Finish the current step and start the next.' },
-          done: { type: 'array', items: { type: 'string' }, description: 'Titles of steps now finished.' },
-          active: { type: 'string', description: 'Title of the step now in progress.' },
-          failed: { type: 'string', description: 'Title of the step that failed.' },
-          state: { type: 'string', enum: ['running', 'needs_input', 'error', 'done'] },
-          note: { type: 'string', description: 'A short line under the bar.' },
-        },
-        required: ['id'],
-      },
-    }).catch(() => {})
     await $.command.register({
       name: 'flowdeck-agents',
       description: 'Show or hide the flowdeck panel: context window, subagents running, finished and planned, with model, cost and time',
     }).catch(() => {}) // a name Claude Code already has is refused: start anyway
 
-    // The flow shown and flow-live.json sorted into this session's and the last sessions' (closed and archived), then the
-    // finished plans other sessions left.
+    // The flow shown and flow-live.json sorted into this session's and the last sessions' (closed and archived).
     await adoptLive($, sessionId)
-    void collectPlans($)
 
     // Ticks the running agents' clocks; quiet when nothing runs. Every tick redraws the pane and gives its buttons new
     // handles, so it stays slow: a click on a handle from before the redraw is refused by the desktop app.
@@ -2177,10 +1948,7 @@ export const register: Register = (on, options) => {
 
   // The rules are added to whatever the engine and other mods composed; a failure below is not masked (that would replace the real prompt with ours alone).
   on('prompt.compose', async ($, e, next) => {
-    const rules = [
-      { id: 'flowdeck:plan-rule', text: PLAN_RULE, scope: 'session' as const },
-      { id: 'flowdeck:flow-rule', text: FLOW_RULE, scope: 'session' as const },
-    ]
+    const rules = [{ id: 'flowdeck:flow-rule', text: FLOW_RULE, scope: 'session' as const }]
     const result = await next(e)
     return { sections: [...result.sections, ...rules] }
   })
@@ -2328,89 +2096,14 @@ export const register: Register = (on, options) => {
     return { result: `ok (unknown step${unknown.length > 1 ? 's' : ''} ${unknown.map(t => `"${t.slice(0, 60)}"`).join(', ')} ignored)` }
   })
 
-  // A task plan of the main session; a refused call changes nothing.
-  on('tool.call', { tool: PLAN_TOOL }, async ($, e) => {
-    if (e.agentId) return { result: 'ignored: only the main session plans' }
-    try {
-      const input = e as unknown as Record<string, unknown>
-      const id = planId(input)
-      const list = await readPlans($)
-      const made = normalize(input, list.find(p => p.id === id) ?? null, await $.clock.now(), id)
-      if (typeof made === 'string') return { result: 'flowdeck plan: ' + made }
-      const placed = await updatePlans($, prev => placeBar(prev, made))
-      await savePlans($, placed)
-      if (made.state === 'done') await archivePlan($, made)
-      return { result: planLine(made) }
-    } catch {
-      return { result: 'flowdeck plan: could not update the plan' }
-    }
-  })
-
-  // The plan the user approves in plan mode becomes the plan "plan"; approving a revision updates it.
-  on('tool.call', { tool: 'ExitPlanMode' }, async ($, e, next) => {
-    const ran = await next(e)
-    if (e.agentId || ran.deny !== undefined || ran.isError === true) return ran
-    try {
-      const fromResult = (ran.result as { plan?: unknown } | undefined)?.plan
-      const fromInput = (e as unknown as { plan?: unknown }).plan
-      const text = typeof fromResult === 'string' && fromResult.trim() ? fromResult : fromInput
-      if (typeof text !== 'string') return ran
-      const list = await readPlans($)
-      const made = importPlan(text, list.find(p => p.id === PLAN_ID) ?? null, await $.clock.now())
-      if (!made) return ran
-      const placed = await updatePlans($, prev => placeBar(prev, made))
-      await savePlans($, placed)
-    } catch {
-      // A failing store or clock costs the plan, not the approval.
-    }
-    return ran
-  })
-
-  // A question to the user marks the newest running plan as waiting until the answer comes back.
-  on('tool.call', { tool: 'AskUserQuestion' }, async ($, e, next) => {
-    if (e.agentId) return next(e)
-    let waiting: string | undefined
-    try {
-      const first = ((e as unknown as { questions?: unknown }).questions as { header?: unknown; question?: unknown }[] | undefined)?.[0]
-      const note = str(first?.header, 160) || str(first?.question, 160) || null
-      const live = (await readPlans($)).filter(p => p.state === 'running').pop()
-      if (live) {
-        waiting = live.id
-        await savePlans($, await updatePlans($, list => list.map(p => (p.id === live.id ? { ...p, state: 'needs_input' as const, note } : p))))
-      }
-    } catch {
-      // A failing store costs the waiting mark, not the question.
-    }
-    const ran = await next(e)
-    if (waiting) {
-      try {
-        const id = waiting
-        await savePlans($, await updatePlans($, list => list.map(p => (p.id === id && p.state === 'needs_input' ? { ...p, state: 'running' as const, note: null } : p))))
-      } catch {
-        // as above
-      }
-    }
-    return ran
-  })
-
-  // The user's own prompt (typed, or sent from the phone over Remote Control) answers whatever a plan was waiting on.
-  // It is also the user's message keep warm counts renewals from; an SDK host's turn (`sdk`) counts too, as a host may
-  // send what the user typed that way.
+  // The user's own prompt (typed, or sent from the phone over Remote Control) is the user's message keep warm counts
+  // renewals from; an SDK host's turn (`sdk`) counts too, as a host may send what the user typed that way.
   on('prompt.submit', async ($, e, next) => {
     prompted = true
     const kind = e.origin?.kind
     if ((kind === 'composer' || kind === 'bridge' || kind === 'sdk') && !e.isMeta) {
       const at = await $.clock.now().catch(() => 0)
       if (at) await updateKeepWarm($, k => userSpoke(k, at)).catch(() => {})
-    }
-    if (e.origin?.kind === 'composer' || e.origin?.kind === 'bridge') {
-      try {
-        if ((await readPlans($)).some(p => p.state === 'needs_input')) {
-          await savePlans($, await updatePlans($, list => list.map(p => (p.state === 'needs_input' ? { ...p, state: 'running' as const, note: null } : p))))
-        }
-      } catch {
-        // A failing store costs the reset, not the prompt.
-      }
     }
     return next(e)
   })
@@ -2568,7 +2261,6 @@ export const register: Register = (on, options) => {
       const at = await $.clock.now().catch(() => null)
       if (at !== null) await updateCache($, c => measured(c, at, e.durationMs, context, e.usage?.model)).catch(() => {})
     }
-    if (!agentId) await closeFinishedPlans($).catch(() => {})
     if (!agentId) await autoFinish($).catch(() => {}) // the main turn ended: a flow whose tasks are all done finishes
     return result
   })
@@ -3169,8 +2861,7 @@ export const register: Register = (on, options) => {
       )
     })
 
-    // One plan as the Plans section and an Archive plan group draw it: the svg on the desktop, the rows in the terminal.
-    // `kp` keeps the Archive's keys apart from the section's.
+    // An Archive plan group (saved by an older flowdeck) draws its plan: the svg on the desktop, the rows in the terminal.
     const planDrawing = (pl: TaskPlan, kp: string, at: number): RenderChildren => {
       if (Svg) {
         const d = planSvg(W, pl, at)
@@ -3183,35 +2874,6 @@ export const register: Register = (on, options) => {
               {r.line}
             </Text>
           ))}
-        </Box>
-      )
-    }
-
-    // The Plans tab's list.
-    const plansSection = async (): Promise<RenderChildren> => {
-      const planList = await readPlans($)
-      if (!planList.length) return <Text dimColor>{s.noPlans}</Text>
-      const clockNow = await $.clock.now()
-      const clearPlans = planList.some(pl => pl.state === 'done') ? (
-        <Button
-          key="plans-clear"
-          label="Clear finished"
-          plain
-          onPress={() => clearFinishedPlans($)}
-        />
-      ) : null
-      if (Svg) {
-        return (
-          <Box key="plans-section" flexDirection="column" gap={1}>
-            {planList.map(pl => planDrawing(pl, '', clockNow))}
-            {clearPlans}
-          </Box>
-        )
-      }
-      return (
-        <Box flexDirection="column">
-          {planList.map(pl => planDrawing(pl, '', clockNow))}
-          {clearPlans}
         </Box>
       )
     }
@@ -3318,7 +2980,6 @@ export const register: Register = (on, options) => {
     const counts: Record<PanelTab, number | null> = {
       active: flowCount?.active ?? null,
       finished: flowCount?.finished ?? null,
-      plans: await readPlans($).then(l => l.length, () => null),
       // The sessions each index lists in that tab (archive-index.ts `reconcile`).
       archive: await readLists($).then(l => l.records.length, () => null),
       trash: await readLists($).then(l => l.trash.length, () => null),
@@ -3327,7 +2988,7 @@ export const register: Register = (on, options) => {
     const isFlowTab = p.tab === 'active' || p.tab === 'finished'
     const shown = isFlowTab
       ? await safe(TAB_LABEL[p.tab], () => drawFlow(p.tab === 'finished' ? 'finished' : 'active'))
-      : await safe(TAB_LABEL[p.tab], p.tab === 'plans' ? plansSection : archivePart(p.tab === 'trash' ? 'trash' : 'archive'))
+      : await safe(TAB_LABEL[p.tab], archivePart(p.tab === 'trash' ? 'trash' : 'archive'))
     const group = (
       <Box key="flowdeck-group" flexDirection="column" marginTop={1}>
         {tabs}
@@ -3352,7 +3013,7 @@ export const register: Register = (on, options) => {
     return (
       <Box flexDirection="column">
         {topToggleRow($, { Box, Text, Button }, p)}
-        {tabRow($, { Box, Text, Button }, p, { active: null, finished: null, plans: null, archive: null, trash: null }, tabGap(e.surface))}
+        {tabRow($, { Box, Text, Button }, p, { active: null, finished: null, archive: null, trash: null }, tabGap(e.surface))}
         <Text dimColor>flowdeck could not draw this panel</Text>
       </Box>
     )
@@ -3362,34 +3023,15 @@ export const register: Register = (on, options) => {
     const f = await readFlow($)
     const hidden = (await readPanel($)).isBandHidden
     if (hidden || e.props.hasSurvey) return next(e)
-    // the open plans, newest first, at most two rows below the flow row
-    const open = [...(await readPlans($))].reverse().filter(pl => pl.state === 'running' || pl.state === 'needs_input' || pl.state === 'error').slice(0, 2)
     const ui = $.ui.resolve(e)
     const { Box, Text, Button } = ui
     const bandWidth = Math.max(180, Math.min(MAX_BAND_W, (e.props.bodyColumns || 100) * 9 - 180))
     // The prompt cache's chip, shown once the session made a request, with or without a flow (cache-view.tsx).
     const cache = await cacheBandPart($, { Box, Text, Button, Svg: e.surface !== 'terminal' && 'Svg' in ui ? ui.Svg : null } as CacheUi, bandWidth, e.props.bodyColumns || 0)
-    if (f === null && open.length === 0 && !cache) return next(e)
+    if (f === null && !cache) return next(e)
 
     // What other mods and Claude Code draw here stays, below this row; when that fails, the row is drawn without it.
     const theirs = await next(e).catch((): RenderChildren => null)
-    const planNow = open.length ? await $.clock.now() : 0
-    const planRowEls =
-      e.surface !== 'terminal' && 'Svg' in ui
-        ? open.map(pl => {
-            const { Svg } = ui
-            const d = planBandSvg(bandWidth, pl, planNow)
-            return (
-              <Box key={`flowdeck-plan-${keyOf(pl.id)}`} flexDirection="row" flexShrink={1} minWidth={0} overflow="hidden">
-                <Svg source={svg(bandWidth, d.height, d.body)} alt={planAlt(pl)} width={bandWidth} height={d.height} />
-              </Box>
-            )
-          })
-        : open.map(pl => (
-            <Text key={`flowdeck-plan-${keyOf(pl.id)}`} color={STATE_COLOR[pl.state] ?? ACCENT} wrap="truncate-end">
-              {planBandText(pl, e.props.bodyColumns)}
-            </Text>
-          ))
     if (f === null) {
       return (
         <Box flexDirection="column">
@@ -3399,7 +3041,6 @@ export const register: Register = (on, options) => {
             </Box>
           ) : null}
           {cache?.card ?? null}
-          {planRowEls}
           {theirs}
         </Box>
       )
@@ -3426,7 +3067,7 @@ export const register: Register = (on, options) => {
       />
     )
 
-    // The terminal's kit has an Svg too, drawn as an empty box: the terminal takes the text row, as the plan rows do.
+    // The terminal's kit has an Svg too, drawn as an empty box: the terminal takes the text row.
     if (e.surface !== 'terminal' && 'Svg' in ui) {
       const { Svg } = ui
       // About 9 CSS px per reported column (measured in the desktop app; savvy-progress assumed 8 and stopped
@@ -3442,7 +3083,6 @@ export const register: Register = (on, options) => {
             {dismiss}
           </Box>
           {cache?.card ?? null}
-          {planRowEls}
           {theirs}
         </Box>
       )
@@ -3471,7 +3111,6 @@ export const register: Register = (on, options) => {
         {dismiss}
       </Box>
       {cache?.card ?? null}
-      {planRowEls}
       {theirs}
       </Box>
     )

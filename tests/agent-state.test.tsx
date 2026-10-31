@@ -38,8 +38,8 @@ describe('agent state on the progress line', () => {
     expect(agentState({ status: 'done', endedAt: 5 }).name).toBe('Done')
   })
 
-  test('the housekeeping tools are flowdeck’s own step, progress and plan', () => {
-    expect([...HOUSEKEEPING].sort()).toEqual(['mcp__flowdeck__plan', 'mcp__flowdeck__progress', 'mcp__flowdeck__step'])
+  test('the housekeeping tools are flowdeck’s own step and progress', () => {
+    expect([...HOUSEKEEPING].sort()).toEqual(['mcp__flowdeck__progress', 'mcp__flowdeck__step'])
     expect(HOUSEKEEPING.has('Bash')).toBe(false)
   })
 

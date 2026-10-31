@@ -26,144 +26,17 @@ function engine(on: any, opts: { store?: Record<string, unknown> } = {}) {
 }
 
 const start = ($: any) => $.session.start({ surface: 'terminal', isInteractive: true, cwd: '/work' } as any)
-const settle = () => new Promise(done => (globalThis as any).setTimeout(done, 30))
 const mount = ($: any, surface: 'terminal' | 'desktop', bodyColumns = 60) =>
   $.ui.mount({ plugin: 'flowdeck', surface, component: 'Pane', requestId: 'flowdeck-agents', props: { bodyColumns } } as any)
-// The Plans tab, unless another is named.
-const pane = async ($: any, surface: 'terminal' | 'desktop', bodyColumns = 60, tab: Tab = 'plans') => {
+// The Active tab, unless another is named.
+const pane = async ($: any, surface: 'terminal' | 'desktop', bodyColumns = 60, tab: Tab = 'active') => {
   await showTab($, tab)
   return mount($, surface, bodyColumns)
 }
-const plan = ($: any, input: Record<string, unknown>) => $.tool.call({ tool: 'mcp__flowdeck__plan', ...input } as any)
-const saved = (store: Record<string, unknown>): any[] => ((store.plans as any)?.s ?? []) as any[]
 
-const STAGES = [
-  { name: 'Build', steps: [{ title: 'write tests' }, { title: 'wire tool' }] },
-  { name: 'Ship', steps: [{ title: 'commit' }] },
-]
-const create = ($: any, id: string, title: string) => plan($, { id, title, stages: STAGES })
-const finish = ($: any, id: string) => plan($, { id, done: ['write tests', 'wire tool', 'commit'] })
-
-describe('plans section in the panel', () => {
-  test('a created plan shows its title, state and percent in the terminal panel', async ($, on) => {
-    engine(on)
-    await start($)
-    await create($, 'alpha', 'Alpha rollout')
-    await plan($, { id: 'alpha', next: true })
-    const p = await pane($, 'terminal')
-    expect(await p.find({ type: 'Button', text: /Plans/ })).toBeDefined()
-    expect(await p.find({ type: 'Text', text: /Alpha rollout {2}Running/ })).toBeDefined()
-    expect(await p.find({ type: 'Text', text: /33%/ })).toBeDefined()
-    await p.unmount()
-  })
-
-  test('the desktop panel draws one svg per plan', async ($, on) => {
-    engine(on)
-    await start($)
-    const before = await pane($, 'desktop', 80)
-    const base = (await before.findAll({ type: 'Svg' })).length
-    await before.unmount()
-    await create($, 'alpha', 'Alpha rollout')
-    const p = await pane($, 'desktop', 80)
-    expect((await p.findAll({ type: 'Svg' })).length).toBe(base + 1)
-    await p.unmount()
-  })
-
-  test('the Plans tab has no hide toggle; a stored hidden choice from before is read but hides nothing', async ($, on) => {
-    engine(on, { store: { plansShown: false } })
-    await start($)
-    await create($, 'alpha', 'Alpha rollout')
-    const p = await pane($, 'terminal')
-    expect(await p.find({ type: 'Button', key: 'plans' })).toBeUndefined()
-    expect(await p.find({ type: 'Button', key: 'tab-plans', text: 'Plans (1)' })).toBeDefined()
-    expect(await p.find({ type: 'Text', text: /Alpha rollout/ })).toBeDefined()
-    await p.unmount()
-  })
-
-  test('without plans the Plans tab says No plans and counts 0', async ($, on) => {
-    engine(on)
-    await start($)
-    for (const surface of ['terminal', 'desktop'] as const) {
-      const p = await pane($, surface)
-      expect(await p.find({ type: 'Button', key: 'tab-plans', text: 'Plans (0)' })).toBeDefined()
-      expect(await p.find({ type: 'Text', text: 'No plans' })).toBeDefined()
-      expect(await p.find({ type: 'Button', text: /Clear finished/ })).toBeUndefined()
-      await p.unmount()
-    }
-  })
-
-  test('Clear finished shows only with a done plan and removes only done plans', async ($, on) => {
-    const { store } = engine(on)
-    await start($)
-    await create($, 'alpha', 'Alpha rollout')
-    await create($, 'beta', 'Beta cleanup')
-    let p = await pane($, 'terminal')
-    expect(await p.find({ type: 'Button', text: /Clear finished/ })).toBeUndefined()
-    await p.unmount()
-    await finish($, 'beta')
-    p = await pane($, 'terminal')
-    expect(await p.find({ type: 'Text', text: /Beta cleanup {2}Done/ })).toBeDefined()
-    await p.press({ key: 'plans-clear' })
-    await settle()
-    await p.unmount()
-    expect(saved(store).map(x => x.id)).toEqual(['alpha'])
-    p = await pane($, 'terminal')
-    // gone from the Plans tab; only its Archive group still draws it
-    expect(await p.find({ type: 'Text', text: /Beta cleanup/ })).toBeUndefined()
-    expect(await p.find({ type: 'Text', text: /Alpha rollout/ })).toBeDefined()
-    expect(await p.find({ type: 'Button', text: /Clear finished/ })).toBeUndefined()
-    await p.unmount()
-    p = await pane($, 'terminal', 60, 'archive')
-    expect((await p.findAll({ type: 'Text' })).filter((t: any) => /Beta cleanup/.test(t.text))).toHaveLength(1)
-    await p.unmount()
-  })
-
-  test('three plans all show', async ($, on) => {
-    engine(on)
-    await start($)
-    await create($, 'alpha', 'Alpha rollout')
-    await create($, 'beta', 'Beta cleanup')
-    await create($, 'gamma', 'Gamma docs')
-    const p = await pane($, 'terminal')
-    for (const t of [/Alpha rollout/, /Beta cleanup/, /Gamma docs/]) expect(await p.find({ type: 'Text', text: t })).toBeDefined()
-    await p.unmount()
-    const d = await pane($, 'desktop', 80)
-    const alts = (await d.findAll({ type: 'Svg' })).map((n: any) => String(n.props?.alt ?? ''))
-    for (const t of ['Alpha rollout: Running, 0%', 'Beta cleanup: Running, 0%', 'Gamma docs: Running, 0%']) expect(alts).toContain(t)
-    await d.unmount()
-  })
-
-  test('the section shows with a flow running; there is no compact strip or Collapse', async ($, on) => {
-    engine(on)
-    await start($)
-    await create($, 'alpha', 'Alpha rollout')
-    await $.tool.call({ tool: 'mcp__flowdeck__progress', title: 'Ship it', total: 1, tasks: [{ title: 'a', tier: 'light' }] } as any)
-    let p = await pane($, 'terminal', 60, 'active')
-    expect(await p.find({ type: 'Button', key: 'compact' })).toBeUndefined()
-    await p.unmount()
-    p = await pane($, 'terminal')
-    expect(await p.find({ type: 'Text', text: /Alpha rollout/ })).toBeDefined()
-    await p.unmount()
-    const before = await pane($, 'desktop', 80)
-    const alts = (await before.findAll({ type: 'Svg' })).map((n: any) => String(n.props?.alt ?? ''))
-    expect(alts).toContain('Alpha rollout: Running, 0%')
-    expect(alts.some((a: string) => /agents/.test(a))).toBe(false)
-    await before.unmount()
-  })
-
-  test('a narrow panel does not throw', async ($, on) => {
-    engine(on)
-    await start($)
-    await create($, 'alpha', 'Alpha rollout')
-    const t = await pane($, 'terminal', 10)
-    expect(await t.find({ type: 'Button', text: /Plans/ })).toBeDefined()
-    await t.unmount()
-    const d = await pane($, 'desktop', 10)
-    expect((await d.findAll({ type: 'Svg' })).length).toBeGreaterThanOrEqual(1)
-    await d.unmount()
-  })
-
-  test('plans restored from the store after a new session start show up', async ($, on) => {
+// The Plans tab and section are gone (1.0.0035): plans an older flowdeck stored show nowhere in the panel.
+describe('no plans section in the panel', () => {
+  test('plans an older flowdeck stored show in no tab, on either surface', async ($, on) => {
     const stored = {
       id: 'alpha',
       title: 'Alpha rollout',
@@ -173,11 +46,18 @@ describe('plans section in the panel', () => {
       note: null,
       startedAt: NOW - 60_000,
     }
-    engine(on, { store: { plans: { s: [stored] } } })
+    engine(on, { store: { plans: { s: [stored] }, plansShown: true } })
     await start($)
-    const p = await pane($, 'terminal')
-    expect(await p.find({ type: 'Text', text: /Alpha rollout/ })).toBeDefined()
-    await p.unmount()
+    for (const tab of ['active', 'finished', 'archive', 'trash'] as const) {
+      for (const surface of ['terminal', 'desktop'] as const) {
+        const p = await pane($, surface, 80, tab)
+        const drawn = JSON.stringify(await p.drawn())
+        expect(drawn).not.toContain('Alpha rollout')
+        expect(await p.find({ type: 'Button', key: 'plans-clear' })).toBeUndefined()
+        await p.unmount()
+      }
+    }
+    await showTab($, 'active')
   })
 })
 
@@ -236,13 +116,12 @@ describe('agent rows: live tool word and state colours', () => {
     expect(await words($)).toEqual([{ text: 'Running · Bash', color: RUNNING }])
   })
 
-  test('flowdeck’s step, progress and plan calls do not change the word', async ($, on) => {
+  test('flowdeck’s step and progress calls do not change the word', async ($, on) => {
     agentEngine(on)
     await start($)
     await spawn($)
     await call($, 'Bash', 'w1')
     await call($, 'mcp__flowdeck__step', 'w1', { done: 1, total: 3, note: 'tests' })
-    await call($, 'mcp__flowdeck__plan', 'w1', { id: 'x' })
     await call($, 'mcp__flowdeck__progress', 'w1', {})
     expect(await words($)).toEqual([{ text: 'Running · Bash', color: RUNNING }])
     expect(await paneText($)).toMatch(/Running · Bash · 2\/3 tests$/m)

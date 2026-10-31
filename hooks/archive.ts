@@ -1,5 +1,5 @@
 // The archive (formerly History): a record of finished flowdeck flows, kept per project, one entry per flow with its runs,
-// and one per finished plan, newest first by their end. Each entry is a session file of its own (see archive-store.ts).
+// and one per finished plan an older flowdeck saved, newest first by their end. Each entry is a session file of its own (see archive-store.ts).
 import type { AgentRun, AgentStatus, ArchiveAgent, ArchiveEntry, ArchiveTask, Flow, PlanStage, PlanState, PlanStep, StepStatus, TaskPlan } from '../types'
 import { itemsOf } from './agent-items'
 import { sortNewest } from './order'
@@ -13,7 +13,7 @@ export const MAX_TEXT = 200
 // Bounds one entry: the newest runs of a flow, each with its capped items and strings.
 export const MAX_AGENTS = 60
 // What a file should stay under, in UTF-8 bytes: the engine reads and writes at most 4 MiB (4,194,304 bytes) a file, and
-// the rest is room for one save's growth. `plans.json` and the archive's indexes stay under it (an index past it is said).
+// the rest is room for one save's growth. The archive's indexes stay under it (an index past it is said).
 export const MAX_ARCHIVE_BYTES = 2_500_000
 export const VOLUME_MAX = MAX_ARCHIVE_BYTES
 export const INDEX_MAX = MAX_ARCHIVE_BYTES
@@ -196,7 +196,8 @@ function planOf(v: unknown): TaskPlan | null {
 
 const stepsOf = (p: TaskPlan): PlanStep[] => p.stages.flatMap(s => s.steps)
 
-// A finished plan as its own entry: one id per plan and project, so saving it again replaces it. Dated by its end, or `at`
+// A finished plan as its own entry, as flowdeck saved one before 1.0.0035 (the tests build archived plans with it): one
+// id per plan and project, so saving it again replaces it. Dated by its end, or `at`
 // (the save) when it has none; no tasks, runs, cost or tokens.
 export function planEntry(plan: TaskPlan, project: string, at: number): ArchiveEntry {
   const p = planOf(plan) ?? { ...plan, stages: [] }

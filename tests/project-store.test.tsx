@@ -73,8 +73,6 @@ const flow = async ($: any, title = 'Ship it') => {
   await progress($, { title, total: 2, done: 1, phase: 'delegate', tasks: [{ title: 'write tests', tier: 'careful' }, { title: 'wire it', tier: 'medium' }] })
   return progress($, { finished: true })
 }
-const planTool = async ($: any, input: Record<string, unknown>) => String((await $.tool.call({ tool: 'mcp__flowdeck__plan', ...input } as any)).result)
-const STAGES = [{ name: 'Build', steps: [{ title: 'write tests' }, { title: 'wire tool' }] }]
 // The Archive tab.
 const pane = async ($: any) => {
   await showTab($, 'archive')
@@ -263,8 +261,6 @@ describe('the archive in the project folder', () => {
     expect(sessionPaths(files, DIR)).toEqual([])
     expect(INDEX in files).toBe(false)
     expect(await archiveButtons($)).toEqual([`archive-${keyOf(flowAt(NOW).id)}`])
-    expect(await planTool($, { id: 'work', title: 'x', stages: STAGES })).toBe('work: 0/2, running, active "write tests"')
-    expect((store.plans as any).s).toHaveLength(1)
   })
 
   test('a flow neither the folder nor the store can take still shows for this session, and the panel says so', async ($, on) => {
@@ -285,9 +281,8 @@ describe('the archive in the project folder', () => {
     const { store, writes } = engine(on)
     await start($, '')
     await flow($)
-    await planTool($, { id: 'work', title: 'x', stages: STAGES })
     expect((store.history as any[]).map(e => e.title)).toEqual(['Ship it'])
-    expect((store.plans as any).s).toHaveLength(1)
+    expect(store.plans).toBeUndefined()
     expect(writes).toEqual([])
   })
   test('a flow that went to the store because the write failed gets its session file at the next load; the store keeps it', async ($, on) => {
@@ -315,112 +310,30 @@ describe('the archive in the project folder', () => {
   })
 })
 
-describe('plans in the project folder', () => {
-  test('plans save to plans.json under the session id and come back on restart', async ($, on) => {
-    const { files, store } = engine(on, { sessionId: 'abc' })
-    await start($)
-    await planTool($, { id: 'work', title: 'x', stages: STAGES })
-    await planTool($, { id: 'work', next: true })
-    const saved = JSON.parse(files[PLANS])
-    expect(Object.keys(saved)).toEqual(['abc'])
-    expect(saved.abc[0].id).toBe('work')
-    expect(files[IGNORE]).toBe('*\n')
-    expect(store.plans).toBeUndefined()
-    await start($)
-    expect(await planTool($, { id: 'work', next: true })).toBe('work: 2/2, done')
-  })
-
-  test('plans are not imported from the old store, but a missing file still loads them from it', async ($, on) => {
-    const mine = { id: 'mine', title: 't', kind: 'plan', stages: [{ name: 'S', steps: [{ title: 'a', status: 'active', substeps: [] }] }], state: 'running', note: null, startedAt: 1 }
-    const { files, store } = engine(on, { store: { plans: { s: [mine], other: [mine] } } })
-    await start($)
-    expect(await planTool($, { id: 'mine', next: true })).toBe('mine: 1/1, done')
-    expect(Object.keys(JSON.parse(files[PLANS]))).toEqual(['s'])
-    expect(Object.keys(store.plans as object)).toEqual(['s', 'other'])
-  })
-
-  test('25 sessions in the file are all kept: none is dropped for age, and each stays exactly as it was', async ($, on) => {
-    const plans: Record<string, unknown> = {}
-    for (let i = 0; i < 25; i++) plans[`old${i}`] = [{ id: 'p', title: 't', kind: 'plan', stages: [], state: 'done', note: null, startedAt: i }]
-    plans.odd = 'not a list' // kept too: it is not this session's
-    const { files } = engine(on, { files: { [PLANS]: JSON.stringify(plans) } })
-    await start($)
-    await planTool($, { id: 'work', title: 'x', stages: STAGES })
-    const saved = JSON.parse(files[PLANS])
-    expect(Object.keys(saved)).toHaveLength(27)
-    expect(saved.s).toHaveLength(1)
-    delete saved.s
-    expect(saved).toEqual(plans)
-  })
-
-  test('a corrupt plans.json is never overwritten: this session’s plans go to its side file and come back from it on restart', async ($, on) => {
-    const { files } = engine(on, { files: { [PLANS]: 'nope' } })
-    await start($)
-    expect(await planTool($, { id: 'work', title: 'x', stages: STAGES })).toBe('work: 0/2, running, active "write tests"')
-    await planTool($, { id: 'work', next: true })
-    expect(files[PLANS]).toBe('nope')
-    expect(JSON.parse(files[`${DIR}/plans-extra-s.json`])[0].id).toBe('work')
-    await start($)
-    expect(await planTool($, { id: 'work', next: true })).toBe('work: 2/2, done')
-    expect(files[PLANS]).toBe('nope')
-  })
-
-  test('a plans.json that is there but cannot be read is never written; once a session has its side file, only that is written', async ($, on) => {
-    const { files, fs } = engine(on, { files: { [PLANS]: '{}' }, tooBig: [PLANS] })
-    await start($)
-    await planTool($, { id: 'work', title: 'x', stages: STAGES })
-    expect(files[PLANS]).toBe('{}')
-    fs.tooBig.clear()
-    await planTool($, { id: 'work', next: true })
-    expect(files[PLANS]).toBe('{}')
-    expect(JSON.parse(files[`${DIR}/plans-extra-s.json`])[0].stages[0].steps.map((st: any) => st.status)).toEqual(['done', 'active'])
-  })
-
-  test('when stat, the listing and `exists` all fail, neither plans.json nor a side file is written: the store keeps the plans', async ($, on) => {
-    const { files, fs, store } = engine(on, { files: { [PLANS]: '{"other":[]}' }, sessionId: 'abc' })
-    fs.unreadable.add(PLANS)
-    Object.assign(fs.fail, { stat: true, list: true, exists: true })
-    await start($)
-    await planTool($, { id: 'work', title: 'x', stages: STAGES })
-    expect(files[PLANS]).toBe('{"other":[]}')
-    expect(Object.keys(files)).toEqual([PLANS])
-    expect((store.plans as any).abc).toHaveLength(1)
-  })
-
-  test('a plans.json that would pass the byte limit is left as it is and the plans go to the side file', async ($, on) => {
-    // 1,300,000 Cyrillic characters: 2,600,000 bytes, over the 2,500,000-byte limit though not in characters
-    const plans = { old: [{ id: 'p', title: 't', kind: 'plan', stages: [], state: 'done', note: 'Ж'.repeat(1_300_000), startedAt: 1 }] }
-    const text = JSON.stringify(plans)
-    const { files, fs } = engine(on, { files: { [PLANS]: text } })
-    await start($)
-    await planTool($, { id: 'work', title: 'x', stages: STAGES })
-    expect(files[PLANS]).toBe(text)
-    expect(JSON.parse(files[`${DIR}/plans-extra-s.json`])[0].id).toBe('work')
-    expect(Math.max(...fs.tried.map(t => t.bytes))).toBeLessThan(2_500_000)
-  })
-
-  test('a side file of this session that does not parse is never written over either: the store keeps the plans', async ($, on) => {
+// The Plans feature is gone (1.0.0035): an existing plans.json (and a session's plans-extra file) is never read or
+// written, and its plans neither show nor reach the Archive; a flow's save leaves it exactly as it was.
+describe('an old plans.json in the project folder', () => {
+  test('is never read or written, its plans do not show, and the Archive holds only the flow', async ($, on) => {
+    const mine = { id: 'work', title: 'Old plan', kind: 'plan', stages: [{ name: 'S', steps: [{ title: 'a', status: 'done', substeps: [] }] }], state: 'done', note: null, startedAt: 1, endedAt: 2 }
+    const text = JSON.stringify({ s: [mine], other: [mine] })
     const side = `${DIR}/plans-extra-s.json`
-    const { files, store } = engine(on, { files: { [PLANS]: 'nope', [side]: 'broken' } })
+    const { files, fs } = engine(on, { files: { [PLANS]: text, [side]: JSON.stringify([mine]) } })
     await start($)
-    await planTool($, { id: 'work', title: 'x', stages: STAGES })
-    expect(files[side]).toBe('broken')
-    expect(files[PLANS]).toBe('nope')
-    expect((store.plans as any).s).toHaveLength(1)
-  })
-
-  test('a session id that is no plain file name gets its own safe side file name', async ($, on) => {
-    const { files } = engine(on, { files: { [PLANS]: 'nope' }, sessionId: 'a/b_c' })
+    await settle()
+    await flow($)
+    await $.turn.complete({ reason: 'answer', answer: 'ok', durationMs: 1 } as any)
     await start($)
-    await planTool($, { id: 'work', title: 'x', stages: STAGES })
-    expect(Object.keys(files).filter(f => f.includes('plans-extra-'))).toEqual([`${DIR}/plans-extra-a_002fb_005fc.json`])
-  })
-
-  test('a corrupt plans file reads as empty', async ($, on) => {
-    engine(on, { files: { [PLANS]: 'nope' } })
-    await start($)
-    expect(await planTool($, { id: 'work', next: true })).toMatch(/^flowdeck plan: no plan "work" yet/)
-    expect(await planTool($, { id: 'work', title: 'x', stages: STAGES })).toBe('work: 0/2, running, active "write tests"')
+    await settle()
+    const isPlansFile = (p: string) => p === PLANS || p === side
+    expect(fs.reads.filter(isPlansFile)).toEqual([])
+    expect(fs.writes.filter(isPlansFile)).toEqual([])
+    expect(files[PLANS]).toBe(text)
+    expect(files[side]).toBe(JSON.stringify([mine]))
+    expect(files[IGNORE]).toBe('*\n')
+    expect(titles(sessions(files, DIR))).toEqual(['Ship it'])
+    const p = await pane($)
+    expect(JSON.stringify(await p.drawn())).not.toContain('Old plan')
+    await p.unmount()
   })
 })
 
@@ -429,9 +342,7 @@ describe('everything failing', () => {
     const { fail } = engine(on, { fail: { fs: true, store: true } })
     await start($)
     expect(String((await progress($, { title: 'T', total: 1, done: 0, phase: 'delegate', tasks: [{ title: 'a', tier: 'light' }] })).result)).toContain('ok')
-    expect(await planTool($, { id: 'work', title: 'x', stages: [{ name: 'S', steps: [{ title: 'a' }] }] })).toContain('work')
-    expect(await planTool($, { id: 'work', done: ['a'], state: 'running' })).toContain('work')
-    // From here the clock fails too, where saving reads it: recording the flow and closing the plan.
+    // From here the clock fails too, where saving reads it: recording the flow.
     fail.clock = true
     await $.session.end({ reason: 'prompt_input_exit', sessionId: 's' } as any)
     expect(String((await progress($, { finished: true })).result)).toContain('ok')

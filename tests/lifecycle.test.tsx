@@ -495,20 +495,25 @@ describe('a new session in the same process', () => {
   })
 })
 
-describe('plans other sessions left', () => {
+// The Plans feature is gone (1.0.0035): the plans files an older flowdeck left are never read, written or archived.
+describe('plans files an older flowdeck left', () => {
   const plan = (id: string, state: string) => ({ id, title: `Plan ${id}`, kind: 'todo', stages: [{ name: 'todo', steps: [{ title: 'a', status: state === 'done' ? 'done' : 'active', substeps: [] }] }], state, note: null, startedAt: NOW - 90 * MIN, endedAt: state === 'done' ? NOW - 80 * MIN : null })
 
-  test('their finished plans are archived once at the start; running ones and this session\'s are left alone', async ($, on) => {
-    const plans = JSON.stringify({ other: [plan('p1', 'done'), plan('p2', 'running')], s: [plan('p3', 'done')] })
+  test('plans.json and the plans-extra files are left exactly as they are: never read, written or archived', async ($, on) => {
+    const plans = JSON.stringify({ other: [plan('p1', 'done'), plan('p2', 'running')], s: [plan('p3', 'running')] })
     const side = JSON.stringify([plan('p4', 'done')])
-    const { files } = engine(on, { files: { [`${DIR}/plans.json`]: plans, [`${DIR}/plans-extra-third.json`]: side } })
+    const { fs, files } = engine(on, { files: { [`${DIR}/plans.json`]: plans, [`${DIR}/plans-extra-third.json`]: side } })
     await start($)
     await settle()
-    expect(archived(files).map(e => e.title).sort()).toEqual(['Plan p1', 'Plan p4'])
+    await progress($, { title: 'Ship', phase: 'delegate', tasks: [{ title: 'one', tier: 'light' }] })
+    await mainTurnEnds($)
+    await settle()
+    const isPlansFile = (p: string) => /\/plans(-extra-[^/]+)?\.json$/.test(p)
+    expect(fs.reads.filter(isPlansFile)).toEqual([])
+    expect(fs.writes.filter(isPlansFile)).toEqual([])
     expect(files[`${DIR}/plans.json`]).toBe(plans)
-    await start($)
-    await settle()
-    expect(sessionPaths(files, DIR)).toHaveLength(2)
+    expect(files[`${DIR}/plans-extra-third.json`]).toBe(side)
+    expect(archived(files).filter(e => /^Plan p/.test(e.title))).toEqual([])
   })
 })
 
@@ -518,7 +523,7 @@ describe('with an empty store and no settings, as on a new machine', () => {
     on('prompt.compose', () => ({ sections: [] }))
     await start($)
     const prompt = await $.prompt.compose({ model: 'm', promptModel: 'm', surfaces: ['terminal'], tools: [], outputStyle: null, traits: [] } as any)
-    expect(prompt.sections.map((s: any) => s.id)).toEqual(['flowdeck:plan-rule', 'flowdeck:flow-rule'])
+    expect(prompt.sections.map((s: any) => s.id)).toEqual(['flowdeck:flow-rule'])
     // a task list starts the flow; a worker does one task, the list completes the other
     await todo($, [['Build the thing', 'in_progress'], ['Check the thing', 'pending']])
     await launch($, 'w1', 'Build the thing', 'medium')

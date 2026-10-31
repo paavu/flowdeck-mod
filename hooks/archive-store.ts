@@ -7,7 +7,7 @@
 // `eraseSessionFile`, for Empty Trash, one session file in `.trash/` or `archive/` at a time through a host command.
 //
 // In `<project>/.claude/flowdeck/` (with its `*` .gitignore):
-// - `archive/<session>.json`: one saved session each (a flow or a finished plan), the whole entry; written first on every
+// - `archive/<session>.json`: one saved session each (a flow, or a finished plan an older flowdeck saved), the whole entry; written first on every
 //   save, and only over an older copy of the same session.
 // - `archive-index.json`: one small record per session (archive-index.ts); the Archive tab draws from it alone.
 // - `.trash/<session>-t<ms>.json` and `.trash/trash-index.json`: the copies of the sessions moved to the trash, and their

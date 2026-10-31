@@ -601,7 +601,7 @@ describe('where the Archive button shows', () => {
     await finishedRows($, clock, 4)
     await press($, 'archive-item-w2')
     for (const surface of ['terminal', 'desktop'] as const) {
-      for (const tab of ['active', 'finished', 'plans', 'archive', 'trash'] as const) {
+      for (const tab of ['active', 'finished', 'archive', 'trash'] as const) {
         const p = await pane($, surface, 80, tab)
         const keys = (await p.findAll({ type: 'Button' })).map((b: any) => String(b.props.key))
         await p.unmount()

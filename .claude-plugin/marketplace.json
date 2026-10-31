@@ -6,7 +6,7 @@
     {
       "name": "flowdeck",
       "source": "./",
-      "description": "Orchestrated delivery flow with a live band above the prompt and a side panel of agents, context, usage, plans and past flows",
+      "description": "Orchestrated delivery flow with a live band above the prompt and a side panel of agents, context, usage and past flows",
       "homepage": "https://github.com/paavu/flowdeck-mod",
       "repository": "https://github.com/paavu/flowdeck-mod",
       "license": "MIT",
