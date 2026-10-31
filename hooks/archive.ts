@@ -5,7 +5,7 @@ import { itemsOf } from './agent-items'
 import { sortNewest } from './order'
 import { cleanText, NOTE_MAX, noteOf } from './notes'
 import { isFinished, isStoredStep } from './plan'
-import { acceptedOf } from './tasks'
+import { acceptedOf, modelOf } from './tasks'
 import { dayParts } from './time'
 
 const MAX_TASKS = 100
@@ -136,7 +136,7 @@ export function snapshot(input: {
     status,
     done: flow.done,
     total: flow.total,
-    tasks: flow.tasks.slice(0, MAX_TASKS).map(t => ({ title: cap(t.title), tier: cap(t.tier), after: afterOf(t.after).slice(0, MAX_TASKS), ...noteOf(t) })),
+    tasks: flow.tasks.slice(0, MAX_TASKS).map(t => ({ title: cap(t.title), tier: cap(t.tier), after: afterOf(t.after).slice(0, MAX_TASKS), ...(modelOf(t.model) ? { model: modelOf(t.model) } : {}), ...noteOf(t) })),
     ...(flow.accepted ? { accepted: afterOf(flow.accepted).slice(0, MAX_TASKS) } : {}),
     ...(stampsOf(flow.acceptedAt) ? { acceptedAt: stampsOf(flow.acceptedAt) } : {}),
     cost: agents.reduce((s, a) => s + a.costUsd, 0),
@@ -268,6 +268,8 @@ function parseEntry(v: unknown): ArchiveEntry | null {
       const tier = text(r.tier)
       if (tt === null || tier === null) return []
       const task: ArchiveTask = { title: tt, tier, ...noteOf(r) }
+      const model = modelOf(r.model)
+      if (model) task.model = model
       if (Array.isArray(r.after)) task.after = afterOf(r.after)
       return [task]
     })

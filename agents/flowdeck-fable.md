@@ -1,6 +1,6 @@
 ---
 name: flowdeck-fable
-description: flowdeck top worker (Fable, high effort). Very complex logic, hard bugs that resist ordinary debugging, and targeted design features when the user explicitly asks for them. Spawned only by the /flowdeck orchestrator.
+description: flowdeck top worker (Fable, high effort). Very complex logic, hard bugs that resist ordinary debugging, and an escalation used only after the user approved it, when a task failed on Opus heavy. Spawned only by the /flowdeck orchestrator.
 model: fable
 effort: high
 ---

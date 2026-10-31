@@ -395,7 +395,7 @@ describe('the rule for the model', () => {
     const r = await $.prompt.compose({ model: 'm', promptModel: 'm', surfaces: ['terminal'], tools: [], outputStyle: null, traits: [] } as any)
     const rule = r.sections.find((s: any) => s.id === 'flowdeck:flow-rule')
     for (const word of ['goal', 'result', 'feedback', 'notes [{task, result, feedback}]']) expect(rule.text).toContain(word)
-    expect(rule.text.length).toBeLessThan(560)
+    expect(rule.text.length).toBeLessThan(640)
     const tool = registered.find(t => t.name === 'progress')
     for (const word of ['brief', 'Agent prompt']) expect(tool.description).toContain(word)
   })

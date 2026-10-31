@@ -2,6 +2,11 @@
 
 Versions are `M.m.xxxx`; every build bumps the 4-digit build number. Details and rulings: `docs/ledger.md`, `docs/design.md`.
 
+## 1.0.0038 (2026-10-31)
+- Model routing: `flowdeck-light` and `flowdeck-medium` run on Sonnet (low and medium effort); careful and heavy stay on Opus. Queued rows read `Sonnet · low` and `Sonnet · medium` for those tiers.
+- The orchestrator can pick a model per task: `progress` `tasks[]` and `add[]` take an optional `model` (`sonnet`, `opus`, `haiku`), kept across restarts and in the archive, shown on the queued row as `<tier> · <Model> · <effort>`.
+- Fable is never used automatically: only after the user approves, when a task failed on Opus heavy. SKILL.md gains Model choice and Escalation order; the flow rule gains one sentence; `scripts/check-rules.sh` checks both and the agents' models.
+
 ## 1.0.0037 (2026-10-31)
 - Task tracking is a choice: the flow rule (`flowdeck:flow-rule`) goes into the system prompt only while tracking is `on`, or in a session that ran `/flowdeck:flowdeck`. A fresh install is `unset` and adds nothing until the user chooses. The choice is one for every project, kept in the mod store under `rule`.
 - Migration: when the store has no `rule` yet, an install that ran flowdeck before (its earlier store keys, or `flow-live.json`, `archive-index.json`, `archive/` or `history*.json` in the project's `.claude/flowdeck/`) is saved as `on` and keeps working as before; any other is saved as `unset`.

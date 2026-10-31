@@ -8,6 +8,13 @@ export type RunLike = Pick<AgentRun, 'id' | 'description' | 'status'> & Partial<
 /** A planned task with its number in plan order, and whether everything it waits for is done. */
 export type Numbered<T> = T & { n: number; ready?: boolean }
 
+/** The models a task may name (Fable needs the user's approval, so it is not one); anything else is no model. */
+export const TASK_MODELS = ['sonnet', 'opus', 'haiku'] as const
+export const modelOf = (v: unknown): string | undefined => {
+  const m = typeof v === 'string' ? v.trim().toLowerCase() : ''
+  return (TASK_MODELS as readonly string[]).includes(m) ? m : undefined
+}
+
 export const norm = (s: string): string => s.toLowerCase().replace(/[^\p{L}\p{N}]+/gu, ' ').trim()
 
 // A flowdeck worker's tier from its agent type (`flowdeck-careful`, or `flowdeck:flowdeck-careful` from the plugin);

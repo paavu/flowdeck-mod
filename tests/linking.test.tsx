@@ -150,7 +150,7 @@ describe('linking in the panel', () => {
     clock.now = NOW + 10_000
     await complete($, 'w1')
     t = await terminal($)
-    expect(t).toMatch(/light · Opus · low · after 1 · ready/)
+    expect(t).toMatch(/light · Sonnet · low · after 1 · ready/)
   })
 
   test('#2 in the description links by number and is not repeated after it', async ($, on) => {

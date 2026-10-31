@@ -36,6 +36,8 @@ export type TaskNoteParts = {
 export type PlannedTask = TaskNoteParts & {
   title: string
   tier: string
+  /** The model the orchestrator chose for it (sonnet, opus or haiku); unset means the tier's own. */
+  model?: string
   after: number[]
   mirrored?: boolean
   counted?: boolean
@@ -94,7 +96,7 @@ export type AgentRun = {
   brief?: string
 }
 
-export type ArchiveTask = TaskNoteParts & { title: string; tier: string; after?: number[] }
+export type ArchiveTask = TaskNoteParts & { title: string; tier: string; model?: string; after?: number[] }
 
 /** An agent run as it was when its flow was saved, without the live-only fields. */
 export type ArchiveAgent = Omit<AgentRun, 'tool' | 'isAsked' | 'archived'>

@@ -185,11 +185,13 @@ describe('the flow rule in the system prompt', () => {
       '`#<n> <title>`',
       'No flow for a question or a one-step edit',
       'never leave another task unreported',
+      'Pick the Agent `model` per task and send it as the task\'s `model`', // model choice
+      'Fable only after the user approves, once Opus heavy failed',
     ]) {
       expect(text).toContain(word)
     }
-    // Trimmed in 1.0.0037 from 896 characters.
-    expect(text.length).toBeLessThan(500)
+    // Trimmed in 1.0.0037 from 896 characters; 1.0.0038 adds the model sentence.
+    expect(text.length).toBeLessThan(640)
   })
 })
 

@@ -183,7 +183,7 @@ describe('every task goes through flowdeck', () => {
       expect(rule.text).toContain(word)
     }
     // Trimmed in 1.0.0037 to about half of the 896 characters it had.
-    expect(rule.text.length).toBeLessThan(560)
+    expect(rule.text.length).toBeLessThan(640)
   })
 })
 

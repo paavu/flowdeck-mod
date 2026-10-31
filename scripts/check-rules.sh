@@ -18,5 +18,21 @@ check 'a goal on every task created' 'Send `goal` on every task you create or ad
 check 'result and feedback on accept' 'send `result` (what it delivered) and `feedback`'
 check 'no flow for trivial work' 'A question or a one-step edit needs no flow.'
 check 'never leaving a task unreported' 'never leave a task unreported'
+check 'the per-task model sent in the plan' 'Send the same value as the task'"'"'s `model` in the plan'
+check 'the escalation order' 'Escalation order: a task that fails review on Sonnet goes to Opus careful'
+check 'Fable only after the user approved' 'Use `flowdeck-fable` only after an explicit yes.'
+agent() {
+  f="agents/flowdeck-$1.md"
+  if ! grep -qx "model: $2" "$f" || ! grep -qx "effort: $3" "$f"; then
+    echo "$f is not model $2, effort $3" >&2
+    missing=1
+  fi
+}
+agent light sonnet low
+agent medium sonnet medium
+agent careful opus high
+agent heavy opus xhigh
+agent fable fable high
+grep -q 'only after the user approved it' agents/flowdeck-fable.md || { echo 'flowdeck-fable.md misses the approval line' >&2; missing=1; }
 [ "$missing" = 0 ] && echo "SKILL.md carries every flow rule"
 exit "$missing"

@@ -1,7 +1,7 @@
 ---
 name: flowdeck-light
-description: flowdeck light worker (Opus, low effort). Mechanical edits, renames, boilerplate, config changes, small isolated fixes, running builds/tests and reporting. Spawned only by the /flowdeck orchestrator.
-model: opus
+description: flowdeck light worker (Sonnet, low effort). Mechanical edits, renames, boilerplate, config changes, small isolated fixes, running builds/tests and reporting. Spawned only by the /flowdeck orchestrator.
+model: sonnet
 effort: low
 ---
 

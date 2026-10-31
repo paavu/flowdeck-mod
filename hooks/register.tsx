@@ -19,7 +19,7 @@ import { sortNewest } from './order'
 import { doneText } from './time'
 import { percent, where } from './plan'
 import { planRows, planSvg, STATE_COLOR, stateLabel } from './plan-view'
-import { acceptedOf, acceptedOnly, allTasksDone, cleanAfter, linkRuns, norm, shortTitle, taskOf, taskTag, unstarted, workerTier } from './tasks'
+import { acceptedOf, acceptedOnly, allTasksDone, cleanAfter, linkRuns, modelOf, norm, shortTitle, taskOf, taskTag, TASK_MODELS, unstarted, workerTier } from './tasks'
 import type { TaskLike } from './tasks'
 import { ARCHIVE_PAGE, asAgents, asCacheFacts, asCacheFold, asCacheTick, asDetails, asFlow, asKeepWarm, asLists, asLive, asMeta, asNow, asPanel, asReading, asUsage, LIVE_DEFAULT, PANEL_DEFAULT } from './shapes'
 import { changeLive, endRuns, IDLE_FINISH_MS, isGone, LIVE_BEAT_MS, LIVE_STALE_MS, liveKey, readLive, without } from './live'
@@ -114,12 +114,13 @@ const TICK_MS = 5000
 const PHASES: readonly Phase[] = ['plan', 'design', 'delegate', 'review', 'close']
 // The flow rule, in the system prompt only while task tracking is on (rule.ts) or in a session that ran /flowdeck:flowdeck.
 const FLOW_RULE = `# flowdeck
-Track each task with ${TOOL} (ToolSearch \`select:${TOOL}\` if deferred; workers use only ${STEP_TOOL}). Plan once: title, tasks [{title, tier, after, goal}] from 1; chain tasks editing the same files with \`after\`. New task: \`add\` with its goal. Accepted: \`done: [n]\` with notes [{task, result, feedback}]. Worker Agent description: \`#<n> <title>\`. No flow for a question or a one-step edit; never leave another task unreported.`
+Track each task with ${TOOL} (ToolSearch \`select:${TOOL}\` if deferred; workers use only ${STEP_TOOL}). Plan once: title, tasks [{title, tier, after, goal}] from 1; chain tasks editing the same files with \`after\`. New task: \`add\` with its goal. Accepted: \`done: [n]\` with notes [{task, result, feedback}]. Worker Agent description: \`#<n> <title>\`. Pick the Agent \`model\` per task and send it as the task's \`model\`. Fable only after the user approves, once Opus heavy failed. No flow for a question or a one-step edit; never leave another task unreported.`
 const GOAL_TEXT = "The user's request for this task in a sentence; plain text, at most 300 characters."
 // The pane keeps its id from before the command's rename, so a pane the desktop app placed still opens.
 const PANE = 'flowdeck-agents'
 const PANEL_COMMANDS = ['flowdeck-panel', 'flowdeck-agents'] // the second is the old name, kept for one release
 const RULE_COMMAND = 'flowdeck-rule'
+const MODEL_PROP = { type: 'string', enum: [...TASK_MODELS], description: "Model for the task, if not the tier's." }
 const TIERS = ['fable', 'heavy', 'careful', 'medium', 'light']
 
 const PROGRESS_SPEC = {
@@ -149,6 +150,7 @@ const PROGRESS_SPEC = {
             title: { type: 'string' },
             tier: { type: 'string', enum: TIERS },
             after: { type: 'array', items: { type: 'integer' }, description: 'Numbers of the tasks it waits for.' },
+            model: MODEL_PROP,
             goal: { type: 'string', description: GOAL_TEXT },
           },
           required: ['title'],
@@ -164,6 +166,7 @@ const PROGRESS_SPEC = {
             title: { type: 'string', description: 'A few words.' },
             tier: { type: 'string', enum: TIERS },
             after: { type: 'array', items: { type: 'integer' }, description: 'Numbers of the tasks it waits for; unknown, self and cyclic waits are ignored.' },
+            model: MODEL_PROP,
             goal: { type: 'string', description: GOAL_TEXT },
           },
           required: ['title', 'tier'],
@@ -244,8 +247,8 @@ type ProgressInput = {
   phase?: Phase
   finished?: boolean
   restart?: boolean
-  tasks?: { title?: string; tier?: string; after?: number[]; goal?: string }[]
-  add?: { title?: string; tier?: string; after?: number[]; goal?: string }[]
+  tasks?: { title?: string; tier?: string; after?: number[]; goal?: string; model?: string }[]
+  add?: { title?: string; tier?: string; after?: number[]; goal?: string; model?: string }[]
   /** Handoff notes by task number (from 1): `{ task, goal?, result?, feedback? }` (hooks/notes.ts applyNotes). */
   notes?: unknown
 }
@@ -422,10 +425,12 @@ const cleanTasks = (tasks: ProgressInput['tasks']): PlannedTask[] | undefined =>
     ?.filter(t => t.title?.trim())
     .map(t => {
       const goal = cleanText(t.goal, NOTE_MAX.goal)
+      const model = modelOf(t.model)
       return {
         title: (t.title ?? '').trim(),
         tier: (t.tier ?? '').replace(/^flowdeck-/, '').trim().toLowerCase(),
         after: (t.after ?? []).filter(n => Number.isInteger(n) && n > 0),
+        ...(model ? { model } : {}),
         ...(goal ? { goal } : {}),
       }
     })
@@ -435,7 +440,7 @@ const unionTasks = (kept: PlannedTask[], incoming: PlannedTask[]): PlannedTask[]
   const byTitle = new Map(incoming.map(t => [t.title.toLowerCase(), t]))
   const old = kept.map(t => {
     const next = byTitle.get(t.title.toLowerCase())
-    return next ? { ...t, tier: next.tier || t.tier, after: next.after, ...(next.goal ? { goal: next.goal } : {}) } : t
+    return next ? { ...t, tier: next.tier || t.tier, after: next.after, ...(next.model ? { model: next.model } : {}), ...(next.goal ? { goal: next.goal } : {}) } : t
   })
   const have = new Set(kept.map(t => t.title.toLowerCase()))
   return [...old, ...incoming.filter(t => !have.has(t.title.toLowerCase()))]
@@ -624,8 +629,14 @@ const TIER_MODEL: Record<string, string> = {
   fable: 'Fable · high',
   heavy: 'Opus · xhigh',
   careful: 'Opus · high',
-  medium: 'Opus · medium',
-  light: 'Opus · low',
+  medium: 'Sonnet · medium',
+  light: 'Sonnet · low',
+}
+
+// A planned row's model and effort: the task's own model when it has one, else the tier's (the effort stays the tier's).
+const modelLabel = (tier: string, model?: string): string => {
+  const base = TIER_MODEL[tier] ?? ''
+  return model ? [model[0]!.toUpperCase() + model.slice(1), base.split(' · ')[1]].filter(Boolean).join(' · ') : base
 }
 
 // USD per million tokens: input, output, cache read, cache write (5-minute TTL).
@@ -1025,8 +1036,9 @@ const plannedSvg = (W: number, p: Planned, titleOutside = false): string => {
   const textW = W - 42 - 22
   const ready = p.ready ? tr().ready : ''
   const line = (m: string[]) => `${tier}  ${m.filter(Boolean).join('  ·  ')}${ready ? `  ·  ${ready}` : ''}`
-  const full = [TIER_MODEL[tier] ?? '', afterText(p.after)]
-  const meta = textWidth(line(full), 11) <= textW ? full : [TIER_MODEL[tier] ?? '']
+  const label = modelLabel(tier, p.model)
+  const full = [label, afterText(p.after)]
+  const meta = textWidth(line(full), 11) <= textW ? full : [label]
   const readyW = ready ? textWidth(`  ·  ${ready}`, 11) : 0
   const metaText = fitText(meta.filter(Boolean).join('  ·  '), 11, Math.max(0, textW - textWidth(`${tier}  `, 11) - readyW))
   return svg(
@@ -2823,7 +2835,7 @@ export const register: Register = (on, options) => {
         const tier = pl.tier in TIER_COLOR ? pl.tier : 'other'
         const ready = pl.ready ? ` · ${s.ready}` : ''
         const waits = pl.after.length ? ` · ${afterText(pl.after)}` : ''
-        const head = `  ${tier} · ${TIER_MODEL[tier] ?? ''}`
+        const head = `  ${tier} · ${modelLabel(tier, pl.model)}`
         // The wait goes first when the line is short; `ready` stays.
         const shownWaits = (head + waits + ready).length <= cols ? waits : ''
         const note = taskNote(pl)

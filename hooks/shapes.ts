@@ -6,6 +6,7 @@ import { parseArchive, stampsOf } from './archive'
 import { parseRecords } from './archive-index'
 import { noteOf } from './notes'
 import { asRule } from './rule'
+import { modelOf } from './tasks'
 
 /** How many Archive or Trash rows are drawn at first; `Show more` adds as many. */
 export const ARCHIVE_PAGE = 50
@@ -83,6 +84,8 @@ const asTask = (t: unknown): PlannedTask[] => {
   if (!isObj(t) || typeof t.title !== 'string') return []
   // A task held from before 1.0.0033 has no note; a part of the wrong kind is no part.
   const task: PlannedTask = { title: t.title, tier: text(t.tier, ''), after: Array.isArray(t.after) ? t.after.filter((n): n is number => Number.isInteger(n) && n > 0) : [], ...noteOf(t) }
+  const model = modelOf(t.model)
+  if (model) task.model = model
   if (typeof t.mirrored === 'boolean') task.mirrored = t.mirrored
   if (typeof t.counted === 'boolean') task.counted = t.counted
   return [task]

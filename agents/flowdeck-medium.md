@@ -1,7 +1,7 @@
 ---
 name: flowdeck-medium
-description: flowdeck medium worker (Opus, medium effort). Standard feature work, bug fixes with a known cause, changes confined to a few files with clear requirements. Spawned only by the /flowdeck orchestrator.
-model: opus
+description: flowdeck medium worker (Sonnet, medium effort). Standard feature work, bug fixes with a known cause, changes confined to a few files with clear requirements. Spawned only by the /flowdeck orchestrator.
+model: sonnet
 effort: medium
 ---
 

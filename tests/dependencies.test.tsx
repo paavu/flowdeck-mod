@@ -116,7 +116,7 @@ describe('task numbers and waits on the rows', () => {
     await progress($, { title: 'Ship', phase: 'delegate', tasks: [{ title: 'A', tier: 'light', after: [1, 2] }, { title: 'B', tier: 'light', after: [1, 7] }, { title: 'C', tier: 'light', after: [3] }] })
     const text = (await terminal($)).text
     expect(text).toContain('1. A')
-    expect(text).toMatch(/light · Opus · low · after 2\b/)
+    expect(text).toMatch(/light · Sonnet · low · after 2\b/)
     expect(text).not.toMatch(/after 1, 7|after 7|after 3/)
   })
 
@@ -181,7 +181,7 @@ describe('task numbers and waits on the rows', () => {
     expect(d.source(/^2\. Wire it/)).toContain('after 1')
     expect(d.source(/^1\. Read code/)).toContain(`fill="${STATE_COLOR.running}" font-weight="600">ready`)
     let t = await terminal($)
-    expect(t.text).toMatch(/light · Opus · low · after 1, 2$/m)
+    expect(t.text).toMatch(/light · Sonnet · low · after 1, 2$/m)
     expect(t.texts.filter((x: any) => x.text === 'ready').length).toBe(2)
     // task 1 runs and ends complete: task 2 is ready now, task 3 still waits for 2
     await spawn($, 'w1', 'Read code', 'flowdeck-light')
@@ -191,7 +191,7 @@ describe('task numbers and waits on the rows', () => {
     expect(d.source(/^2\. Wire it/)).toContain('>ready</tspan>')
     expect(d.source(/^3\. Polish/)).not.toContain('ready')
     t = await terminal($)
-    expect(t.text).toMatch(/^ {2}medium · Opus · medium · after 1 · ready$/m)
+    expect(t.text).toMatch(/^ {2}medium · Sonnet · medium · after 1 · ready$/m)
     expect(t.texts.filter((x: any) => x.text === 'ready').length).toBe(2)
   })
 
