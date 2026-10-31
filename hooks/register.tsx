@@ -2493,7 +2493,7 @@ export const register: Register = (on, options) => {
     const today = await clockOr($, 0)
 
     // One flow as the panel draws it, live or from the archive (FlowView in archive-view.tsx says what it takes).
-    const flowView = (v: FlowView): FlowDrawing => {
+    const flowViewAt = (v: FlowView, W: number): FlowDrawing => {
       const { kp, fp, at } = v
       // The task each run belongs to: its number leads the row's name, its waits go on the model line.
       const tasks: TaskLike[] = v.tasks ?? []
@@ -2849,6 +2849,8 @@ export const register: Register = (on, options) => {
       }
     }
 
+    const flowView = (v: FlowView): FlowDrawing => flowViewAt(v, v.width ?? W)
+
     const setIn = (ids: string[] | undefined, id: string, isIn: boolean): string[] => [...(ids ?? []).filter(x => x !== id), ...(isIn ? [id] : [])]
 
     // Context, Usage and the Archive draw on their own, each from its own values, whatever the flow is doing.
@@ -2954,10 +2956,10 @@ export const register: Register = (on, options) => {
     })
 
     // An Archive plan group (saved by an older flowdeck) draws its plan: the svg on the desktop, the rows in the terminal.
-    const planDrawing = (pl: TaskPlan, kp: string, at: number): RenderChildren => {
+    const planDrawing = (pl: TaskPlan, kp: string, at: number, width = W): RenderChildren => {
       if (Svg) {
-        const d = planSvg(W, pl, at)
-        return <Svg key={`${kp}plan-view-${keyOf(pl.id)}`} source={svg(W, d.height, d.body)} alt={`${pl.title}: ${stateLabel(pl)}, ${percent(pl, where(pl))}%`} width={W} height={d.height} />
+        const d = planSvg(width, pl, at)
+        return <Svg key={`${kp}plan-view-${keyOf(pl.id)}`} source={svg(width, d.height, d.body)} alt={`${pl.title}: ${stateLabel(pl)}, ${percent(pl, where(pl))}%`} width={width} height={d.height} />
       }
       return (
         <Box key={`${kp}plan-view-${keyOf(pl.id)}`} flexDirection="column">

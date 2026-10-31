@@ -2,6 +2,9 @@
 
 Versions are `M.m.xxxx`; every build bumps the 4-digit build number. Details and rulings: `docs/ledger.md`, `docs/design.md`.
 
+## 1.0.0045 (2026-10-31)
+- Archive and Trash: an opened session's content (tiles, task rows, notes and steps) sits one level in under its row, by `GROUP_INDENT` (2 columns, the fold glyph and a space) on the desktop and in the terminal; the drawings are that much narrower so nothing overflows. Folded rows are unchanged.
+
 ## 1.0.0044 (2026-10-31)
 - Quiet auto-start: with task tracking `unset` or `off`, a flow that starts by itself (from the session's task list or a flowdeck worker) no longer opens the panel; it still shows in Active, Finished and on the band, and `/flowdeck-panel` opens the panel. With tracking `on`, and for a flow started by `/flowdeck:flowdeck`, nothing changes.
 - The replies of `/flowdeck-rule on|off|status`, the strip on Active and Finished, and the README now say when a switch applies: when the prompt is next composed (a new session, `/clear` or a compaction); running and queued tasks are not affected.

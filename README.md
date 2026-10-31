@@ -72,7 +72,7 @@ To see what the mod hooks and calls before you install it, clone the repository 
 claude plugin update flowdeck@flowdeck-mod
 ```
 
-then `/reload-plugins` in open sessions. Every release raises `version` in `.claude-plugin/plugin.json`, so `update` always sees the new one. The panel's top row shows the version of the code that is running (`v1.0.0044`); after an update without a reload it still names the old one. [CHANGELOG.md](CHANGELOG.md) lists what each version changed.
+then `/reload-plugins` in open sessions. Every release raises `version` in `.claude-plugin/plugin.json`, so `update` always sees the new one. The panel's top row shows the version of the code that is running (`v1.0.0045`); after an update without a reload it still names the old one. [CHANGELOG.md](CHANGELOG.md) lists what each version changed.
 
 From 1.0.0036 or earlier: task tracking became a choice in 1.0.0037. An install that already ran flowdeck keeps its rule (`on`); see [Task tracking](#task-tracking) for how that is decided. `/flowdeck-agents` still opens the panel for this release; its new name is `/flowdeck-panel`.
 
@@ -188,7 +188,7 @@ Keeps the prompt cache warm through a long idle stretch so the next message read
 
 The panel opens with `/flowdeck-panel`, the band's `×N` button, or by itself when the first worker of a flow starts.
 
-**Top row**: `▼ Context`, `▼ Usage`, `● Band`, `● Keep warm` and `● Track tasks`, with the running version (`v1.0.0044`) at the far end. Context and Usage fold their sections and remember the choice (`▼` open, `▶︎` folded, the same glyphs as every fold in the panel); Band, Keep warm and Track tasks are dot switches (`●` on or shown, `○` off or hidden). Band shows or hides the band; Track tasks turns task tracking on or off (`○` until it is on).
+**Top row**: `▼ Context`, `▼ Usage`, `● Band`, `● Keep warm` and `● Track tasks`, with the running version (`v1.0.0045`) at the far end. Context and Usage fold their sections and remember the choice (`▼` open, `▶︎` folded, the same glyphs as every fold in the panel); Band, Keep warm and Track tasks are dot switches (`●` on or shown, `○` off or hidden). Band shows or hides the band; Track tasks turns task tracking on or off (`○` until it is on).
 
 | Section | Shows |
 |---|---|
@@ -201,7 +201,7 @@ The panel opens with `/flowdeck-panel`, the band's `×N` button, or by itself wh
 |---|---|
 | Active | The flow's cost, tokens and time, then the running workers (newest first) and the queued tasks in plan order. |
 | Finished | Done, Error and Incomplete runs and `Accepted · no worker run` rows, latest first. The rows move to the Archive on their own when the flow closes. |
-| Archive | Saved sessions of this project, newest first, one foldable row each. |
+| Archive | Saved sessions of this project, newest first, one foldable row each; an opened row shows its tasks one level in under it. |
 | Trash | Sessions moved to the trash, with `Restore` and `Empty Trash (n)`. |
 
 ### Flow rows

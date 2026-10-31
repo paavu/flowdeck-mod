@@ -2,7 +2,7 @@ import { describe, expect, test } from 'claude-code/testing'
 
 import { keyOf } from '../hooks/archive'
 import { trashName } from '../hooks/archive-index'
-import { RESTORE_ICON, TRASH_ICON } from '../hooks/archive-view'
+import { GROUP_INDENT, RESTORE_ICON, TRASH_ICON } from '../hooks/archive-view'
 import { fileOf, indexPath, records, seed, sessions, titles, trashCopies, trashIndexPath } from './archive-files'
 import { fakeFs } from './fake-fs'
 import { showTab } from './tabs'
@@ -149,8 +149,8 @@ describe('the Archive list draws from the index alone', () => {
     await settle()
     await press($, `archive-${K(2)}`)
     const t = await look($)
-    expect(t.texts).toContain(`  could not read ${fileOf(entry(1))}`)
-    expect(t.texts).toContain('  file missing')
+    expect(t.texts).toContain(`could not read ${fileOf(entry(1))}`)
+    expect(t.texts).toContain('file missing')
     expect(t.texts.some(x => / · file missing$/.test(x))).toBe(true)
     expect(t.buttons.find(b => b.key === 'tab-archive')?.text).toBe('Archive (3)')
   })
@@ -326,5 +326,50 @@ describe('moving a session to the trash', () => {
     const t = await look($)
     expect(t.keys.filter(k => /^archive-k[a-z0-9]+$/.test(k))).toHaveLength(2)
     expect(t.keys.some(k => k.startsWith('archive-del-'))).toBe(false)
+  })
+})
+
+describe('an opened session’s content sits one level in under its row', () => {
+  const bodies = async ($: any, surface: 'terminal' | 'desktop', tab: Tab) => {
+    const p = await pane($, surface, tab)
+    const boxes = (await p.findAll({ type: 'Box' })).filter((b: any) => /^(archive|trash)-body-/.test(String(b.props.key)))
+    const svgs = (await p.findAll({ type: 'Svg' })).map((s: any) => Number(s.props.width))
+    await p.unmount()
+    return { pads: boxes.map((b: any) => ({ key: String(b.props.key), pad: b.props.paddingLeft })), svgs }
+  }
+
+  test('Archive and Trash, both surfaces: only the open group’s body is indented by GROUP_INDENT', async ($, on) => {
+    const { clock } = engine(on, { files: seeded(2) })
+    await start($)
+    await settle()
+    clock.now = NOW + MIN
+    await press($, `archive-del-${K(2)}`)
+    await press($, `archive-trash-${K(2)}`)
+    for (const tab of ['archive', 'trash'] as const) {
+      for (const surface of ['terminal', 'desktop'] as const) {
+        const b = await bodies($, surface, tab)
+        expect(b.pads).toHaveLength(1)
+        expect(b.pads[0]!.pad).toBe(GROUP_INDENT)
+      }
+    }
+  })
+
+  test('a folded row has no body wrapper', async ($, on) => {
+    engine(on, { files: seeded(2) })
+    await start($)
+    await settle()
+    await press($, `archive-${K(1)}`)
+    expect((await bodies($, 'desktop', 'archive')).pads).toEqual([])
+  })
+
+  test('desktop drawings in the body are narrower by the indent and never wider than the pane', async ($, on) => {
+    engine(on, { files: seeded(2) })
+    await start($)
+    await settle()
+    const full = 80 * 8 - 8
+    const { svgs } = await bodies($, 'desktop', 'archive')
+    expect(svgs.every(w => w <= full)).toBe(true)
+    expect(svgs).toContain(full - GROUP_INDENT * 8)
+    expect(svgs).toContain(full) // the folded row's divider keeps the full width
   })
 })

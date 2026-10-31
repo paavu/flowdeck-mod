@@ -37,6 +37,8 @@ export type FlowView = {
   at: number
   t: Totals
   rows: 'active' | 'finished' | 'all'
+  /** The drawing width in pixels on the desktop; the panel's width when absent. */
+  width?: number
 }
 export type FlowDrawing = { header: RenderChildren; body: () => RenderChildren }
 
@@ -85,7 +87,7 @@ export type ArchiveView = {
   canMove: boolean
   flowView: (v: FlowView) => FlowDrawing
   /** One archived plan's drawing; `kp` prefixes its keys, `at` is its clock. */
-  plan: (pl: TaskPlan, kp: string, at: number) => RenderChildren
+  plan: (pl: TaskPlan, kp: string, at: number, width?: number) => RenderChildren
   on: {
     entry: (rec: ArchiveRecord, isOpen: boolean) => unknown
     /** The row's trash can (Archive) or ↩ (Trash): opens its confirmation. */
@@ -99,6 +101,11 @@ export type ArchiveView = {
     empty: () => unknown
   }
 }
+
+/** How far an opened group's content sits in from its session row, in columns: the fold glyph and a space. */
+export const GROUP_INDENT = 2
+/** One column in pixels, as the desktop's drawing width counts them. */
+const COLUMN_PX = 8
 
 // The fold state's key of a group: the session id in the Archive, `trash:<id>` in the Trash.
 export const groupKey = (list: 'archive' | 'trash', id: string): string => (list === 'archive' ? id : `trash:${id}`)
@@ -124,10 +131,11 @@ export function summaryLine(v: Pick<ArchiveView, 'fmt' | 'words'>, rec: ArchiveR
 // drawing; the task list of a flow saved without runs), or why it is not there.
 function groupBody(v: ArchiveView, rec: ArchiveRecord, key: string): RenderChildren {
   const { Box, Text } = v.ui
+  const width = v.W - GROUP_INDENT * COLUMN_PX
   const d = v.details.find(x => x.list === v.list && x.id === rec.id)
   const note = (text: string) => (
     <Text key={`${v.list}-${key}-note`} dimColor wrap="truncate-end">
-      {`  ${text}`}
+      {text}
     </Text>
   )
   if (d?.state !== 'ok' || !d.entry) {
@@ -136,7 +144,7 @@ function groupBody(v: ArchiveView, rec: ArchiveRecord, key: string): RenderChild
   }
   const entry: ArchiveEntry = d.entry
   const kp = `${v.list}-${key}-`
-  if (entry.plan) return v.plan(entry.plan, kp, entry.endedAt)
+  if (entry.plan) return v.plan(entry.plan, kp, entry.endedAt, width)
   const runs = (entry.agents ?? []).map(a => endedRun(a, entry.endedAt))
   if (!runs.length) {
     return formatEntry(entry).lines.map((l, k) => (
@@ -157,6 +165,7 @@ function groupBody(v: ArchiveView, rec: ArchiveRecord, key: string): RenderChild
     at: entry.endedAt,
     t: { cost: entry.cost, tokens: entry.tokens, time: entry.time },
     rows: 'all',
+    width,
   })
   return v.Svg ? [view.header, view.body()] : <Box flexDirection="column" marginTop={1}>{view.body()}</Box>
 }
@@ -231,7 +240,11 @@ function sessionRow(v: ArchiveView, rec: ArchiveRecord, i: number): RenderChildr
               {`  ${summaryLine(v, rec)}`}
             </Text>
           )}
-          {isOpen && groupBody(v, rec, key)}
+          {isOpen && (
+            <Box key={`${v.list}-body-${key}`} flexDirection="column" paddingLeft={GROUP_INDENT}>
+              {groupBody(v, rec, key)}
+            </Box>
+          )}
         </Box>
       )}
     </Box>
