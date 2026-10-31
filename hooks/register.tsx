@@ -1793,7 +1793,7 @@ async function renewNow($: EngineInterface, k: KeepWarm, at: number): Promise<vo
 
 // The band's cache part, null with nothing to show yet. A part that cannot be drawn is said (noteFault) and left out,
 // so the flow row still draws.
-async function cacheBandPart($: EngineInterface, ui: CacheUi, bandW: number): Promise<CacheDrawing | null> {
+async function cacheBandPart($: EngineInterface, ui: CacheUi, bandW: number, columns: number): Promise<CacheDrawing | null> {
   try {
     await read($, cacheTick) // read so the minute tick redraws the band
     const c = await readCache($)
@@ -1803,7 +1803,7 @@ async function cacheBandPart($: EngineInterface, ui: CacheUi, bandW: number): Pr
       const mode = (await cacheView($, await readCache($), await $.clock.now()))?.mode
       if (mode) await update($, cacheFold, f => toggledFold(asCacheFold(f), mode))
     }
-    return cacheDrawing(ui, v, isCardOpen(asCacheFold(await read($, cacheFold)), v.mode), toggle, bandW, svg)
+    return cacheDrawing(ui, v, isCardOpen(asCacheFold(await read($, cacheFold)), v.mode), toggle, bandW, svg, columns)
   } catch (err) {
     noteFault($, 'band', `cache: ${err instanceof Error ? err.message : String(err)}`)
     return null
@@ -3188,7 +3188,7 @@ export const register: Register = (on, options) => {
     const { Box, Text, Button } = ui
     const bandWidth = Math.max(180, Math.min(MAX_BAND_W, (e.props.bodyColumns || 100) * 9 - 180))
     // The prompt cache's chip, shown once the session made a request, with or without a flow (cache-view.tsx).
-    const cache = await cacheBandPart($, { Box, Text, Button, Svg: e.surface !== 'terminal' && 'Svg' in ui ? ui.Svg : null } as CacheUi, bandWidth)
+    const cache = await cacheBandPart($, { Box, Text, Button, Svg: e.surface !== 'terminal' && 'Svg' in ui ? ui.Svg : null } as CacheUi, bandWidth, e.props.bodyColumns || 0)
     if (f === null && open.length === 0 && !cache) return next(e)
 
     // What other mods and Claude Code draw here stays, below this row; when that fails, the row is drawn without it.

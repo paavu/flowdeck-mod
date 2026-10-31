@@ -2,6 +2,11 @@
 
 Versions are `M.m.xxxx`; every build bumps the 4-digit build number. Details and rulings: `docs/ledger.md`, `docs/design.md`.
 
+## 1.0.0032 (2026-10-31)
+- The prompt-cache card is shorter: on a wide band (up to 760 px) it draws two columns of about three rows instead of eight stacked ones. Left: the chip with the idle time and the tokens, the TTL line with the hour's bar, keep warm's state with `renewal ≈ … · cold ≈ …` on the same line. Right, past a faint divider: the caption with a dim `prices are estimates` at its end, then the four models side by side (name above price, `YOU` on the session's model). About 82 px high (98-100 px when a line has to drop to a fourth row), down from about 210 px.
+- Every text is measured: a line that does not fit moves to a fourth row (the costs below keep warm's state, the footer below the models), and a band too narrow for two columns (below 520 px, or where the texts need more room) stacks the card in one column with every line wrapped to the width, four models a row (two, or one, when four do not fit). Nothing overlaps or leaves the card at any width.
+- The terminal card is three lines: `idle … · … tokens cached · <TTL>`, `keep warm: … · renewal ≈ … · cold ≈ …`, and `<caption>: Fable $… · Opus $… · …` with ` · prices are estimates` after it when the row has the columns (else on a fourth line). The chip, the band row and the chevron are unchanged.
+
 ## 1.0.0031 (2026-10-30)
 - `Empty Trash (n)` at the top of the Trash tab, shown only while the Trash holds sessions (never on the Archive tab). It asks first: `Erase n sessions for good? This cannot be undone.` with `Erase` / `Cancel` in its place (held through redraws; Cancel or switching tab closes it).
 - `Erase` permanently erases every trashed session everywhere (no Mac Trash, no undo): its original in `archive/` and its copies in `.trash/`, then writes `.trash/trash-index.json` empty. The one place flowdeck erases a file, a one-off exception the user chose for this button. Restore still moves a session back; Empty Trash erases for good. Nothing was erased before.

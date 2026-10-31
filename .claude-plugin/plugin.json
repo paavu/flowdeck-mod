@@ -1,6 +1,6 @@
 {
   "name": "flowdeck",
-  "version": "1.0.0031",
+  "version": "1.0.0032",
   "description": "Orchestrated delivery flow with a live side panel: /flowdeck plans and delegates to tiered workers, /flowdeck-agents shows the panel with the agents, progress and context window.",
   "author": { "name": "paavu-mods" },
   "types": "./types/index.d.ts",

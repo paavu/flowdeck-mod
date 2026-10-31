@@ -1,7 +1,9 @@
 import { describe, expect, mock, test } from 'claude-code/testing'
 
-import { coldCost, familyOf, isCardOpen, MODELS, nextCost, summaryText, toggledFold, tokText, TTL_MS, ttlText, usd, viewOf, warmCost } from '../hooks/cache'
-import { CACHE_FOLD_PX } from '../hooks/cache-view'
+import { CACHE_WORD, coldCost, familyOf, isCardOpen, MODELS, nextCost, summaryText, toggledFold, tokText, TTL_MS, ttlText, usd, viewOf, warmCost } from '../hooks/cache'
+import type { CacheView } from '../hooks/cache'
+import { CACHE_FOLD_PX, CARD_MAX_W, cardLines, cardSvg, WIDE_MIN_W } from '../hooks/cache-view'
+import { textWidth } from '../hooks/plan-view'
 import { asCacheFacts, asCacheFold, asCacheTick } from '../hooks/shapes'
 import { hhmm, idleText, minutesLeft } from '../hooks/time'
 
@@ -484,6 +486,131 @@ describe('Show and Hide', () => {
     expect(h(narrow)).toBeGreaterThan(h(wide))
     expect(narrow.widths[narrow.alts.findIndex(a => a.startsWith('Cache'))]).toBe(180)
   })
+})
+
+describe("the card's layout", () => {
+  const facts = (tokens: number, model: string) => ({ lastAt: NOW, tokens, window: 1e6, model })
+  const at = (tokens: number, model: string, idle: number, keep?: CacheView['keep']): CacheView => {
+    const v = viewOf(facts(tokens, model), NOW + idle)!
+    return keep ? { ...v, keep } : v
+  }
+  // The owner's screenshot (cold for 13h 14m, not renewed), a warm card, the longest keep-warm text on Fable's larger
+  // context, an unpriced model on a tiny context, and a cold Haiku days later.
+  const VIEWS: Record<string, CacheView> = {
+    screenshot: at(220_000, 'claude-sonnet-5', (14 * 60 + 14) * MIN),
+    warm: at(TOKENS, 'claude-opus-5-5', 18 * MIN),
+    longest: at(1_240_000, 'claude-fable-5', 30 * MIN, { kind: 'failed', renewals: 2, retryAt: NOW + 52 * MIN }),
+    unpriced: at(640, 'mystery-model', 5 * MIN),
+    days: at(TOKENS, 'claude-haiku-5', (3 * 24 + 9) * 60 * MIN),
+  }
+  const WIDTHS = [760, 640, 520, 400, 300, 180]
+  const unesc = (s: string) => s.replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&quot;/g, '"').replace(/&amp;/g, '&')
+  const attrsOf = (s: string) => Object.fromEntries([...s.matchAll(/([\w-]+)="([^"]*)"/g)].map(m => [m[1]!, m[2]!]))
+  // Each text's box, measured as the card measures it (600 and up is bold); the chip's word is centred on its x.
+  const textsOf = (svg: string) =>
+    [...svg.matchAll(/<text ([^>]*)>([^<]*)<\/text>/g)].map(m => {
+      const a = attrsOf(m[1]!)
+      const s = unesc(m[2]!)
+      const size = Number(a['font-size'])
+      const w = textWidth(s, size, Number(a['font-weight'] ?? 400) >= 600)
+      const x = Number(a.x) - (a['text-anchor'] === 'middle' ? w / 2 : 0)
+      const y = Number(a.y)
+      return { s, y, left: x, right: x + w, top: y - size * 0.75, bottom: y + size * 0.2 }
+    })
+  const draw = (v: CacheView, w: number) => cardSvg(v, w, (_w, _h, body) => body)
+  const norm = (s: string) => s.replace(/ · /g, ' ').replace(/\s+/g, ' ')
+
+  test('every text, rect and line stays inside the card, and no two texts overlap, at every width', () => {
+    for (const [name, v] of Object.entries(VIEWS)) {
+      for (const W of WIDTHS) {
+        const c = draw(v, W)
+        const where = `${name} at ${W}`
+        expect([where, c.width]).toEqual([where, W])
+        const texts = textsOf(c.source)
+        for (const t of texts) {
+          expect([where, t.s, t.left >= 0, t.right <= c.width, t.bottom <= c.height]).toEqual([where, t.s, true, true, true])
+        }
+        for (let i = 0; i < texts.length; i++)
+          for (let j = i + 1; j < texts.length; j++) {
+            const a = texts[i]!
+            const b = texts[j]!
+            const isOver = a.left < b.right && b.left < a.right && a.top < b.bottom && b.top < a.bottom
+            expect([where, a.s, b.s, isOver]).toEqual([where, a.s, b.s, false])
+          }
+        for (const m of c.source.matchAll(/<rect ([^>]*)\/>/g)) {
+          const a = attrsOf(m[1]!)
+          expect([where, Number(a.x) >= 0, Number(a.x) + Number(a.width) <= c.width, Number(a.y) + Number(a.height) <= c.height]).toEqual([where, true, true, true])
+        }
+        for (const m of c.source.matchAll(/<line ([^>]*)\/>/g)) {
+          const a = attrsOf(m[1]!)
+          expect([where, Number(a.x1) > 0 && Number(a.x1) < c.width, Number(a.y2) <= c.height]).toEqual([where, true, true])
+        }
+      }
+    }
+  })
+
+  test('a wide band gets two columns of about three rows, at most 110 px high', () => {
+    for (const [name, v] of Object.entries(VIEWS)) {
+      const c = draw(v, 2000)
+      expect(c.width).toBe(CARD_MAX_W)
+      expect([name, c.source.includes('<line class="ln"'), c.height <= 110]).toEqual([name, true, true])
+    }
+    // The owner's screenshot: three rows, every model's price beside the costs, the footer at the caption's end.
+    const c = draw(VIEWS.screenshot!, 760)
+    expect(c.height).toBeLessThanOrEqual(90)
+    const texts = textsOf(c.source)
+    const y = (s: string) => texts.find(t => t.s === s)!.y
+    expect(y('keep warm: not renewed')).toBe(y('renewal ≈ $0.04 · cold ≈ $0.88'))
+    expect(y('next message, re-cache (1-hour write)')).toBe(y('prices are estimates'))
+    const prices = ['$4.40', '$1.76', '$0.88', '$0.22'].map(y)
+    expect(new Set(prices).size).toBe(1)
+    expect(textsOf(c.source).filter(t => t.s === 'prices are estimates')[0]!.left).toBeGreaterThan(texts.find(t => t.s === 'idle 14h 14m · 220k tokens cached')!.right)
+  })
+
+  test(`below ${WIDE_MIN_W} px (or when the columns do not fit) the card stacks, and still says everything`, () => {
+    expect(draw(VIEWS.screenshot!, 400).source).not.toContain('<line')
+    expect(draw(VIEWS.screenshot!, 180).source).not.toContain('<line')
+    for (const [name, v] of Object.entries(VIEWS)) {
+      for (const W of WIDTHS) {
+        const c = draw(v, W)
+        const texts = textsOf(c.source).map(t => t.s)
+        const flat = norm(texts.join(' '))
+        const lines = cardLines(v)
+        const want = [`idle ${idleText(v.idleMs)} · ${tokText(v.tokens)} tokens cached`, ttlText(v), lines.keep, lines.renewal ?? '', lines.label.slice(0, -1), lines.footer]
+        for (const f of want) expect([name, W, f, flat.includes(norm(f))]).toEqual([name, W, f, true])
+        for (const m of lines.models) expect([name, W, texts.includes(m.name), texts.includes(m.cost)]).toEqual([name, W, true, true])
+        expect([name, W, texts.includes('YOU')]).toEqual([name, W, v.model !== null])
+        expect([name, W, texts.includes(CACHE_WORD[v.mode])]).toEqual([name, W, true])
+      }
+    }
+  })
+
+  test('the stacked card is still shorter than the eight rows it replaced, and grows only as the band narrows', () => {
+    const v = VIEWS.screenshot!
+    expect(draw(v, 400).height).toBeLessThanOrEqual(150)
+    expect(draw(v, 180).height).toBeGreaterThanOrEqual(draw(v, 400).height)
+    expect(draw(v, 400).height).toBeGreaterThan(draw(v, 760).height)
+  })
+
+  for (const [columns, isFootUp] of [[140, true], [70, false]] as const) {
+    test(`the terminal card: three lines, the footer ${isFootUp ? 'at the end of the third' : 'on its own'} (${columns} columns)`, async ($, on) => {
+      const { clock } = engine(on, { store: { keepWarm: { '': false } } }) // keep warm switched off in this project
+      await start($)
+      await mainTurn($)
+      await clock.set(NOW + 2 * TTL_MS)
+      const l = await look($, 'terminal', columns)
+      expect(l.isCardOpen).toBe(true)
+      expect(l.texts).toContain('idle 2h 0m · 770k tokens cached · cold for 1h 0m')
+      expect(l.texts).toContain('keep warm: off · renewal ≈ $0.15 · cold ≈ $6.16')
+      const models = 'Fable $15.40 · Opus $6.16 YOU · Sonnet $3.08 · Haiku $0.77'
+      const third = `next message, re-cache (1-hour write): ${models}`
+      expect(l.texts).toContain(isFootUp ? `${third} · prices are estimates` : third)
+      expect(l.texts).toContain(models)
+      expect(l.texts).toContain('prices are estimates')
+      const card = l.json.slice(l.json.indexOf('"cache-card"'))
+      expect(card.split('"wrap":"truncate-end"').length - 1).toBe(isFootUp ? 3 : 4)
+    })
+  }
 })
 
 describe('the minute tick', () => {

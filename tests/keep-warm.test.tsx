@@ -104,15 +104,18 @@ const openCard = async ($: any) => {
   if (!JSON.stringify(await b.drawn()).includes('"cache-card"')) await b.press({ key: 'cache-fold' })
   await b.unmount()
 }
-// The card's keep-warm line and cost line, the same on both surfaces (the desktop's alt, the terminal's lines).
+// The card's keep-warm state and costs, the same on both surfaces (the desktop's alt; the terminal's one line for both).
 const cardOf = async ($: any): Promise<{ keep: string; renewal: string | undefined; facts: string; alt: string }> => {
   await openCard($)
   const t = await look($, 'terminal')
   const d = await look($, 'desktop')
   const alt = d.alts.find(a => a.startsWith('Cache ')) ?? ''
-  const keep = t.texts.find(x => /^(keep warm: |kept warm ×)/.test(x)) ?? ''
+  const line = t.texts.find(x => /^(keep warm: |kept warm ×)/.test(x)) ?? ''
+  const renewal = t.texts.find(x => x.startsWith('renewal ≈'))
+  const keep = line.split(' · renewal ≈ ')[0]!
+  expect(line).toBe(renewal ? `${keep} · ${renewal}` : keep)
   expect(alt).toContain(`. ${keep}.`)
-  return { keep, renewal: t.texts.find(x => x.startsWith('renewal ≈')), facts: t.texts.find(x => x.startsWith('idle ')) ?? '', alt }
+  return { keep, renewal, facts: t.texts.find(x => x.startsWith('idle ')) ?? '', alt }
 }
 const pressKeepWarm = async ($: any, surface: 'desktop' | 'terminal' = 'terminal') => {
   const p = await pane($, surface)
