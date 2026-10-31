@@ -11,7 +11,7 @@
 </p>
 
 <p align="center">
-  <img alt="Version 1.0.0061" src="https://img.shields.io/badge/version-1.0.0061-8f8cf4">
+  <img alt="Version 1.0.0062" src="https://img.shields.io/badge/version-1.0.0062-8f8cf4">
   <img alt="MIT license" src="https://img.shields.io/badge/license-MIT-5fbf8f">
   <img alt="Claude Code 2.1.295 or later" src="https://img.shields.io/badge/Claude%20Code-%E2%89%A5%202.1.295-8f8cf4">
   <img alt="Terminal and desktop" src="https://img.shields.io/badge/surfaces-terminal%20%2B%20desktop-5fbf8f">
@@ -23,6 +23,14 @@
   <a href="#model-routing">Model routing</a> &middot;
   <a href="CHANGELOG.md">Changelog</a> &middot;
   <a href="#privacy-what-it-reads-writes-and-runs">Privacy</a>
+</p>
+
+<p align="center">
+  <img src="docs/media/flowdeck-demo.gif" alt="A 20-second tour of FlowDeck with sample data: the band above the prompt, the crew with model, effort, steps and cost, handoff notes, the cache card and the archive." width="800">
+</p>
+
+<p align="center">
+  A 20-second tour with sample data. <a href="docs/media/flowdeck-demo.mp4?raw=1">Download the full-resolution video</a>.
 </p>
 
 ---

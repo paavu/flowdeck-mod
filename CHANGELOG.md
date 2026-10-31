@@ -2,6 +2,9 @@
 
 Versions are `M.m.xxxx`; every build bumps the 4-digit build number. Details and rulings: `docs/ledger.md`, `docs/design.md`.
 
+## 1.0.0062 (2026-10-31)
+- README: a framed 20-second screen recording of the panel, band, crew and archive (sample data) sits at the top, as a GIF with a link to the full-resolution MP4 in `docs/media/`.
+
 ## 1.0.0061 (2026-10-31)
 - README: the "How it works" diagram is now a vertical image with larger text (light and dark), drawn by `scripts/diagrams/how-it-works.py`, instead of a small left-to-right Mermaid chart.
 
