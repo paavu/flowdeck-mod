@@ -263,8 +263,8 @@ describe('every agent row folds', () => {
     let p = await pane($, 'terminal')
     const chevrons = (await p.findAll({ type: 'Button' })).filter((b: any) => /^agent-fold-/.test(String(b.props.key)))
     expect(chevrons.map((b: any) => [String(b.props.key), String(b.props.label), b.props.dimColor])).toEqual([
-      ['agent-fold-w2', '▸', false],
-      ['agent-fold-w1', '▸', true],
+      ['agent-fold-w2', '▶︎', false],
+      ['agent-fold-w1', '▶︎', true],
     ])
     // planned rows do not fold
     expect((await p.findAll({ type: 'Button' })).some((b: any) => /plan-/.test(String(b.props.key)))).toBe(false)
@@ -275,8 +275,8 @@ describe('every agent row folds', () => {
     const texts = (await p.findAll({ type: 'Text' })).map((x: any) => ({ text: String(x.text), dim: x.props.dimColor }))
     const buttons = await p.findAll({ type: 'Button' })
     await p.unmount()
-    expect(buttons.find((b: any) => b.props.key === 'agent-fold-w1')?.props.label).toBe('▾')
-    expect(buttons.find((b: any) => b.props.key === 'agent-fold-w2')?.props.label).toBe('▸') // only the row pressed opens
+    expect(buttons.find((b: any) => b.props.key === 'agent-fold-w1')?.props.label).toBe('▼')
+    expect(buttons.find((b: any) => b.props.key === 'agent-fold-w2')?.props.label).toBe('▶︎') // only the row pressed opens
     expect(texts.some(x => detail(x.text) && x.dim)).toBe(true)
     expect(texts.some(x => x.text.trim() === 'No steps reported yet' && x.dim)).toBe(true)
     expect(texts.some(x => /\btwo\b/.test(x.text))).toBe(false) // w2's items stay folded
@@ -329,7 +329,7 @@ describe('every agent row folds', () => {
       const p = await pane($, surface, 'finished')
       const b = (await p.findAll({ type: 'Button' })).find((x: any) => x.props.key === 'agent-fold-w1')
       await p.unmount()
-      expect(b?.props.label).toBe('▸')
+      expect(b?.props.label).toBe('▶︎')
       expect(b?.props.dimColor).toBe(true)
     }
   })

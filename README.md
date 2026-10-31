@@ -54,7 +54,7 @@ Check it loaded: `/plugin` shows a dim line such as `1 mod active · flowdeck` u
 
 First run:
 
-1. `/flowdeck-agents` opens the panel: the top row (`Context`, `Usage`, `Band`, `Keep warm (on)` and the version), then the tabs, all at `(0)` in a new project. Context and Usage fill in once Claude Code reports them, at the latest after the first reply.
+1. `/flowdeck-agents` opens the panel: the top row (`▼ Context`, `▼ Usage`, `● Band`, `● Keep warm` and the version), then the tabs, all at `(0)` in a new project. Context and Usage fill in once Claude Code reports them, at the latest after the first reply.
 2. After the first reply, the band above the prompt shows the `WARM` cache chip.
 3. `/flowdeck <a small task>` starts a flow: the orchestrator shows its plan, the band shows the running task with `Tasks X/Y`, and each worker appears in the panel's Active tab with its steps. When every task is done and the turn ends, the band reads `Done` and the flow is saved to the Archive tab.
 
@@ -70,7 +70,7 @@ To see what the mod hooks and calls before you install it, clone the repository 
 claude plugin update flowdeck@flowdeck-mod
 ```
 
-then `/reload-plugins` in open sessions. Every release raises `version` in `.claude-plugin/plugin.json`, so `update` always sees the new one. The panel's top row shows the version of the code that is running (`v1.0.0035`); after an update without a reload it still names the old one. [CHANGELOG.md](CHANGELOG.md) lists what each version changed.
+then `/reload-plugins` in open sessions. Every release raises `version` in `.claude-plugin/plugin.json`, so `update` always sees the new one. The panel's top row shows the version of the code that is running (`v1.0.0036`); after an update without a reload it still names the old one. [CHANGELOG.md](CHANGELOG.md) lists what each version changed.
 
 From 1.0.0034 or earlier: the Plans tab and the `plan` tool are gone (1.0.0035). An old `plans.json` is ignored and never deleted, and a panel left on the Plans tab opens on Active.
 
@@ -179,7 +179,7 @@ Keeps the prompt cache warm through a long idle stretch so the next message read
 
 The panel opens with `/flowdeck-agents`, the band's `×N` button, or by itself when the first worker of a flow starts.
 
-**Top row**: `Context`, `Usage`, `Band` and `Keep warm (on)` / `Keep warm (off)`, with the running version (`v1.0.0035`) at the far end. Context and Usage fold their sections and remember the choice; Band shows or hides the band.
+**Top row**: `▼ Context`, `▼ Usage`, `● Band` and `● Keep warm`, with the running version (`v1.0.0036`) at the far end. Context and Usage fold their sections and remember the choice (`▼` open, `▶︎` folded, the same glyphs as every fold in the panel); Band and Keep warm are dot switches (`●` on or shown, `○` off or hidden). Band shows or hides the band.
 
 | Section | Shows |
 |---|---|

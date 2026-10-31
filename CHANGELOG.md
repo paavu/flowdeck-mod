@@ -2,6 +2,9 @@
 
 Versions are `M.m.xxxx`; every build bumps the 4-digit build number. Details and rulings: `docs/ledger.md`, `docs/design.md`.
 
+## 1.0.0036 (2026-10-31)
+- Toggle and collapse icons: every fold chevron is a solid triangle, `▼` open and `▶︎` folded (the folded one carries a text-style selector so it never renders as an emoji), all from `foldGlyph` in hooks/fold.ts, including the cache card's chevron. In the top row Context and Usage use them; Band and Keep warm are dot switches (`●` on or shown, `○` off or hidden) and Keep warm no longer says `(on)` / `(off)`. Behaviour is unchanged.
+
 ## 1.0.0035 (2026-10-31)
 - Plans removed: the flow's task list (Active, Finished, Archive, Trash) is the only task list. The `mcp__flowdeck__plan` tool, the Plans tab and its `Clear finished`, the plan rows in the band, the `flowdeck:plan-rule` prompt section and the plan-mode (`ExitPlanMode`) and question (`AskUserQuestion`) hooks are gone; the tab row reads `Active`, `Finished`, `Archive`, `Trash`.
 - An existing `.claude/flowdeck/plans.json` or `plans-extra-<session>.json`, and plans kept in the mod store, are no longer read or written and are never deleted; done plans other sessions left are no longer archived at the start. Plans an older version saved to the Archive still show there, drawn as before.

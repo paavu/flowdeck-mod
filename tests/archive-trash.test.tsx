@@ -95,7 +95,7 @@ describe('the Archive list draws from the index alone', () => {
     expect(t.buttons.find(b => b.key === 'tab-archive')?.text).toBe('Archive (5)')
     expect(t.buttons.find(b => b.key === 'tab-trash')?.text).toBe('Trash (0)')
     // Each row: the chevron first, the date and the item count, its summary below.
-    expect(t.buttons.find(b => b.key === `archive-${K(2)}`)?.text).toMatch(/^▸ Oct 30, 2026 · \d\d:\d\d \(1\)$/)
+    expect(t.buttons.find(b => b.key === `archive-${K(2)}`)?.text).toMatch(/^▶︎ Oct 30, 2026 · \d\d:\d\d \(1\)$/)
     expect(t.texts.filter(x => x === '  ≈$1.25 · 12k tokens · 30:00')).toHaveLength(5)
     // The chevron leads the row; the ✕ comes after the name, and no chevron follows it.
     for (const surface of ['terminal', 'desktop'] as const) {
@@ -104,7 +104,7 @@ describe('the Archive list draws from the index alone', () => {
       expect(at(`archive-${K(2)}`)).toBeLessThan(at(`archive-del-${K(2)}`))
       expect(at(`archive-del-${K(2)}`)).toBeLessThan(at(`archive-${K(3)}`))
       // (the open group's own agent rows have their chevrons before their names)
-      expect(s.buttons.filter(b => /[▸▾]$/.test(b.text) && !/-agent-fold-/.test(b.key))).toEqual([])
+      expect(s.buttons.filter(b => /(?:▶︎|▼)$/.test(b.text) && !/-agent-fold-/.test(b.key))).toEqual([])
     }
   })
 
@@ -130,7 +130,7 @@ describe('the Archive list draws from the index alone', () => {
     expect(sessionReads(fs)).toEqual([`${DIR}/archive/${fileOf(entry(3))}`])
     let t = await look($)
     expect(t.texts.some(x => /task 3/.test(x))).toBe(true)
-    expect(t.buttons.find(b => b.key === `archive-${K(3)}`)?.text).toMatch(/^▾ /)
+    expect(t.buttons.find(b => b.key === `archive-${K(3)}`)?.text).toMatch(/^▼ /)
     expect(sessionReads(fs)).toHaveLength(1)
     await press($, `archive-${K(3)}`)
     t = await look($)
@@ -161,8 +161,8 @@ describe('the Archive list draws from the index alone', () => {
     // The first group is open and held; ten more opened push it out.
     for (let i = 2; i <= 11; i++) await press($, `archive-${K(i)}`)
     const t = await look($)
-    expect(t.buttons.find(b => b.key === `archive-${K(1)}`)?.text).toMatch(/^▸ /)
-    for (let i = 2; i <= 11; i++) expect(t.buttons.find(b => b.key === `archive-${K(i)}`)?.text).toMatch(/^▾ /)
+    expect(t.buttons.find(b => b.key === `archive-${K(1)}`)?.text).toMatch(/^▶︎ /)
+    for (let i = 2; i <= 11; i++) expect(t.buttons.find(b => b.key === `archive-${K(i)}`)?.text).toMatch(/^▼ /)
     expect(t.texts.filter(x => x === '  loading…')).toEqual([])
   })
 
@@ -233,7 +233,7 @@ describe('moving a session to the trash', () => {
       expect(a.keys).not.toContain(`archive-${K(2)}`)
       const t = await look($, surface, 'trash')
       expect(t.keys.filter(k => /^trash-k[a-z0-9]+$/.test(k))).toEqual([`trash-${K(2)}`])
-      expect(t.buttons.find(b => b.key === `trash-${K(2)}`)?.text).toMatch(/^▾ Oct 30, 2026 · \d\d:\d\d \(1\)$/)
+      expect(t.buttons.find(b => b.key === `trash-${K(2)}`)?.text).toMatch(/^▼ Oct 30, 2026 · \d\d:\d\d \(1\)$/)
       expect(t.buttons.find(b => b.key === `trash-restore-${K(2)}`)?.text).toBe('Restore')
       expect(t.texts).toContain('  ≈$1.25 · 12k tokens · 30:00')
       // Its first group opens with the trash copy's rows.

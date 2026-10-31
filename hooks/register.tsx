@@ -1682,7 +1682,7 @@ function topToggleRow($: EngineInterface, ui: Pick<Elements['desktop'], 'Box' | 
   const toggleContext = (
     <Button
       key="context"
-      label={`${p.isContextShown ? '▾' : '▸'} Context`}
+      label={`${foldGlyph(p.isContextShown)} Context`}
       plain
       onPress={async () => {
         const shown = !p.isContextShown
@@ -1694,7 +1694,7 @@ function topToggleRow($: EngineInterface, ui: Pick<Elements['desktop'], 'Box' | 
   const toggleUsage = (
     <Button
       key="usage"
-      label={`${p.isUsageShown ? '▾' : '▸'} Usage`}
+      label={`${foldGlyph(p.isUsageShown)} Usage`}
       plain
       onPress={async () => {
         const shown = !p.isUsageShown
@@ -1706,7 +1706,7 @@ function topToggleRow($: EngineInterface, ui: Pick<Elements['desktop'], 'Box' | 
   const toggleBand = (
     <Button
       key="band"
-      label={`${p.isBandHidden ? '▸' : '▾'} Band`}
+      label={`${p.isBandHidden ? '○' : '●'} Band`}
       plain
       onPress={async () => {
         const hidden = !p.isBandHidden
@@ -1717,7 +1717,7 @@ function topToggleRow($: EngineInterface, ui: Pick<Elements['desktop'], 'Box' | 
   const toggleKeepWarm = (
     <Button
       key="keep-warm"
-      label={p.isKeepWarm ? '▾ Keep warm (on)' : '▸ Keep warm (off)'}
+      label={`${p.isKeepWarm ? '●' : '○'} Keep warm`}
       plain
       onPress={async () => {
         const on = !p.isKeepWarm

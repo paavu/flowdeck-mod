@@ -285,7 +285,7 @@ describe('the chip in the band', () => {
       expect(l.isCardOpen).toBe(false)
       expect(l.chip).toBe('WARM: 42m left')
       // no Show/Hide: the one control is the dim fold chevron right after the chip
-      expect(l.buttons).toEqual([{ key: 'cache-fold', label: '▸' }])
+      expect(l.buttons).toEqual([{ key: 'cache-fold', label: '▶︎' }])
       expect(l.json).not.toMatch(/"(Show|Hide)"/)
       expect(l.json.indexOf('cache-chip')).toBeLessThan(l.json.indexOf('cache-fold'))
       if (surface === 'desktop') {
@@ -310,12 +310,12 @@ describe('the chip in the band', () => {
       await pressFold($, surface)
       let l = await look($, surface)
       expect(l.isCardOpen).toBe(true)
-      expect(l.buttons).toEqual([{ key: 'cache-fold', label: '▾' }])
+      expect(l.buttons).toEqual([{ key: 'cache-fold', label: '▼' }])
       expect(l.chip).toBe('WARM: 42m left') // the chip itself is unchanged
       await pressFold($, surface)
       l = await look($, surface)
       expect(l.isCardOpen).toBe(false)
-      expect(l.buttons).toEqual([{ key: 'cache-fold', label: '▸' }])
+      expect(l.buttons).toEqual([{ key: 'cache-fold', label: '▶︎' }])
     })
 
     test(`with a flow the chip sits between the progress and the buttons (${surface})`, async ($, on) => {
@@ -365,7 +365,7 @@ describe('the chip in the band', () => {
     const l = await look($, 'terminal', 120)
     const bar = l.texts.find(t => /^[█░]+$/.test(t)) ?? ''
     const titleW = Math.max(8, Math.min(30, 'FlowDeck'.length + 2, Math.floor(120 / 3)))
-    // ` WARM `, a space, `60m left`, the gap, `▸`, the row's gap
+    // ` WARM `, a space, `60m left`, the gap, `▶︎`, the row's gap
     expect(bar.length).toBe(Math.max(6, Math.min(40, 120 - titleW - 32 - (' WARM '.length + 1 + '60m left'.length + 1 + 1 + 2))))
   })
 

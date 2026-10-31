@@ -2,6 +2,7 @@ import { describe, expect, mock, test } from 'claude-code/testing'
 
 import { isRenewDue, KEEP_WARM_DEFAULT, KEEP_WARM_MAX_RENEWALS, KEEP_WARM_MIN_TOKENS, keepStatus, keepText, RENEW_AT_MS, TTL_MS, viewOf } from '../hooks/cache'
 import { CACHE_FOLD_PX } from '../hooks/cache-view'
+import { FOLD_OPEN, FOLD_SHUT, foldGlyph } from '../hooks/fold'
 import { asKeepWarm, asPanel, PANEL_DEFAULT } from '../hooks/shapes'
 import { hhmm } from '../hooks/time'
 import { fakeFs } from './fake-fs'
@@ -361,11 +362,11 @@ describe('the Keep warm switch', () => {
       const band = await p.find({ type: 'Button', key: 'band' })
       const keep = await p.find({ type: 'Button', key: 'keep-warm' })
       await p.unmount()
-      expect(keep?.props?.label).toBe('▾ Keep warm (on)')
+      expect(keep?.props?.label).toBe('● Keep warm')
       expect(keep?.props?.plain).toBe(band?.props?.plain)
       expect(keep?.props?.dimColor).toBeUndefined()
       await pressKeepWarm($, surface)
-      expect(await keepWarmLabel($, surface)).toBe('▸ Keep warm (off)')
+      expect(await keepWarmLabel($, surface)).toBe('○ Keep warm')
     })
   }
 
@@ -383,20 +384,20 @@ describe('the Keep warm switch', () => {
     fakeFs(on)
     engine(on, { store: { keepWarm: { '/work/app': false } } })
     await start($, '/work/app')
-    for (const surface of SURFACES) expect(await keepWarmLabel($, surface)).toBe('▸ Keep warm (off)')
+    for (const surface of SURFACES) expect(await keepWarmLabel($, surface)).toBe('○ Keep warm')
   })
 
   test('another project is on unless it was switched off there', async ($, on) => {
     fakeFs(on)
     engine(on, { store: { keepWarm: { '/work/app': false } } })
     await start($, '/work/other')
-    expect(await keepWarmLabel($, 'terminal')).toBe('▾ Keep warm (on)')
+    expect(await keepWarmLabel($, 'terminal')).toBe('● Keep warm')
   })
 
   test('a store value of the wrong kind reads as on', async ($, on) => {
     engine(on, { store: { keepWarm: { '': 'no' } } })
     await start($)
-    expect(await keepWarmLabel($, 'desktop')).toBe('▾ Keep warm (on)')
+    expect(await keepWarmLabel($, 'desktop')).toBe('● Keep warm')
   })
 
   test('a panel held from before 1.0.0030 reads as on, and its press works', async ($, on) => {
@@ -408,9 +409,9 @@ describe('the Keep warm switch', () => {
     const old: Record<string, unknown> = { ...PANEL_DEFAULT }
     delete old.isKeepWarm
     held(on, 'panel', old)
-    for (const surface of SURFACES) expect(await keepWarmLabel($, surface)).toBe('▾ Keep warm (on)')
+    for (const surface of SURFACES) expect(await keepWarmLabel($, surface)).toBe('● Keep warm')
     await pressKeepWarm($)
-    expect(await keepWarmLabel($, 'terminal')).toBe('▸ Keep warm (off)')
+    expect(await keepWarmLabel($, 'terminal')).toBe('○ Keep warm')
   })
 })
 
@@ -527,4 +528,30 @@ describe('keep warm, pure', () => {
     expect(asKeepWarm('x')).toEqual(KEEP_WARM_DEFAULT)
     expect(asKeepWarm({ renewals: 1, failures: 'two', turnAt: -5, extra: true })).toEqual({ ...KEEP_WARM_DEFAULT, renewals: 1 })
   })
+})
+
+describe('the toggle and collapse glyphs', () => {
+  test('foldGlyph: solid down triangle open, solid right triangle with the text selector folded', async () => {
+    expect(foldGlyph(true)).toBe('\u25bc')
+    expect(foldGlyph(false)).toBe('\u25b6\ufe0e')
+    expect(FOLD_OPEN).toBe('\u25bc')
+    expect(FOLD_SHUT).toBe('\u25b6\ufe0e')
+  })
+
+  for (const surface of SURFACES) {
+    test(`the top row: fold glyphs on Context and Usage, dot switches on Band and Keep warm, both states (${surface})`, async ($, on) => {
+      engine(on)
+      await start($)
+      const p = await pane($, surface)
+      const labels = async () => {
+        const out: string[] = []
+        for (const key of ['context', 'usage', 'band', 'keep-warm']) out.push(String((await p.find({ type: 'Button', key }))?.props?.label))
+        return out
+      }
+      expect(await labels()).toEqual(['\u25bc Context', '\u25bc Usage', '\u25cf Band', '\u25cf Keep warm'])
+      for (const key of ['context', 'usage', 'band', 'keep-warm']) await p.press({ key })
+      expect(await labels()).toEqual(['\u25b6\ufe0e Context', '\u25b6\ufe0e Usage', '\u25cb Band', '\u25cb Keep warm'])
+      await p.unmount()
+    })
+  }
 })

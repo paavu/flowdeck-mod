@@ -231,15 +231,15 @@ describe('a panel held from an older flowdeck', () => {
   // The selected tab's label is the underlined Text.
   const selected = async (p: any, text: string) => ((await p.find({ type: 'Text', text }))?.props.underline === true ? true : undefined)
   const presses: [string, string, Tab | undefined, (p: any) => Promise<unknown>, (p: any) => Promise<unknown>][] = [
-    ['context', 'context', undefined, p => p.find({ type: 'Button', key: 'context', text: /▾ Context/ }), p => p.find({ type: 'Button', key: 'context', text: /▸ Context/ })],
-    ['usage', 'usage', undefined, p => p.find({ type: 'Button', key: 'usage', text: /▾ Usage/ }), p => p.find({ type: 'Button', key: 'usage', text: /▸ Usage/ })],
-    ['band', 'band', undefined, p => p.find({ type: 'Button', key: 'band', text: /▾ Band/ }), p => p.find({ type: 'Button', key: 'band', text: /▸ Band/ })],
+    ['context', 'context', undefined, p => p.find({ type: 'Button', key: 'context', text: /▼ Context/ }), p => p.find({ type: 'Button', key: 'context', text: /▶︎ Context/ })],
+    ['usage', 'usage', undefined, p => p.find({ type: 'Button', key: 'usage', text: /▼ Usage/ }), p => p.find({ type: 'Button', key: 'usage', text: /▶︎ Usage/ })],
+    ['band', 'band', undefined, p => p.find({ type: 'Button', key: 'band', text: /● Band/ }), p => p.find({ type: 'Button', key: 'band', text: /○ Band/ })],
     ['finished tab', 'tab-finished', undefined, p => selected(p, 'Active (1)'), p => selected(p, 'Finished (1)')],
     ['archive tab', 'tab-archive', undefined, p => selected(p, 'Active (1)'), p => p.find({ type: 'Button', key: `archive-${keyOf('e1')}` })],
-    ['agent fold', 'agent-fold-w1', 'finished', p => p.find({ type: 'Button', key: 'agent-fold-w1', text: '▸' }), p => p.find({ type: 'Button', key: 'agent-fold-w1', text: '▾' })],
+    ['agent fold', 'agent-fold-w1', 'finished', p => p.find({ type: 'Button', key: 'agent-fold-w1', text: '▶︎' }), p => p.find({ type: 'Button', key: 'agent-fold-w1', text: '▼' })],
     // the newest group (e1) is open by default
-    ['open archive group', `archive-${keyOf('e1')}`, 'archive', p => p.find({ type: 'Button', key: `archive-${keyOf('e1')}`, text: /^▾/ }), p => p.find({ type: 'Button', key: `archive-${keyOf('e1')}`, text: /^▸/ })],
-    ['folded archive group', `archive-${keyOf('e2')}`, 'archive', p => p.find({ type: 'Button', key: `archive-${keyOf('e2')}`, text: /^▸/ }), p => p.find({ type: 'Button', key: `archive-${keyOf('e2')}`, text: /^▾/ })],
+    ['open archive group', `archive-${keyOf('e1')}`, 'archive', p => p.find({ type: 'Button', key: `archive-${keyOf('e1')}`, text: /^▼/ }), p => p.find({ type: 'Button', key: `archive-${keyOf('e1')}`, text: /^▶︎/ })],
+    ['folded archive group', `archive-${keyOf('e2')}`, 'archive', p => p.find({ type: 'Button', key: `archive-${keyOf('e2')}`, text: /^▶︎/ }), p => p.find({ type: 'Button', key: `archive-${keyOf('e2')}`, text: /^▼/ })],
     ['archive item', 'archive-item-w1', 'finished', p => p.find({ type: 'Button', key: 'archive-item-w1' }), p => p.find({ type: 'Text', text: /1 archived/ })],
   ]
   for (const [name, key, tab, before, after] of presses) {

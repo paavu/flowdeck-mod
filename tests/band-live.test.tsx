@@ -115,10 +115,10 @@ describe('the band in a live-like session', () => {
       await liveSession($)
       expect((await rowOf($, 'desktop')).shown).toBe(true)
       const p = await pane($, surface)
-      expect(await p.find({ type: 'Button', key: 'band', text: /▾ Band/ })).toBeDefined()
+      expect(await p.find({ type: 'Button', key: 'band', text: /● Band/ })).toBeDefined()
       await p.press({ key: 'band' })
       await settle()
-      expect(await p.find({ type: 'Button', key: 'band', text: /▸ Band/ })).toBeDefined()
+      expect(await p.find({ type: 'Button', key: 'band', text: /○ Band/ })).toBeDefined()
       for (const s of SURFACES) {
         const r = await rowOf($, s)
         expect(r.shown).toBe(false)
@@ -126,7 +126,7 @@ describe('the band in a live-like session', () => {
       }
       await p.press({ key: 'band' })
       await settle()
-      expect(await p.find({ type: 'Button', key: 'band', text: /▾ Band/ })).toBeDefined()
+      expect(await p.find({ type: 'Button', key: 'band', text: /● Band/ })).toBeDefined()
       for (const s of SURFACES) expect((await rowOf($, s)).shown).toBe(true)
       await p.unmount()
     })
@@ -141,7 +141,7 @@ describe('the band in a live-like session', () => {
     await b.press({ key: 'flowdeck-dismiss' }) // hidden from the band itself
     await b.unmount()
     await settle()
-    expect(await p.find({ type: 'Button', key: 'band', text: /▸ Band/ })).toBeDefined()
+    expect(await p.find({ type: 'Button', key: 'band', text: /○ Band/ })).toBeDefined()
     await p.press({ key: 'band' }) // the person presses Band to bring it back
     await settle()
     await p.unmount()

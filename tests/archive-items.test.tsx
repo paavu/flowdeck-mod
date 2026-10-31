@@ -286,7 +286,7 @@ describe('the partial archive entry', () => {
     await press($, 'archive-item-w1')
     for (const surface of ['terminal', 'desktop'] as const) {
       let p = await pane($, surface, 80, 'archive')
-      const groups = await p.findAll({ type: 'Button', text: /^▾ .* \(1\) · running$/ })
+      const groups = await p.findAll({ type: 'Button', text: /^▼ .* \(1\) · running$/ })
       expect(groups.length).toBe(1)
       expect(await p.find({ type: 'Text', text: /1\/3|archived while the flow runs|ended with the session/ })).toBeUndefined()
       const buttons = await p.findAll({ type: 'Button' })

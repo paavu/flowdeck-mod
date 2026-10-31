@@ -195,7 +195,7 @@ describe('accepted tasks in the panel', () => {
     await settle()
     await p.unmount()
     const txt = (await terminal($, ['archive'])).text
-    const [first, second] = txt.split(/▾ /).slice(1)
+    const [first, second] = txt.split(/▼ /).slice(1)
     expect(first).toMatch(/✓ {3}3\. Polish/)
     expect(first).not.toMatch(/1\. Read code/)
     expect(second).toMatch(/✓ {3}1\. Read code/)

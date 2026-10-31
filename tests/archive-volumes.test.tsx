@@ -118,7 +118,7 @@ const view = async ($: any, surface: 'terminal' | 'desktop' = 'terminal') => {
     keys,
     // the groups' fold keys, `archive-<keyOf(id)>`, without the prefix
     groups: folds.map((b: any) => String(b.props.key).slice('archive-'.length)),
-    open: folds.map((b: any) => JSON.stringify(b).includes('▾ ')),
+    open: folds.map((b: any) => JSON.stringify(b).includes('▼ ')),
     label: (key: string) => String(buttons.find((b: any) => String(b.props.key) === key)?.props.label ?? ''),
     tab: buttons.find((b: any) => String(b.props.key) === 'tab-archive')?.text,
   }

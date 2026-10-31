@@ -370,15 +370,15 @@ describe('archive groups in the panel', () => {
     const t = await terminal($)
     const groups = t.buttons.filter((b: any) => [`archive-${keyOf('gA')}`, `archive-${keyOf('gB')}`].includes(String(b.props.key)))
     expect(groups.map((b: any) => String(b.props.key))).toEqual([`archive-${keyOf('gA')}`, `archive-${keyOf('gB')}`])
-    expect(groups[0].text).toMatch(/^▾ .* \(2\)$/)
-    expect(groups[1].text).toMatch(/^▸ .* \(1\)$/)
+    expect(groups[0].text).toMatch(/^▼ .* \(2\)$/)
+    expect(groups[1].text).toMatch(/^▶︎ .* \(1\)$/)
     expect(groups[0].text).toContain(entryDate(groupA()))
     expect(t.text).toMatch(DATE)
     // no title, done/total or status words anywhere in the Archive
     expect(t.text).not.toMatch(/Flow [AB]|1\/3|1\/1|finished|ended with the session/)
     // the open group starts with its summary right under the fold
     const lines = t.text.split('\n')
-    const at = lines.findIndex((l: string) => l.startsWith('▾ '))
+    const at = lines.findIndex((l: string) => l.startsWith('▼ '))
     expect(lines[at + 1]).toContain('≈$1.50 · 12k tokens · 30:00')
     expect(t.text).toContain('≈$1.50 · 12k tokens · 30:00')
     expect(t.text).toContain('≈$0.75 · 3k tokens · 1:30')
@@ -394,7 +394,7 @@ describe('archive groups in the panel', () => {
     const summaries = d.texts.filter((x: any) => /≈\$/.test(String(x.text)))
     expect(summaries.map((x: any) => String(x.text))).toEqual(['  ≈$1.50 · 12k tokens · 30:00', '  ≈$0.75 · 3k tokens · 1:30'])
     for (const x of summaries) expect(x.props.dimColor).toBe(true)
-    expect(d.buttons.find((b: any) => String(b.props.key) === `archive-${keyOf('gA')}`).text).toMatch(/^▾ .* \(2\)$/)
+    expect(d.buttons.find((b: any) => String(b.props.key) === `archive-${keyOf('gA')}`).text).toMatch(/^▼ .* \(2\)$/)
     // (a row's own alt may say its run finished; the group itself never does)
     expect(d.alts.filter((a: string) => /Flow [AB]|1\/3|ended with the session/.test(a))).toEqual([])
     expect(d.buttons.filter((b: any) => [`archive-${keyOf('gA')}`, `archive-${keyOf('gB')}`].includes(String(b.props.key))).some((b: any) => /finished/.test(b.text))).toBe(false)
@@ -497,7 +497,7 @@ describe('archive groups in the panel', () => {
     for (const surface of ['terminal', 'desktop'] as const) {
       await press($, surface, `archive-${keyOf('gA')}`)
       let t = await terminal($)
-      expect(JSON.stringify(t.buttons.find((b: any) => String(b.props.key) === `archive-${keyOf('gA')}`))).toContain('▸ ')
+      expect(JSON.stringify(t.buttons.find((b: any) => String(b.props.key) === `archive-${keyOf('gA')}`))).toContain('▶︎ ')
       expect(t.text).not.toMatch(/write tests/)
       expect(t.text).toContain('≈$1.50 · 12k tokens · 30:00')
       // a re-render keeps the choice
@@ -507,7 +507,7 @@ describe('archive groups in the panel', () => {
       expect(d.svgs.filter((s: any) => Number(s.props.height) === 48).length).toBe(0)
       await press($, surface, `archive-${keyOf('gB')}`)
       t = await terminal($)
-      expect(JSON.stringify(t.buttons.find((b: any) => String(b.props.key) === `archive-${keyOf('gB')}`))).toContain('▾ ')
+      expect(JSON.stringify(t.buttons.find((b: any) => String(b.props.key) === `archive-${keyOf('gB')}`))).toContain('▼ ')
       expect(t.text).toMatch(/only task/)
       expect(t.text).not.toMatch(/write tests/)
       expect(t.text).not.toMatch(/Finished/)
@@ -531,7 +531,7 @@ describe('archive groups in the panel', () => {
       const buttons = await p.findAll({ type: 'Button' })
       await p.unmount()
       const fold = buttons.find((b: any) => String(b.props.key) === `archive-${keyOf(g.id)}`)
-      expect(fold.text).toBe(`▾ ${date(cols)}`)
+      expect(fold.text).toBe(`▼ ${date(cols)}`)
       expect(fold.text).toMatch(/ \(17\)$/)
       expect(/\d\d:\d\d/.test(fold.text)).toBe(time)
       expect(fold.text).not.toContain('items')
@@ -548,7 +548,7 @@ describe('archive groups in the panel', () => {
     await start($)
     await settle()
     const t = await terminal($)
-    expect(JSON.stringify(t.buttons.find((b: any) => String(b.props.key) === `archive-${keyOf('gB')}`))).toContain('▾ ')
+    expect(JSON.stringify(t.buttons.find((b: any) => String(b.props.key) === `archive-${keyOf('gB')}`))).toContain('▼ ')
     expect(t.text).toMatch(/only task/)
     const d = await desktop($)
     expect(d.alts.some((a: string) => /^only task:/.test(a))).toBe(true)
@@ -602,7 +602,7 @@ describe('archive groups in the panel', () => {
     for (const surface of ['terminal', 'desktop'] as const) {
       let t = await terminal($)
       expect(t.text).not.toContain('ended with the session')
-      expect(t.text).toMatch(/^▾ .* \(2\)$/m)
+      expect(t.text).toMatch(/^▼ .* \(2\)$/m)
       expect(t.text).toContain('≈$1.50 · 12k tokens · 30:00')
       expect(t.text).toMatch(/✓ write tests \(careful\)/)
       expect(t.text).toMatch(/○ wire it \(medium\)/)
@@ -665,18 +665,18 @@ describe('archive groups in the panel', () => {
     // the live row's second step shows only when that row is unfolded
     expect(t.text).not.toMatch(/live two/)
     const label = (key: string) => String(t.buttons.find((b: any) => String(b.props.key) === key)?.props.label)
-    expect(label(`archive-${keyOf('gA')}-agent-fold-a2`)).toBe('▾')
-    expect(label(`archive-${keyOf('gC')}-agent-fold-a2`)).toBe('▸')
+    expect(label(`archive-${keyOf('gA')}-agent-fold-a2`)).toBe('▼')
+    expect(label(`archive-${keyOf('gC')}-agent-fold-a2`)).toBe('▶︎')
     expect(t.keys).not.toContain('agent-fold-a2')
     // the live row is on the Active tab, folded
     const live = await terminal($, 'active')
     expect(live.text).not.toMatch(/live two|patch it/)
-    expect(String(live.buttons.find((b: any) => String(b.props.key) === 'agent-fold-a2')?.props.label)).toBe('▸')
+    expect(String(live.buttons.find((b: any) => String(b.props.key) === 'agent-fold-a2')?.props.label)).toBe('▶︎')
     await pressOn($, 'active', 'terminal', 'agent-fold-a2')
     expect((await terminal($, 'active')).text).toMatch(/live two/)
     t = await terminal($)
     expect(count(t.text, '✗ patch it')).toBe(1)
-    expect(label(`archive-${keyOf('gC')}-agent-fold-a2`)).toBe('▸')
+    expect(label(`archive-${keyOf('gC')}-agent-fold-a2`)).toBe('▶︎')
   })
 
   test('52 groups show the newest 50 and Show more reveals the rest', async ($, on) => {
@@ -699,7 +699,7 @@ describe('archive groups in the panel', () => {
     expect(groups.length).toBe(52)
     expect(t.keys).not.toContain('archive-more')
     // the newest is still the only group open by default
-    expect(groups.map((b: any) => (JSON.stringify(b).includes('▾ ') ? 'open' : 'folded'))).toEqual(['open', ...Array(51).fill('folded')])
+    expect(groups.map((b: any) => (JSON.stringify(b).includes('▼ ') ? 'open' : 'folded'))).toEqual(['open', ...Array(51).fill('folded')])
     expect(t.text.split('only task').length - 1).toBe(1)
   })
 
@@ -755,11 +755,11 @@ describe('archive groups in the panel', () => {
     for (const surface of ['terminal', 'desktop'] as const) {
       await press($, surface, `archive-${keyOf(other.id)}`)
       let t = await terminal($)
-      expect(JSON.stringify(t.buttons.find((b: any) => String(b.props.key) === `archive-${keyOf(other.id)}`))).toContain('▾ ')
+      expect(JSON.stringify(t.buttons.find((b: any) => String(b.props.key) === `archive-${keyOf(other.id)}`))).toContain('▼ ')
       expect(t.text).toMatch(/only task/)
       await press($, surface, `archive-${keyOf(other.id)}`)
       t = await terminal($)
-      expect(JSON.stringify(t.buttons.find((b: any) => String(b.props.key) === `archive-${keyOf(other.id)}`))).toContain('▸ ')
+      expect(JSON.stringify(t.buttons.find((b: any) => String(b.props.key) === `archive-${keyOf(other.id)}`))).toContain('▶︎ ')
       expect(t.text).not.toMatch(/only task/)
     }
   })

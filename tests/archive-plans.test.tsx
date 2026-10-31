@@ -235,7 +235,7 @@ describe('archived plans an older flowdeck saved', () => {
     await start($)
     await settle()
     const t = await terminal($, 80, ['archive'])
-    expect(t.group(e.id).text).toMatch(/^▾ [A-Z][a-z]{2} \d{1,2}, \d{4} · \d{2}:\d{2} \(3\)$/)
+    expect(t.group(e.id).text).toMatch(/^▼ [A-Z][a-z]{2} \d{1,2}, \d{4} · \d{2}:\d{2} \(3\)$/)
     expect(t.group(e.id).text).not.toMatch(/Beta/)
     // only the Archive group draws it: there is no Plans tab
     expect(t.texts.filter(x => HEAD.test(x))).toHaveLength(1)
@@ -247,7 +247,7 @@ describe('archived plans an older flowdeck saved', () => {
     // folded, the group keeps its fold line only
     await press($, `archive-${keyOf(e.id)}`)
     const folded = await terminal($, 80, ['archive'])
-    expect(folded.group(e.id).text).toMatch(/^▸ .* \(3\)$/)
+    expect(folded.group(e.id).text).toMatch(/^▶︎ .* \(3\)$/)
     expect(folded.texts.filter(x => HEAD.test(x))).toHaveLength(0)
   })
 
@@ -275,8 +275,8 @@ describe('archived plans an older flowdeck saved', () => {
     engine(on, { store: { historyShown: true, history: [solo] } })
     await start($)
     await settle()
-    expect((await terminal($, 40)).group(id).text).toMatch(/^▾ .* · \d{2}:\d{2} \(1\)$/)
-    expect((await terminal($, 24)).group(id).text).toMatch(/^▾ [A-Z][a-z]{2} \d{1,2}, \d{4} \(1\)$/)
+    expect((await terminal($, 40)).group(id).text).toMatch(/^▼ .* · \d{2}:\d{2} \(1\)$/)
+    expect((await terminal($, 24)).group(id).text).toMatch(/^▼ [A-Z][a-z]{2} \d{1,2}, \d{4} \(1\)$/)
   })
 
   test('old entries without a plan are drawn as before', async ($, on) => {
@@ -284,7 +284,7 @@ describe('archived plans an older flowdeck saved', () => {
     const { store } = engine(on, { store: { historyShown: true, history: [old] } })
     await start($)
     const t = await terminal($)
-    expect(t.group('old').text).toMatch(/^▾ .* \(2\)$/)
+    expect(t.group('old').text).toMatch(/^▼ .* \(2\)$/)
     expect(t.text).toMatch(/✓ a \(light\)/)
     expect(t.text).toMatch(/○ b \(light\)/)
     expect(parseArchive(store.history)).toEqual([old as ArchiveEntry])

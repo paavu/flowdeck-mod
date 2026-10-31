@@ -279,7 +279,7 @@ describe('agent items through the step tool', () => {
     expect(t.text).toMatch(/2\/3 tests/)
     // No step list: the chevron is there, dim, and opens on the row's details.
     const chevron = t.buttons.find((b: any) => String(b.props.key) === 'agent-fold-w1')
-    expect(String(chevron?.props.label)).toBe('▸')
+    expect(String(chevron?.props.label)).toBe('▶︎')
     expect(chevron?.props.dimColor).toBe(true)
   })
 
@@ -346,15 +346,15 @@ describe('agent items in the panel', () => {
     await step($, { steps: SIX }, 'w1')
     await step($, { done: 1, total: 4 }, 'w2')
     let t = await terminal($)
-    const chevrons = t.buttons.filter((b: any) => /^[▸▾]$/.test(String(b.props.label)))
+    const chevrons = t.buttons.filter((b: any) => /^(?:▶︎|▼)$/.test(String(b.props.label)))
     expect(chevrons.length).toBe(2)
-    expect(chevrons.map((b: any) => String(b.props.label))).toEqual(['▸', '▸'])
+    expect(chevrons.map((b: any) => String(b.props.label))).toEqual(['▶︎', '▶︎'])
     expect(chevrons.find((b: any) => b.props.key === 'agent-fold-w1')?.props.dimColor).toBe(false)
     expect(chevrons.find((b: any) => b.props.key === 'agent-fold-w2')?.props.dimColor).toBe(true)
     expect(t.text).not.toMatch(/fix types/)
     await fold($, 'w1')
     t = await terminal($)
-    expect(t.buttons.filter((b: any) => String(b.props.label) === '▾').length).toBe(1)
+    expect(t.buttons.filter((b: any) => String(b.props.label) === '▼').length).toBe(1)
     for (const s of SIX) expect(t.text).toContain(s.title)
     const active = t.texts.find((x: any) => x.text === '●' && x.props.color === RUNNING)
     expect(active).toBeDefined()
@@ -374,7 +374,7 @@ describe('agent items in the panel', () => {
     await step($, { next: true }, 'w1')
     let d = await desktop($)
     const before = d.svgs.length
-    const chevrons = d.buttons.filter((b: any) => /^[▸▾]$/.test(String(b.props.label)))
+    const chevrons = d.buttons.filter((b: any) => /^(?:▶︎|▼)$/.test(String(b.props.label)))
     expect(chevrons.map((b: any) => [String(b.props.key), b.props.dimColor])).toEqual([
       ['agent-fold-w2', true],
       ['agent-fold-w1', false],
