@@ -2,6 +2,9 @@
 
 Versions are `M.m.xxxx`; every build bumps the 4-digit build number. Details and rulings: `docs/ledger.md`, `docs/design.md`.
 
+## 1.0.0053 (2026-10-31)
+- The version label at the right of the panel's top row uses the same small size as the `Resets in` text (11, `SMALL_SIZE`). On the desktop it is a small right-aligned drawing (muted colour, tabular numerals); the terminal keeps its dim text.
+
 ## 1.0.0052 (2026-10-31)
 - README: a new top (centred logo, tagline, badges and links, The problem, The idea, Install, Your first two minutes) with Requirements and Known limits moved near the end; a new logo (`docs/images/logo.svg`, `logo.png`) and plugin icon. `scripts/check-readme.sh` also checks that every in-page README link resolves to a heading. No change to the mod's behaviour.
 

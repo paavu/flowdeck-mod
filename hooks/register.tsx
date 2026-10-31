@@ -26,6 +26,7 @@ import type { TaskLike } from './tasks'
 import { ARCHIVE_PAGE, asAgents, asCacheFacts, asCacheFold, asCacheTick, asDetails, asFlow, asKeepWarm, asLists, asLive, asMeta, asNow, asPanel, asReading, asUsage, LIVE_DEFAULT, PANEL_DEFAULT } from './shapes'
 import { changeLive, endRuns, IDLE_FINISH_MS, isGone, LIVE_BEAT_MS, LIVE_STALE_MS, liveKey, readLive, without } from './live'
 import type { LiveRecord } from './live'
+import { SMALL_SIZE } from './sizes'
 import { VERSION } from './version'
 import { asRule, estimateTokens, isPriorFile, isStoredRule, PRIOR_STORE_KEYS, RULE_KEY, SCHEMA_CHARS_PER_TOKEN, toggledRule } from './rule'
 import { live, record, resetKey, resets, toWindows, usageHeadSvg, usageRows, usageSvg } from './usage'
@@ -1895,8 +1896,10 @@ function ruleStrip($: EngineInterface, ui: Pick<Elements['desktop'], 'Box' | 'Te
 
 // The buttons on top of the panel, and at the row's far end the dim version of the code running (version.ts). They read
 // only the panel's own toggles, so the panel can draw them whatever else fails.
-function topToggleRow($: EngineInterface, ui: Pick<Elements['desktop'], 'Box' | 'Text' | 'Button'>, p: Panel): RenderChildren {
-  const { Box, Text, Button } = ui
+function topToggleRow($: EngineInterface, ui: Pick<Elements['desktop'], 'Box' | 'Text' | 'Button'> & { Svg?: Elements['desktop']['Svg'] | null }, p: Panel): RenderChildren {
+  const { Box, Text, Button, Svg } = ui
+  const versionText = `v${VERSION}`
+  const versionW = Math.ceil(textWidth(versionText, SMALL_SIZE)) + 4
   const toggleContext = (
     <Button
       key="context"
@@ -1955,7 +1958,17 @@ function topToggleRow($: EngineInterface, ui: Pick<Elements['desktop'], 'Box' | 
       </Box>
       <Box flexGrow={1} />
       <Box flexShrink={0}>
-        <Text key="version" dimColor>{`v${VERSION}`}</Text>
+        {Svg ? (
+          <Svg
+            key="version"
+            source={svg(versionW, 18, `<text class="m" x="${versionW}" y="14" text-anchor="end" font-family="${FONT}" font-size="${SMALL_SIZE}" font-variant-numeric="tabular-nums">${versionText}</text>`)}
+            alt={versionText}
+            width={versionW}
+            height={18}
+          />
+        ) : (
+          <Text key="version" dimColor>{versionText}</Text>
+        )}
       </Box>
     </Box>
   )
@@ -2511,7 +2524,7 @@ export const register: Register = (on, options) => {
         return failed(label)
       }
     }
-    const topToggles = topToggleRow($, { Box, Text, Button }, p)
+    const topToggles = topToggleRow($, { Box, Text, Button, Svg: e.surface === 'desktop' && 'Svg' in ui ? ui.Svg : null }, p)
     // Why the band above the prompt failed in this load, under the buttons (the Band button is among them).
     const fault: unknown = await read($, bandError).catch(() => '')
     const bandLine = typeof fault === 'string' && fault ? <Text dimColor>{`band error: ${fault} (v${VERSION})`}</Text> : null
@@ -3181,11 +3194,12 @@ export const register: Register = (on, options) => {
     )
   }).catch(async ($, e) => {
     // The worst case still draws the top buttons and the tabs (without counts) and says so: never a blank pane.
-    const { Box, Text, Button } = $.ui.resolve(e)
+    const ui = $.ui.resolve(e)
+    const { Box, Text, Button } = ui
     const p = await readPanel($).catch(() => asPanel(null))
     return (
       <Box flexDirection="column">
-        {topToggleRow($, { Box, Text, Button }, p)}
+        {topToggleRow($, { Box, Text, Button, Svg: e.surface === 'desktop' && 'Svg' in ui ? ui.Svg : null }, p)}
         {flowTitleRow($, { Box, Text, Button }, p)}
         {tabRow($, { Box, Text, Button }, p, { active: null, finished: null, archive: null, trash: null }, tabGap(e.surface))}
         <Text dimColor>flowdeck could not draw this panel</Text>

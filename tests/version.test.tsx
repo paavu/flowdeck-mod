@@ -1,5 +1,6 @@
 import { describe, expect, test } from 'claude-code/testing'
 
+import { SMALL_SIZE } from '../hooks/sizes'
 import { VERSION } from '../hooks/version'
 
 // The panel names the version of the code running (hooks/version.ts, loaded with the mod), never plugin.json read at run
@@ -50,9 +51,19 @@ describe('the running version', () => {
       const buttons: any[] = kids[0]?.children ?? []
       expect(buttons.map(c => c?.props?.key)).toEqual(['context', 'usage', 'band', 'keep-warm'])
       expect(kids[1]?.props?.flexGrow).toBe(1)
-      const label = walk(kids[2]).find(n => n?.type === 'Text')
-      expect(textOf(label)).toBe(`v${VERSION}`)
-      expect(label.props.dimColor).toBe(true)
+      if (surface === 'desktop') {
+        const label = walk(kids[2]).find(n => n?.type === 'Svg')
+        expect(label.props.alt).toBe(`v${VERSION}`)
+        expect(label.props.source).toContain(`font-size="${SMALL_SIZE}"`)
+        expect(label.props.source).toContain('text-anchor="end"')
+        expect(label.props.source).toContain('class="m"')
+        expect(label.props.source).toContain(`>v${VERSION}</text>`)
+        expect(row.props.flexWrap).toBe('nowrap')
+      } else {
+        const label = walk(kids[2]).find(n => n?.type === 'Text')
+        expect(textOf(label)).toBe(`v${VERSION}`)
+        expect(label.props.dimColor).toBe(true)
+      }
       expect(kids[2]?.props?.flexShrink).toBe(0)
     })
   }
@@ -63,7 +74,7 @@ describe('the running version', () => {
     for (const surface of ['desktop', 'terminal'] as const) {
       const p = await pane($, surface)
       expect(await p.find({ type: 'Text', text: 'flowdeck could not draw this panel' })).toBeDefined()
-      expect(await p.find({ type: 'Text', text: `v${VERSION}` })).toBeDefined()
+      expect(await p.find(surface === 'desktop' ? { type: 'Svg', alt: `v${VERSION}` } : { type: 'Text', text: `v${VERSION}` })).toBeDefined()
       expect(await p.find({ type: 'Text', text: 'FlowDeck' })).toBeDefined()
       expect(await p.find({ type: 'Button', text: /Track tasks/ })).toBeDefined()
       await p.unmount()
