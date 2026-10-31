@@ -1,5 +1,9 @@
 // The context window as data and as drawings, for the flowdeck panel. The maths is context-bar's (hamzafer, MIT).
 import type { Reading, Slice } from '../types'
+import { fitText, textWidth } from './plan-view'
+import { SMALL_SIZE, TITLE_SIZE, TITLE_WEIGHT } from './sizes'
+
+export const TITLE = 'Context'
 
 const SPLIT = '   '
 // /context's theme gives several rows the same grey, so each used row gets its own color, in order.
@@ -118,11 +122,12 @@ export function contextSvg(width: number, r: Reading, collapsed = false): { heig
       const text = line
         .map(s => `<tspan fill="${s.color}">${s.kind === 'used' ? '■ ' : '□ '}</tspan><tspan class="${s.kind === 'used' ? 't' : 's'}">${esc(s.name)} ${tokens(s.tokens)}${s.kind === 'used' ? ` ${share(s.tokens, r.window)}` : ''}</tspan>`)
         .join('<tspan>   </tspan>')
-      return `<text x="0" y="${y}" font-family="${FONT}" font-size="11">${text}</text>`
+      return `<text x="0" y="${y}" font-family="${FONT}" font-size="${SMALL_SIZE}">${text}</text>`
     })
     .join('\n')
-  const body = `<text class="t" x="0" y="14" font-family="${FONT}" font-size="12" font-weight="600">context</text>
-<text class="s" x="${width}" y="14" text-anchor="end" font-family="${FONT}" font-size="11" font-variant-numeric="tabular-nums">${esc(headOf(r))}  ${r.percent}%</text>
+  const right = fitText(`${headOf(r)}  ${r.percent}%`, SMALL_SIZE, Math.max(0, width - textWidth(TITLE, TITLE_SIZE, true) - 12))
+  const body = `<text class="t" x="0" y="14" font-family="${FONT}" font-size="${TITLE_SIZE}" font-weight="${TITLE_WEIGHT}">${TITLE}</text>
+<text class="s" x="${width}" y="14" text-anchor="end" font-family="${FONT}" font-size="${SMALL_SIZE}" font-variant-numeric="tabular-nums">${esc(right)}</text>
 ${rects}
 ${rows}`
   return { height: collapsed ? barY + barH + 6 : barY + barH + 22 + Math.max(1, lines.length) * 16, body }

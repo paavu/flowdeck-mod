@@ -25,7 +25,7 @@ export const stateLabel = (p: TaskPlan): string => STATE_NAME[stateOf(p)]
 const pxAt11 = (ch: string) => (/[　-鿿]/.test(ch) ? 12 : /[ilI.,:;'|!]/.test(ch) ? 3.4 : /[mwMW]/.test(ch) ? 9.5 : 6.2)
 export const textWidth = (s: string, size: number, bold = false) => ([...s].reduce((n, ch) => n + pxAt11(ch), 0) * size * (bold ? 1.06 : 1)) / 11
 
-const fitText = (s: string, size: number, maxW: number, bold = false): string => {
+export const fitText = (s: string, size: number, maxW: number, bold = false): string => {
   if (textWidth(s, size, bold) <= maxW) return s
   if (textWidth('…', size, bold) > maxW) return ''
   let out = ''

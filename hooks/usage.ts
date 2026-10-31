@@ -1,6 +1,8 @@
 import type { Sample, Samples, UsageWindow } from '../types'
 export type { Sample, Samples, UsageWindow }
 import { hhmm } from './time'
+import { fitText, textWidth } from './plan-view'
+import { SMALL_SIZE, TITLE_SIZE, TITLE_WEIGHT } from './sizes'
 
 // Rate-limit usage for the flowdeck panel: the session and weekly windows, and a forecast of whether the pace burns them before the reset.
 
@@ -167,6 +169,18 @@ export function usageRows(windows: UsageWindow[], samples: Samples, now: number,
   return rows
 }
 
+// A window's title at the left and its reset line at the right of `width`, the reset line cut to what the title leaves.
+const headText = (width: number, label: string, reset: string, top: number): string => {
+  const room = Math.max(0, width - textWidth(label, TITLE_SIZE, true) - 12)
+  return `<text class="t" x="0" y="${top + 14}" font-family="${FONT}" font-size="${TITLE_SIZE}" font-weight="${TITLE_WEIGHT}">${esc(label)}</text>
+<text class="s" x="${width}" y="${top + 14}" text-anchor="end" font-family="${FONT}" font-size="${SMALL_SIZE}">${esc(fitText(reset, SMALL_SIZE, room))}</text>`
+}
+
+// The header alone, for the panel to put the reset switch beside.
+export function usageHeadSvg(width: number, label: string, reset: string): { height: number; body: string } {
+  return { height: 18, body: headText(width, label, reset, 0) }
+}
+
 // The desktop drawing, as the inside of the panel's svg: per window a label and reset line, the bar with projections and the even-pace mark, the percent, and the verdict.
 // `header: false` leaves out the label and reset line (the panel draws them natively above, beside the reset switch) and the room they took.
 export function usageSvg(width: number, windows: UsageWindow[], samples: Samples, now: number, tz?: string, opts: { header?: boolean } = {}): { height: number; body: string } {
@@ -191,17 +205,15 @@ export function usageSvg(width: number, windows: UsageWindow[], samples: Samples
       const markX = Math.min(barW - 2, Math.max(0, x(100 - f.expected) - 1))
       const mark = w.resetsAt === null ? '' : `<rect data-mark="${w.kind}" x="${markX.toFixed(1)}" y="${y - 3}" width="2" height="16" fill="#6b6b6b" opacity="0.9"/>`
       const notes = verdictLines(w, f, now, tz)
-        .map((note, i) => `<text class="s" x="0" y="${y + 30 + i * 14}" font-family="${FONT}" font-size="11">${esc(fit(note, Math.floor(width / 5.5)))}</text>`)
+        .map((note, i) => `<text class="s" x="0" y="${y + 30 + i * 14}" font-family="${FONT}" font-size="${SMALL_SIZE}">${esc(fit(note, Math.floor(width / 5.5)))}</text>`)
         .join('\n')
       const head = header
-        ? `<text class="t" x="0" y="${top + 14}" font-family="${FONT}" font-size="13" font-weight="600">${esc(w.label)}</text>
-<text class="s" x="${barW}" y="${top + 14}" text-anchor="end" font-family="${FONT}" font-size="11">${esc(resets(w, now, tz))}</text>
-`
+        ? `${headText(barW, w.label, resets(w, now, tz), top)}\n`
         : ''
       const out = `${head}<rect x="0" y="${y}" width="${barW}" height="10" rx="5" fill="${color}" opacity="0.18"/>
 <rect data-bar="${w.kind}" data-state="${over ? 'over' : 'ok'}" x="0" y="${y}" width="${x(left).toFixed(1)}" height="10" rx="5" fill="${color}"/>
 ${ext(f.recent, 0, 10, 0.45)}${ext(f.average, 10, 3, 0.6)}${mark}
-<text class="s" x="${width}" y="${y + 9}" text-anchor="end" font-family="${FONT}" font-size="12" font-variant-numeric="tabular-nums">${pct(left)} left</text>
+<text class="s" x="${width}" y="${y + 9}" text-anchor="end" font-family="${FONT}" font-size="${SMALL_SIZE}" font-variant-numeric="tabular-nums">${pct(left)} left</text>
 ${notes}`
       top += ROW
       return out

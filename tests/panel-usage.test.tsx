@@ -1,5 +1,6 @@
 import { describe, expect, test } from 'claude-code/testing'
 
+import { SMALL_SIZE, TITLE_SIZE, TITLE_WEIGHT } from '../hooks/sizes'
 import { resets, toWindows } from '../hooks/usage'
 
 const NOW = Date.UTC(2026, 9, 26, 12, 40)
@@ -211,15 +212,19 @@ describe('usage section in the panel', () => {
     await p.unmount()
   })
 
-  test('desktop: a native row per window above a drawing without its header', async ($, on) => {
+  test('desktop: a header drawing and its switch per window above a drawing without its header', async ($, on) => {
     engine(on)
     await start($)
     await settle()
     const p = await pane($, 'desktop', 80)
-    expect(await p.find({ type: 'Text', text: /^Current session$/ })).toBeDefined()
-    expect(await p.find({ type: 'Text', text: /^This week$/ })).toBeDefined()
-    expect(await p.find({ type: 'Text', text: /^Resets in 2h 0m$/ })).toBeDefined()
-    expect(await p.find({ type: 'Text', text: /^Resets in 2d 23h 0m$/ })).toBeDefined()
+    const heads = (await p.findAll({ type: 'Svg' })).filter((n: any) => /Resets/.test(String(n.props?.alt ?? '')))
+    expect(heads.length).toBe(2)
+    const sources = heads.map((n: any) => String(n.props.source))
+    expect(sources[0]).toContain(`font-size="${TITLE_SIZE}" font-weight="${TITLE_WEIGHT}">Current session</text>`)
+    expect(sources[1]).toContain(`font-size="${TITLE_SIZE}" font-weight="${TITLE_WEIGHT}">This week</text>`)
+    expect(sources[0]).toContain(`font-size="${SMALL_SIZE}">Resets in 2h 0m`)
+    expect(sources[1]).toContain(`font-size="${SMALL_SIZE}">Resets in 2d 23h 0m`)
+    for (const h of heads) expect(h.props.width).toBeLessThan(80 * 8)
     const buttons = await p.findAll({ type: 'Button' })
     const reset = buttons.filter((b: any) => /^usage-reset-(session|week)$/.test(String(b.props.key)))
     expect(reset.length).toBe(2)

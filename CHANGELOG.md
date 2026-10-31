@@ -2,6 +2,9 @@
 
 Versions are `M.m.xxxx`; every build bumps the 4-digit build number. Details and rulings: `docs/ledger.md`, `docs/design.md`.
 
+## 1.0.0051 (2026-10-31)
+- Context and Usage type: the Context title reads `Context`; `Current session` and `This week` use the same size and weight as it (12, semibold), and the reset text and the `% left` figures the same small size as the Context head figures (11). The sizes are shared constants in `hooks/sizes.ts`. On the desktop the Usage titles and reset lines are now drawn (one header drawing per window, the reset switch beside it) so their size can match.
+
 ## 1.0.0050 (2026-10-31)
 - The `Track tasks` switch moved from the panel's top row to a new `FlowDeck` title row above the tabs (title, then the button beside it). Same key, label, press and stored choice. README, design notes and the panel screenshots follow.
 

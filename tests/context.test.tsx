@@ -1,6 +1,8 @@
 import { describe, expect, test } from 'claude-code/testing'
 
 import { cells, contextRows, contextSvg, legend, share, toReading, tokens } from '../hooks/context'
+import { textWidth } from '../hooks/plan-view'
+import { SMALL_SIZE, TITLE_SIZE, TITLE_WEIGHT } from '../hooks/sizes'
 
 // /context's breakdown as the engine hands it over, for a 1M window.
 const BREAKDOWN = {
@@ -61,6 +63,22 @@ describe('context module', () => {
     expect(body).toContain('204k of 1M · compacts at 950k')
     expect(body).toContain('messages 186k')
     expect(height).toBeGreaterThan(40)
+  })
+
+  test('the title reads Context at the title size and the head figures at the small size', () => {
+    const { body } = contextSvg(400, toReading(BREAKDOWN))
+    expect(body).toContain(`font-size="${TITLE_SIZE}" font-weight="${TITLE_WEIGHT}">Context</text>`)
+    expect(body).not.toContain('>context<')
+    expect(body).toMatch(new RegExp(`font-size="${SMALL_SIZE}"[^>]*>204k of 1M`))
+  })
+
+  test('the head figures stay inside the drawing at several widths', () => {
+    const r = toReading(BREAKDOWN)
+    for (const width of [120, 160, 240, 400, 900]) {
+      const { body } = contextSvg(width, r)
+      const right = /text-anchor="end"[^>]*>([^<]*)</.exec(body)![1]!
+      expect(textWidth(right, SMALL_SIZE, true) + textWidth('Context', TITLE_SIZE, true) <= width).toBe(true)
+    }
   })
 
   test('contextRows fit the columns', () => {

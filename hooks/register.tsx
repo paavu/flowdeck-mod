@@ -28,7 +28,7 @@ import { changeLive, endRuns, IDLE_FINISH_MS, isGone, LIVE_BEAT_MS, LIVE_STALE_M
 import type { LiveRecord } from './live'
 import { VERSION } from './version'
 import { asRule, estimateTokens, isPriorFile, isStoredRule, PRIOR_STORE_KEYS, RULE_KEY, SCHEMA_CHARS_PER_TOKEN, toggledRule } from './rule'
-import { live, record, resetKey, resets, toWindows, usageRows, usageSvg } from './usage'
+import { live, record, resetKey, resets, toWindows, usageHeadSvg, usageRows, usageSvg } from './usage'
 import { cacheKey, isCardOpen, isRenewDue, isShowable, KEEP_WARM_DEFAULT, measured, remeasured, renewalEnded, seeded, stamped, toggledFold, userSpoke, viewOf } from './cache'
 import type { CacheFacts, KeepWarm } from './cache'
 import { cacheDrawing } from './cache-view'
@@ -982,6 +982,7 @@ const headerSvg = (W: number, t: ReturnType<typeof totals>): string => {
 
 // The usage reset switch: a clock face, single width and without an emoji form (U+23F1 draws as an emoji in some fonts).
 const RESET_ICON = '◷'
+const SWITCH_W = 24 // the room the reset switch takes beside the usage header drawing
 
 const ctxOf = (a: AgentRun): number => (a.contextMax ? Math.min(100, Math.round((a.contextTokens / a.contextMax) * 100)) : 0)
 
@@ -2974,21 +2975,13 @@ export const register: Register = (on, options) => {
           <Box flexDirection="column">
             {us.windows.map(win => {
               const reset = resets(live(win, clockNow), clockNow, undefined, remaining)
+              const headW = reset ? W - SWITCH_W : W
+              const dh = usageHeadSvg(headW, win.label, reset)
               const du = usageSvg(W, [win], us.samples, clockNow, undefined, { header: false })
               return (
                 <Box key={`usage-${win.kind}`} flexDirection="column">
-                  <Box flexDirection="row" alignItems="center" gap={1}>
-                    <Box flexShrink={1} minWidth={0} overflow="hidden">
-                      <Text bold wrap="truncate-end">
-                        {win.label}
-                      </Text>
-                    </Box>
-                    <Box flexGrow={1} />
-                    {reset && (
-                      <Box flexShrink={0}>
-                        <Text dimColor>{reset}</Text>
-                      </Box>
-                    )}
+                  <Box flexDirection="row" alignItems="center">
+                    <Svg source={svg(headW, dh.height, dh.body)} alt={`${win.label} ${reset}`} width={headW} height={dh.height} />
                     {reset && <Box flexShrink={0}>{resetSwitch(win.kind)}</Box>}
                   </Box>
                   <Svg source={svg(W, du.height, du.body)} alt={`${win.label} ${Math.max(0, 100 - win.percent)}% left`} width={W} height={du.height} />

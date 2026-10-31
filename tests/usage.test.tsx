@@ -1,6 +1,8 @@
 import { describe, expect, test } from 'claude-code/testing'
 
-import { forecast, record, toWindows, usageRows, usageSvg, fmtReset, live, resets, untilText, resetKey } from '../hooks/usage'
+import { textWidth } from '../hooks/plan-view'
+import { SMALL_SIZE, TITLE_SIZE, TITLE_WEIGHT } from '../hooks/sizes'
+import { forecast, record, toWindows, usageHeadSvg, usageRows, usageSvg, fmtReset, live, resets, untilText, resetKey } from '../hooks/usage'
 import { hhmm } from '../hooks/time'
 import { entryDate, groupLine } from '../hooks/archive'
 
@@ -145,6 +147,39 @@ describe('drawings', () => {
     expect((body.match(/data-mark=/g) ?? []).length).toBe(2)
     expect(body).toContain('24% left')
     expect(height).toBeGreaterThan(100)
+  })
+
+  test('titles use the title size, the reset and "% left" texts the small size', () => {
+    const { body } = usageSvg(400, toWindows(limits(76, 33)), {}, NOW, 'UTC')
+    for (const label of ['Current session', 'This week']) {
+      expect(body).toContain(`font-size="${TITLE_SIZE}" font-weight="${TITLE_WEIGHT}">${label}</text>`)
+    }
+    expect((body.match(/Resets[^<]*</g) ?? []).length).toBe(2)
+    expect((body.match(new RegExp(`font-size="${SMALL_SIZE}"[^>]*>Resets`, 'g')) ?? []).length).toBe(2)
+    expect((body.match(new RegExp(`font-size="${SMALL_SIZE}"[^>]*>\\d+% left`, 'g')) ?? []).length).toBe(2)
+    expect(body).toMatch(new RegExp(`font-size="${SMALL_SIZE}">on pace`))
+  })
+
+  test('the header and the "% left" text stay inside the drawing at several widths', () => {
+    for (const width of [160, 240, 400, 900]) {
+      const { body } = usageSvg(width, toWindows(limits(76, 33)), {}, NOW, 'UTC')
+      const barW = Math.max(40, width - 74)
+      for (const m of body.matchAll(/<text [^>]*x="([\d.]+)"[^>]*text-anchor="end"[^>]*>([^<]*)</g)) {
+        const w = textWidth(m[2]!, SMALL_SIZE, true)
+        expect(Number(m[1]) <= width).toBe(true)
+        expect(Number(m[1]) - w >= 0).toBe(true)
+        if (/left$/.test(m[2]!)) expect(Number(m[1]) - w >= barW).toBe(true)
+      }
+    }
+  })
+
+  test('usageHeadSvg puts the title and the reset line on one row inside its width', () => {
+    for (const width of [120, 200, 400]) {
+      const { body } = usageHeadSvg(width, 'Current session', 'Resets in 2d 13h 0m')
+      expect(body).toContain(`font-size="${TITLE_SIZE}" font-weight="${TITLE_WEIGHT}">Current session</text>`)
+      const reset = /text-anchor="end"[^>]*>([^<]*)</.exec(body)![1]!
+      expect(textWidth('Current session', TITLE_SIZE, true) + textWidth(reset, SMALL_SIZE) <= width).toBe(true)
+    }
   })
 
   test('a bar turns red when the forecast passes 100%', () => {
