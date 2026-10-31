@@ -5,6 +5,7 @@ import type { AgentRun, AgentStatus, ArchiveDetail, ArchiveEntry, ArchiveLists, 
 import { parseArchive, stampsOf } from './archive'
 import { parseRecords } from './archive-index'
 import { noteOf } from './notes'
+import { asRule } from './rule'
 
 /** How many Archive or Trash rows are drawn at first; `Show more` adds as many. */
 export const ARCHIVE_PAGE = 50
@@ -28,6 +29,8 @@ export const PANEL_DEFAULT: Panel = {
   confirm: null,
   autoOpenedFor: '',
   tab: 'active',
+  // Not chosen until the user picks (the store key `rule` wins at session start).
+  rule: 'unset',
 }
 
 const TABS: readonly PanelTab[] = ['active', 'finished', 'archive', 'trash']
@@ -69,6 +72,8 @@ export function asPanel(v: unknown): Panel {
     autoOpenedFor: text(o.autoOpenedFor, d.autoOpenedFor),
     // A panel held from before 1.0.0035 may have the Plans tab selected: it reads as Active, as any unknown tab does.
     tab: TABS.includes(o.tab as PanelTab) ? (o.tab as PanelTab) : d.tab,
+    // A panel held from before 1.0.0037 has no choice: unset until session start reads the store.
+    rule: asRule(o.rule),
   }
 }
 

@@ -39,9 +39,10 @@ const RATES = [
   { kind: 'seven_day', percentUsed: 21, resetsAt: new Date(NOW + 61 * HOUR).toISOString() },
 ]
 
-function engine(on: any, files: Record<string, string> = {}) {
+// Task tracking is on in every shot but the strip's own (`rule` off there).
+function engine(on: any, files: Record<string, string> = {}, rule = 'on') {
   const clock = mock.clock(on, { now: NOW - 70 * MIN })
-  mock.store(on, {})
+  mock.store(on, { rule })
   fakeFs(on, { files })
   on('env.get', () => ({ value: undefined }))
   on('settings.read', () => ({ value: {} }))
@@ -240,4 +241,14 @@ test('archive and trash', async ($, on) => {
   await press($, () => pane($), `archive-cancel-${keyOf(list[2]!.id)}`)
   await tab($, 'trash')
   await shot('panel-trash', await pane($))
+})
+
+// Task tracking turned off: the strip above the Active list says so and offers to turn it on.
+test('task tracking off', async ($, on) => {
+  const { clock } = engine(on, {}, 'off')
+  await at(clock, 0)
+  await start($)
+  await press($, () => pane($), 'context')
+  await press($, () => pane($), 'usage')
+  await shot('panel-tracking-off', await pane($))
 })

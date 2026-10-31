@@ -1,7 +1,7 @@
 import { atom, read, update } from 'claude-code'
 import type { Elements, EngineInterface, Register, RenderChildren } from 'claude-code'
 
-import type { AgentRun, ArchiveDetail, ArchiveEntry, ArchiveLists, ArchiveRecord, Flow, Panel, PanelTab, Phase, PlannedTask, Reading, Samples, TaskPlan, UsageWindow } from '../types'
+import type { AgentRun, ArchiveDetail, ArchiveEntry, ArchiveLists, ArchiveRecord, Flow, Panel, PanelTab, Phase, PlannedTask, Reading, Rule, Samples, TaskPlan, UsageWindow } from '../types'
 import { derive, finishItems, hasItemOps, ITEM_H, itemAlt, itemLine, itemsOf, itemSvg, noteSvg, stepItems, timedItems } from './agent-items'
 import type { StepInput } from './agent-items'
 import { agentState, HOUSEKEEPING, isComplete, isIncomplete, isLive, isSettled, markOf, progressOf, splitHead, stateText, stepCount } from './agent-state'
@@ -25,6 +25,7 @@ import { ARCHIVE_PAGE, asAgents, asCacheFacts, asCacheFold, asCacheTick, asDetai
 import { changeLive, endRuns, IDLE_FINISH_MS, isGone, LIVE_BEAT_MS, LIVE_STALE_MS, liveKey, readLive, without } from './live'
 import type { LiveRecord } from './live'
 import { VERSION } from './version'
+import { asRule, estimateTokens, isPriorFile, isStoredRule, PRIOR_STORE_KEYS, RULE_KEY, SCHEMA_CHARS_PER_TOKEN, toggledRule } from './rule'
 import { live, record, resetKey, resets, toWindows, usageRows, usageSvg } from './usage'
 import { cacheKey, isCardOpen, isRenewDue, isShowable, KEEP_WARM_DEFAULT, measured, remeasured, renewalEnded, seeded, stamped, toggledFold, userSpoke, viewOf } from './cache'
 import type { CacheFacts, KeepWarm } from './cache'
@@ -52,6 +53,8 @@ const keepWarm = atom({ plugin: 'flowdeck', key: 'keepWarm' } as const, KEEP_WAR
 // The shown flow's owner session and activity (flow-live.json), and what reading or writing that file could not do.
 const liveState = atom({ plugin: 'flowdeck', key: 'live' } as const, LIVE_DEFAULT)
 const liveError = atom({ plugin: 'flowdeck', key: 'liveError' } as const, '')
+// /flowdeck:flowdeck ran in this session: the flow rule is injected for it whatever the stored choice (rule.ts).
+const ruleSession = atom({ plugin: 'flowdeck', key: 'ruleSession' } as const, false)
 
 // A reload keeps the held values an older flowdeck wrote, in its older shape: every read goes through its normalizer
 // (shapes.ts), and every update hands its change the normalized value. A change that returns that value unchanged hands
@@ -108,12 +111,128 @@ const updateKeepWarm = async ($: EngineInterface, change: (k: KeepWarm) => KeepW
 const TOOL = 'mcp__flowdeck__progress'
 const STEP_TOOL = 'mcp__flowdeck__step'
 const TICK_MS = 5000
-// Every task goes through flowdeck: this rule is in every session's system prompt, so the mod alone sets it.
-const FLOW_RULE = `# flowdeck flows
-Every task goes through flowdeck: report it with ${TOOL} (load it with ToolSearch \`select:${TOOL}\` when it is deferred; a flowdeck worker reports only its own steps, with ${STEP_TOOL}). Send the plan once: title, \`tasks\` [{title, tier, after, goal}] numbered from 1 (tasks that edit the same files are chained with \`after\`; independent ones get none), phase "delegate". Add each new task with \`add\` (goal too); send \`done: [numbers]\` as tasks are accepted, with \`notes: [{task, result, feedback}]\`. goal (the user's request), result and feedback are the task row's handoff note, plain text; its brief is your Agent prompt. Begin every worker's Agent description with \`#<n> <title>\`. Never leave a task unreported. A flow finishes by itself once every task is done and no worker runs; send \`finished: true\` only when the user asks to end it.`
-const GOAL_TEXT = "A short summary of the user's request for this task, plain text, at most 300 characters; shown on the task's row."
-const PANE = 'flowdeck-agents'
 const PHASES: readonly Phase[] = ['plan', 'design', 'delegate', 'review', 'close']
+// The flow rule, in the system prompt only while task tracking is on (rule.ts) or in a session that ran /flowdeck:flowdeck.
+const FLOW_RULE = `# flowdeck
+Track each task with ${TOOL} (ToolSearch \`select:${TOOL}\` if deferred; workers use only ${STEP_TOOL}). Plan once: title, tasks [{title, tier, after, goal}] from 1; chain tasks editing the same files with \`after\`. New task: \`add\` with its goal. Accepted: \`done: [n]\` with notes [{task, result, feedback}]. Worker Agent description: \`#<n> <title>\`. No flow for a question or a one-step edit; never leave another task unreported.`
+const GOAL_TEXT = "The user's request for this task in a sentence; plain text, at most 300 characters."
+// The pane keeps its id from before the command's rename, so a pane the desktop app placed still opens.
+const PANE = 'flowdeck-agents'
+const PANEL_COMMANDS = ['flowdeck-panel', 'flowdeck-agents'] // the second is the old name, kept for one release
+const RULE_COMMAND = 'flowdeck-rule'
+const TIERS = ['fable', 'heavy', 'careful', 'medium', 'light']
+
+const PROGRESS_SPEC = {
+  name: 'progress',
+  description:
+    'Report the flow to the flowdeck band and panel. Plan once (title, tasks each with a goal, phase "delegate"); add new tasks with add; accept tasks with done: [numbers] plus notes [{task, result, feedback}]; phase "close" when the work is done. ' +
+    'One call may carry add, done and notes together; fields left out keep their value. finished: true only when the user ends the flow (an all-done flow finishes by itself when the turn ends). ' +
+    'restart: true replaces the open flow for a new /flowdeck <task>. Notes are plain text; the brief is taken from the Agent prompt.',
+  inputSchema: {
+    type: 'object',
+    properties: {
+      title: { type: 'string', description: "The flow's name, a few words." },
+      total: { type: 'integer', minimum: 0, description: 'Number of planned tasks.' },
+      done: {
+        description: 'Accepted task numbers (from 1), added to those before; one done without a worker run shows as Accepted. A bare count means the first N.',
+        anyOf: [{ type: 'array', items: { type: 'integer', minimum: 1 } }, { type: 'integer', minimum: 0 }],
+      },
+      phase: { type: 'string', enum: [...PHASES] },
+      finished: { type: 'boolean', description: 'True only when the user ends the flow.' },
+      restart: { type: 'boolean', description: 'Finish the open flow and start a new one from this call.' },
+      add: {
+        type: 'array',
+        description: 'Tasks appended to the open flow (new requests, new task-list items); titles already there are ignored.',
+        items: {
+          type: 'object',
+          properties: {
+            title: { type: 'string' },
+            tier: { type: 'string', enum: TIERS },
+            after: { type: 'array', items: { type: 'integer' }, description: 'Numbers of the tasks it waits for.' },
+            goal: { type: 'string', description: GOAL_TEXT },
+          },
+          required: ['title'],
+        },
+      },
+      tasks: {
+        type: 'array',
+        description:
+          'The plan in order, numbered from 1; delegate each with the Agent description `#<n> <title>`. Chain tasks that edit the same files with after; independent ones get none and run in parallel once ready.',
+        items: {
+          type: 'object',
+          properties: {
+            title: { type: 'string', description: 'A few words.' },
+            tier: { type: 'string', enum: TIERS },
+            after: { type: 'array', items: { type: 'integer' }, description: 'Numbers of the tasks it waits for; unknown, self and cyclic waits are ignored.' },
+            goal: { type: 'string', description: GOAL_TEXT },
+          },
+          required: ['title', 'tier'],
+        },
+      },
+      notes: {
+        type: 'array',
+        description: 'Handoff notes by task number: a part sent replaces the old one, "" clears it. Send result and feedback with the task\'s done.',
+        items: {
+          type: 'object',
+          properties: {
+            task: { type: 'integer', minimum: 1, description: 'The task number.' },
+            goal: { type: 'string', description: GOAL_TEXT },
+            result: { type: 'string', description: 'What it delivered; plain text, at most 300 characters.' },
+            feedback: { type: 'string', description: 'Your review: what was checked, what is left or risky; plain text, at most 300 characters.' },
+          },
+          required: ['task'],
+        },
+      },
+    },
+  },
+}
+
+const STEP_SPEC = {
+  name: 'step',
+  description:
+    'For flowdeck workers: report your own steps to the panel. Send your plan once as steps (3-8 short titles), then next: true as each finishes; done (titles), active or failed for the others. ' +
+    'Without a list: total and done (a count) with a note. Silent: it only draws your row.',
+  inputSchema: {
+    type: 'object',
+    properties: {
+      steps: {
+        type: 'array',
+        description: 'Your plan, up to 12 steps, sent once (again only if it changes); the first starts active.',
+        items: {
+          type: 'object',
+          properties: {
+            title: { type: 'string', description: 'A few words.' },
+            status: { type: 'string', enum: ['pending', 'active', 'done', 'error'] },
+          },
+          required: ['title'],
+        },
+      },
+      next: { type: 'boolean', description: 'Finish the active step and start the next.' },
+      done: {
+        description: 'Titles of steps finished; without a list, the count finished.',
+        anyOf: [{ type: 'array', items: { type: 'string' } }, { type: 'integer', minimum: 0 }],
+      },
+      active: { type: 'string', description: 'Title of the step now running.' },
+      failed: { type: 'string', description: 'Title of the step that failed.' },
+      total: { type: 'integer', minimum: 1, description: 'Steps planned, without a list.' },
+      note: { type: 'string', description: 'The active step in a few words (a list uses its title).' },
+    },
+  },
+}
+
+// What tracking adds to the main session: the rule in its system prompt and the progress tool's schema once loaded,
+// rounded to tens (rule.ts estimateTokens).
+const toolChars = (spec: { name: string; description: string; inputSchema: unknown }): number =>
+  JSON.stringify({ name: `mcp__flowdeck__${spec.name}`, description: spec.description, input_schema: spec.inputSchema }).length
+const TRACKING_TOKENS = Math.round((estimateTokens(FLOW_RULE.length) + estimateTokens(toolChars(PROGRESS_SPEC), SCHEMA_CHARS_PER_TOKEN)) / 10) * 10
+
+const RULE_WORDS = {
+  ask: 'Track every task in flowdeck?',
+  off: 'Task tracking is off',
+  body: `When on, Claude plans each task, shows it here with its workers, time and cost, and saves a handoff note. It adds about ${String(TRACKING_TOKENS).replace(/\B(?=(\d{3})+$)/g, ',')} tokens per session and a few tool calls per task. /flowdeck:flowdeck <task> tracks any set of tasks whenever you want.`,
+  on: 'Track all tasks',
+  notNow: 'Not now',
+}
 const ACCENT = '#8f8cf4'
 const DONE = '#5fbf8f'
 
@@ -1675,6 +1794,73 @@ async function loadKeepWarm($: EngineInterface): Promise<boolean | undefined> {
   return typeof on === 'boolean' ? on : undefined
 }
 
+// Task tracking's choice at session start. A store with no choice yet is migrated once: an install that ran before the
+// choice existed (an earlier flowdeck's store keys, or flow files in this project) keeps its rule (`on`); a fresh one saves
+// `unset`, so later sessions never migrate a fresh user's own flows into `on`. A store that cannot be read migrates nothing.
+async function loadRule($: EngineInterface): Promise<Rule> {
+  const stored: unknown = await $.store.get(RULE_KEY)
+  if (isStoredRule(stored)) return asRule(stored)
+  const isPrior = await hadFlowdeck($).catch(() => false)
+  const rule: Rule = isPrior ? 'on' : 'unset'
+  await $.store.set(RULE_KEY, rule).catch(() => {})
+  return rule
+}
+
+async function hadFlowdeck($: EngineInterface): Promise<boolean> {
+  for (const key of PRIOR_STORE_KEYS) {
+    const v: unknown = await $.store.get(key).catch(() => undefined)
+    if (v !== undefined && v !== null) return true
+  }
+  const dir = dataDir(project)
+  if (!dir) return false
+  const names = await Promise.resolve()
+    .then(() => $.fs.list(dir))
+    .catch(() => [])
+  return names.some(n => isPriorFile(n.name))
+}
+
+// One choice for every project: the panel's copy draws the strip and the switch, the store keeps it.
+async function setRule($: EngineInterface, rule: Rule): Promise<void> {
+  await updatePanel($, prev => (prev.rule === rule ? prev : { ...prev, rule }))
+  await $.store.set(RULE_KEY, rule).catch(() => {})
+}
+
+// The rule goes into the system prompt while tracking is on or /flowdeck:flowdeck ran in this session. The store is read
+// each time, so a choice made in another session counts from its next request; the panel's copy stands in when it cannot.
+async function isRuleOn($: EngineInterface): Promise<boolean> {
+  if ((await read($, ruleSession).catch(() => false)) === true) return true
+  const stored: unknown = await $.store.get(RULE_KEY).catch(() => null)
+  const rule = isStoredRule(stored) ? asRule(stored) : (await readPanel($).catch(() => asPanel(null))).rule
+  return rule === 'on'
+}
+
+const ruleStatus = (rule: Rule, isSession: boolean): string => {
+  const what =
+    rule === 'on'
+      ? 'on: the flow rule is in every session\'s system prompt, so Claude tracks every task in flowdeck.'
+      : rule === 'off'
+        ? 'off: flowdeck adds nothing to the system prompt; /flowdeck:flowdeck <task> still tracks tasks when asked.'
+        : 'not chosen (unset): flowdeck adds nothing to the system prompt until a choice is made; the panel\'s Active tab asks.'
+  const session = isSession && rule !== 'on' ? ' This session tracks tasks: /flowdeck:flowdeck ran in it.' : ''
+  return `Task tracking is ${what}${session}`
+}
+
+// Shown on the Active and Finished tabs until tracking is on: what it does and costs, and the buttons that choose.
+function ruleStrip($: EngineInterface, ui: Pick<Elements['desktop'], 'Box' | 'Text' | 'Button'>, rule: Rule): RenderChildren {
+  if (rule === 'on') return null
+  const { Box, Text, Button } = ui
+  return (
+    <Box key="rule-strip" flexDirection="column" marginTop={1}>
+      <Text bold>{rule === 'off' ? RULE_WORDS.off : RULE_WORDS.ask}</Text>
+      <Text dimColor>{RULE_WORDS.body}</Text>
+      <Box flexDirection="row" gap={2}>
+        <Button key="rule-on" label={RULE_WORDS.on} plain onPress={() => setRule($, 'on')} />
+        {rule === 'unset' ? <Button key="rule-off" label={RULE_WORDS.notNow} plain onPress={() => setRule($, 'off')} /> : null}
+      </Box>
+    </Box>
+  )
+}
+
 // The buttons on top of the panel, and at the row's far end the dim version of the code running (version.ts). They read
 // only the panel's own toggles, so the panel can draw them whatever else fails.
 function topToggleRow($: EngineInterface, ui: Pick<Elements['desktop'], 'Box' | 'Text' | 'Button'>, p: Panel): RenderChildren {
@@ -1726,6 +1912,9 @@ function topToggleRow($: EngineInterface, ui: Pick<Elements['desktop'], 'Box' | 
       }}
     />
   )
+  const toggleRule = (
+    <Button key="track-tasks" label={`${p.rule === 'on' ? '●' : '○'} Track tasks`} plain onPress={() => setRule($, toggledRule(p.rule))} />
+  )
   // One line, never wrapped: the buttons keep their width and only the spacer gives way.
   return (
     <Box key="top-toggles" flexDirection="row" flexWrap="nowrap" gap={1}>
@@ -1734,6 +1923,7 @@ function topToggleRow($: EngineInterface, ui: Pick<Elements['desktop'], 'Box' | 
         {toggleUsage}
         {toggleBand}
         {toggleKeepWarm}
+        {toggleRule}
       </Box>
       <Box flexGrow={1} />
       <Box flexShrink={0}>
@@ -1784,6 +1974,9 @@ export const register: Register = (on, options) => {
     const started = await next(e)
     lang = await detectLang($, options.language).catch((): Lang => 'en')
     project = typeof e.cwd === 'string' ? e.cwd : ''
+    // Before the archive loads: that may write this project's files, which the migration reads as an earlier install's.
+    const rule = await loadRule($).catch(() => null)
+    if (rule) await updatePanel($, prev => (prev.rule === rule ? prev : { ...prev, rule }))
     const stored = await $.store.get('contextShown').catch(() => undefined)
     if (typeof stored === 'boolean') await updatePanel($, prev => ({ ...prev, isContextShown: stored }))
     const storedUsage = await $.store.get('usageShown').catch(() => undefined)
@@ -1809,124 +2002,19 @@ export const register: Register = (on, options) => {
     faults.live.clear()
     if (await read($, bandError).catch(() => '')) await update($, bandError, () => '').catch(() => '')
     if (await read($, liveError).catch(() => '')) await update($, liveError, () => '').catch(() => '')
-    await $.tool.register({
-      name: 'progress',
-      description:
-        'Report every task to the progress bar above the prompt and the agents panel: every task goes through flowdeck. ' +
-        'Call it after presenting the plan (title, total, tasks, phase "delegate"), each time a task is accepted (done: [its number]), ' +
-        'when switching phase or re-planning (tasks), phase "close" when the current work is done, and finished: true only when the user ends the flow ' +
-        '(a flow whose tasks are all done finishes by itself when your turn ends). ' +
-        'For a new /flowdeck <task> while a flow is linked, send the new plan with restart: true: the open flow is finished first and the new one starts. Fields left out keep their previous value. ' +
-        'Every task carries a handoff note the user reads on its row: send `goal` with every task you create or add, and `notes` with `result` and `feedback` for a task when you accept it (with its `done`). ' +
-        'Notes are short plain text, no markdown; the brief is taken from your Agent prompt by itself.',
-      inputSchema: {
-        type: 'object',
-        properties: {
-          title: { type: 'string', description: 'Short name of the overall task, a few words.' },
-          total: { type: 'integer', minimum: 0, description: 'Number of planned worker tasks.' },
-          done: {
-            description:
-              'The tasks accepted after review: their numbers (from 1), e.g. [1, 3], added to those accepted before. Name them, so the panel knows which tasks are done; a task accepted without a worker run (you did it, or one run covered it) shows as Accepted. A plain count still works and means the first N tasks.',
-            anyOf: [{ type: 'array', items: { type: 'integer', minimum: 1 } }, { type: 'integer', minimum: 0 }],
-          },
-          phase: { type: 'string', enum: [...PHASES] },
-          finished: { type: 'boolean', description: 'True once the flow is closed.' },
-          restart: {
-            type: 'boolean',
-            description: 'True to end the open flow (recorded as finished) and start a new one from the rest of this call. Without an open flow it just starts one.',
-          },
-          add: {
-            type: 'array',
-            description:
-              'Tasks to append to the running flow without touching the plan or the accepted count: new requests and new items in the session task list. Titles already in the flow are ignored.',
-            items: {
-              type: 'object',
-              properties: {
-                title: { type: 'string' },
-                tier: { type: 'string', enum: ['fable', 'heavy', 'careful', 'medium', 'light'] },
-                after: { type: 'array', items: { type: 'integer' }, description: 'Numbers of the tasks this one waits for (1-based, in the whole task list).' },
-                goal: { type: 'string', description: GOAL_TEXT },
-              },
-              required: ['title'],
-            },
-          },
-          tasks: {
-            type: 'array',
-            description:
-              'The planned worker tasks in order, numbered from 1. Delegate each with the Agent tool `description` `#<number> <title>` (e.g. `#3 History module`; a return round reuses it): the panel links the worker to its task by that number, else by the title. Tasks that edit the same files must be chained with `after` (they never run in parallel); give every waiting task its `after`; independent tasks get none. The panel marks a planned task `ready` once all it waits for is done, and every ready task should be launched at once, in parallel.',
-            items: {
-              type: 'object',
-              properties: {
-                title: { type: 'string', description: 'A few words; the Agent description is `#<number> <title>`.' },
-                tier: { type: 'string', enum: ['fable', 'heavy', 'careful', 'medium', 'light'] },
-                after: {
-                  type: 'array',
-                  items: { type: 'integer' },
-                  description:
-                    'Numbers (from 1) of the tasks this one waits for; leave out for a task that can start at once. Unknown numbers, the task itself and waits that close a cycle are ignored.',
-                },
-                goal: { type: 'string', description: GOAL_TEXT },
-              },
-              required: ['title', 'tier'],
-            },
-          },
-          notes: {
-            type: 'array',
-            description:
-              'Handoff notes of tasks by number, at any time: a part sent replaces the one before, an empty string clears it, a part left out stays. Send result and feedback when you accept a task, together with its done. Unknown task numbers are ignored.',
-            items: {
-              type: 'object',
-              properties: {
-                task: { type: 'integer', minimum: 1, description: 'The task number (from 1).' },
-                goal: { type: 'string', description: GOAL_TEXT },
-                result: { type: 'string', description: 'What the task delivered, plain text, at most 300 characters.' },
-                feedback: { type: 'string', description: 'Your review of it: what was checked, what is left or risky; plain text, at most 300 characters.' },
-              },
-              required: ['task'],
-            },
-          },
-        },
-      },
-    }).catch(() => {}) // each registration on its own: one refused never stops the others
-    await $.tool.register({
-      name: 'step',
-      description:
-        'For flowdeck workers: report progress on your own task to the agents panel. ' +
-        'Right after reading the brief, send your plan once as `steps` (3-8 titles of a few words); ' +
-        'then move it with `next: true` as each step finishes, `done` (titles), `active` or `failed`. ' +
-        'Without a list, `total` (your plan in 3-8 steps) and `done` (a count, 0 at first) with a `note` still work. ' +
-        'Cheap and silent: it only draws the agent row.',
-      inputSchema: {
-        type: 'object',
-        properties: {
-          steps: {
-            type: 'array',
-            description: 'Your plan in up to 12 steps, sent once (again only when it changes); the first step starts as active.',
-            items: {
-              type: 'object',
-              properties: {
-                title: { type: 'string', description: 'At most 4-5 words.' },
-                status: { type: 'string', enum: ['pending', 'active', 'done', 'error'] },
-              },
-              required: ['title'],
-            },
-          },
-          next: { type: 'boolean', description: 'Finish the step in progress and start the next.' },
-          done: {
-            description: 'Titles of steps now finished; or, without a list, the number of steps finished so far.',
-            anyOf: [{ type: 'array', items: { type: 'string' } }, { type: 'integer', minimum: 0 }],
-          },
-          active: { type: 'string', description: 'Title of the step now in progress.' },
-          failed: { type: 'string', description: 'Title of the step that failed.' },
-          total: { type: 'integer', minimum: 1, description: 'Steps planned, without a list; may change if the plan changes.' },
-          note: { type: 'string', description: 'The step in progress, a few words; with a list, its active title is used.' },
-        },
-      },
-    }).catch(() => {})
-    await $.command.register({
-      name: 'flowdeck-agents',
-      description: 'Show or hide the flowdeck panel: context window, subagents running, finished and planned, with model, cost and time',
-    }).catch(() => {}) // a name Claude Code already has is refused: start anyway
+    // Each registration on its own: one refused never stops the others (a command name Claude Code already has is refused).
+    await $.tool.register(PROGRESS_SPEC).catch(() => {})
+    await $.tool.register(STEP_SPEC).catch(() => {})
+    for (const name of PANEL_COMMANDS) {
+      await $.command.register({
+        name,
+        description:
+          name === 'flowdeck-agents'
+            ? 'Old name of /flowdeck-panel, kept for one release: show or hide the flowdeck panel'
+            : 'Show or hide the flowdeck panel: context window, subagents running, finished and planned, with model, cost and time',
+      }).catch(() => {})
+    }
+    await $.command.register({ name: RULE_COMMAND, description: 'Turn task tracking on or off', argumentHint: 'on | off | status' }).catch(() => {})
 
     // The flow shown and flow-live.json sorted into this session's and the last sessions' (closed and archived).
     await adoptLive($, sessionId)
@@ -1946,16 +2034,47 @@ export const register: Register = (on, options) => {
     return started
   })
 
-  // The rules are added to whatever the engine and other mods composed; a failure below is not masked (that would replace the real prompt with ours alone).
+  // The flow rule is added to whatever the engine and other mods composed, only while tracking is on (isRuleOn); a failure
+  // below is not masked (that would replace the real prompt with ours alone).
   on('prompt.compose', async ($, e, next) => {
-    const rules = [{ id: 'flowdeck:flow-rule', text: FLOW_RULE, scope: 'session' as const }]
     const result = await next(e)
-    return { sections: [...result.sections, ...rules] }
+    if (!(await isRuleOn($).catch(() => false))) return result
+    return { sections: [...result.sections, { id: 'flowdeck:flow-rule', text: FLOW_RULE, scope: 'session' as const }] }
   })
 
-  on('command.run', { command: 'flowdeck-agents' }, async $ => {
-    const isOpen = await togglePane($)
-    return { text: isOpen ? tr().opened : tr().closed }
+  // /flowdeck:flowdeck turns the rule on for its own session, whatever the stored choice (held in $.state, never stored).
+  on('skill.prompt', async ($, e, next) => {
+    const result = await next(e)
+    if (/^(flowdeck:)?flowdeck$/.test(e.skill) && (e.pluginName === undefined || e.pluginName === 'flowdeck')) {
+      await update($, ruleSession, () => true).catch(() => {})
+    }
+    return result
+  })
+
+  for (const command of PANEL_COMMANDS) {
+    on('command.run', { command }, async $ => {
+      const isOpen = await togglePane($)
+      return { text: isOpen ? tr().opened : tr().closed }
+    })
+  }
+
+  on('command.run', { command: RULE_COMMAND }, async ($, e) => {
+    const arg = e.args.trim().toLowerCase()
+    if (arg === 'on' || arg === 'off') {
+      await setRule($, arg)
+      return {
+        text:
+          arg === 'on'
+            ? 'Task tracking is on for every project, from the next request. /flowdeck-rule off turns it off.'
+            : 'Task tracking is off: flowdeck adds nothing to the system prompt. /flowdeck:flowdeck <task> still tracks tasks.',
+      }
+    }
+    if (arg === '' || arg === 'status') {
+      const stored: unknown = await $.store.get(RULE_KEY).catch(() => null)
+      const rule = isStoredRule(stored) ? asRule(stored) : (await readPanel($)).rule
+      return { text: ruleStatus(rule, (await read($, ruleSession).catch(() => false)) === true) }
+    }
+    return { text: 'Usage: /flowdeck-rule on | off | status' }
   })
 
   on('tool.call', { tool: TOOL }, async ($, e) => {
@@ -2989,9 +3108,11 @@ export const register: Register = (on, options) => {
     const shown = isFlowTab
       ? await safe(TAB_LABEL[p.tab], () => drawFlow(p.tab === 'finished' ? 'finished' : 'active'))
       : await safe(TAB_LABEL[p.tab], archivePart(p.tab === 'trash' ? 'trash' : 'archive'))
+    const strip = isFlowTab ? await safe('Task tracking', () => ruleStrip($, { Box, Text, Button }, p.rule)) : null
     const group = (
       <Box key="flowdeck-group" flexDirection="column" marginTop={1}>
         {tabs}
+        {strip}
         {shown}
       </Box>
     )

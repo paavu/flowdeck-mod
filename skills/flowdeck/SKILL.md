@@ -18,7 +18,7 @@ Task from the user: $ARGUMENTS
 
 ## Every task goes through flowdeck
 
-With the mod installed, every task of every session goes through flowdeck (its `flowdeck:flow-rule` in the system prompt says the same in every session): report it with `progress` (plan with `tasks` and `after`, `add` for a new task, each with its `goal`; `done: [numbers]` with `result` and `feedback` notes when accepted), and never leave a task unreported. A task list (TodoWrite) or a worker launch with no open flow starts one by itself; your plan then joins it.
+From this skill on, every task of this session goes through flowdeck, whatever the task tracking choice for other sessions (`/flowdeck-rule`; the mod also puts its short `flowdeck:flow-rule` in this session's system prompt): report it with `progress` (plan with `tasks` and `after`, `add` for a new task, each with its `goal`; `done: [numbers]` with `result` and `feedback` notes when accepted), and never leave a task unreported. A question or a one-step edit needs no flow. A task list (TodoWrite) or a worker launch with no open flow starts one by itself; your plan then joins it.
 
 ## Linked for the whole session
 

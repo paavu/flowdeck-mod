@@ -19,6 +19,7 @@ const SHOTS = {
   'panel-finished': 520,
   'panel-archive': 520,
   'panel-trash': 520,
+  'panel-tracking-off': 520,
 }
 const SVG_SOURCES = ['band-running', 'band-done', 'cache-warm', 'cache-cold']
 const THEME = {

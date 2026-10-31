@@ -8,6 +8,8 @@ function engine(on: any, compose: () => unknown = () => ({ sections: [{ id: 'cor
   on('clock.every', () => ({ value: undefined }))
   on('clock.now', () => ({ value: 0 }))
   on('prompt.compose', compose)
+  // Task tracking on, so the flow rule is composed (tests/rule.test.tsx covers the other choices).
+  on('store.get', (_$: any, e: any) => ({ value: e.key === 'rule' ? 'on' : undefined }))
 }
 
 const compose = ($: any) => $.prompt.compose({ model: 'm', promptModel: 'm', surfaces: ['terminal'], tools: [], outputStyle: null, traits: [] } as any)

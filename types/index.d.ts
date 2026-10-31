@@ -190,7 +190,12 @@ export type Panel = {
   autoOpenedFor: string
   /** The list the panel's flowdeck group shows under its tabs; this session only. */
   tab: PanelTab
+  /** Task tracking, one choice for all projects, stored under the engine-store key `rule` (read at session start). */
+  rule: Rule
 }
+
+/** Task tracking: `on` puts the flow rule in every session's system prompt; `unset` until the user chooses. */
+export type Rule = 'unset' | 'on' | 'off'
 
 export type PanelTab = 'active' | 'finished' | 'archive' | 'trash'
 
@@ -263,6 +268,8 @@ declare module 'claude-code' {
       live: LiveState
       /** What the last read or write of flow-live.json could not do in this load (the panel's line), '' when nothing. */
       liveError: string
+      /** True once `/flowdeck:flowdeck` ran in this session: the flow rule is injected for it whatever the stored choice. */
+      ruleSession: boolean
     }
   }
 }

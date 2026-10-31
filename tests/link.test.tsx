@@ -171,7 +171,7 @@ describe('linked session flow', () => {
     const state = engine(on, { refuseTool: 'step' })
     await start($)
     expect(state.tools).toEqual(['progress'])
-    expect(state.commands).toEqual(['flowdeck-agents'])
+    expect(state.commands).toEqual(['flowdeck-panel', 'flowdeck-agents', 'flowdeck-rule'])
     expect(state.ticked).toBe(true)
   })
 

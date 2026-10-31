@@ -388,12 +388,15 @@ describe('the note button and panel', () => {
 })
 
 describe('the rule for the model', () => {
-  test('the flow rule names goal, result, feedback and the brief, within its length', async ($, on) => {
-    engine(on)
+  test('the flow rule names goal, result and feedback within its length; the progress tool says where the brief comes from', async ($, on) => {
+    const { registered } = engine(on, { store: { rule: 'on' } })
     on('prompt.compose', () => ({ sections: [] }))
+    await $.session.start({ surface: 'terminal', isInteractive: true, cwd: '/work' } as any)
     const r = await $.prompt.compose({ model: 'm', promptModel: 'm', surfaces: ['terminal'], tools: [], outputStyle: null, traits: [] } as any)
     const rule = r.sections.find((s: any) => s.id === 'flowdeck:flow-rule')
-    for (const word of ['goal', 'result', 'feedback', 'notes: [{task, result, feedback}]', 'brief', 'Agent prompt']) expect(rule.text).toContain(word)
-    expect(rule.text.length).toBeLessThan(900)
+    for (const word of ['goal', 'result', 'feedback', 'notes [{task, result, feedback}]']) expect(rule.text).toContain(word)
+    expect(rule.text.length).toBeLessThan(560)
+    const tool = registered.find(t => t.name === 'progress')
+    for (const word of ['brief', 'Agent prompt']) expect(tool.description).toContain(word)
   })
 })

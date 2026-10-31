@@ -2,6 +2,14 @@
 
 Versions are `M.m.xxxx`; every build bumps the 4-digit build number. Details and rulings: `docs/ledger.md`, `docs/design.md`.
 
+## 1.0.0037 (2026-10-31)
+- Task tracking is a choice: the flow rule (`flowdeck:flow-rule`) goes into the system prompt only while tracking is `on`, or in a session that ran `/flowdeck:flowdeck`. A fresh install is `unset` and adds nothing until the user chooses. The choice is one for every project, kept in the mod store under `rule`.
+- Migration: when the store has no `rule` yet, an install that ran flowdeck before (its earlier store keys, or `flow-live.json`, `archive-index.json`, `archive/` or `history*.json` in the project's `.claude/flowdeck/`) is saved as `on` and keeps working as before; any other is saved as `unset`.
+- The Active and Finished tabs show a strip until tracking is on: `Track every task in flowdeck?` with `Track all tasks` and `Not now`, or `Task tracking is off` with `Track all tasks`, and what tracking does and costs (about 1,760 tokens per session). The top row has a `● Track tasks` / `○ Track tasks` switch after Keep warm.
+- Commands: `/flowdeck-rule on | off | status`; the panel command is now `/flowdeck-panel`, and `/flowdeck-agents` still works for this release. The pane id is unchanged, so a placed pane and the held panel state keep working.
+- Smaller footprint: the flow rule went from 896 to 476 characters (about 250 to 130 tokens); the `progress` tool schema from 4,689 to 3,246 characters (`/context` 2.3k to 1.6k tokens) and the `step` schema from 1,516 to 1,274 (758 to 638), every field and cap kept. One `progress` call still carries `add`, `done` and `notes` together. SKILL.md (16,828 characters, about 4,670 tokens) now says a question or a one-step edit needs no flow and no longer relies on the injected rule.
+- `scripts/check-rules.sh` checks SKILL.md carries every flow rule; a new screenshot shows the strip (`docs/images/panel-tracking-off-*.png`).
+
 ## 1.0.0036 (2026-10-31)
 - Toggle and collapse icons: every fold chevron is a solid triangle, `▼` open and `▶︎` folded (the folded one carries a text-style selector so it never renders as an emoji), all from `foldGlyph` in hooks/fold.ts, including the cache card's chevron. In the top row Context and Usage use them; Band and Keep warm are dot switches (`●` on or shown, `○` off or hidden) and Keep warm no longer says `(on)` / `(off)`. Behaviour is unchanged.
 

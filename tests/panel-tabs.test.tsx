@@ -217,7 +217,7 @@ describe('the tabs', () => {
       await p.unmount()
       const row = (key: string) => walk(root).find(n => keyOfNode(n) === key)
       const keys = (n: any) => walk(n).map(keyOfNode).filter(Boolean)
-      expect(keys(row('top-toggles'))).toEqual(['top-toggles', 'context', 'usage', 'band', 'keep-warm'])
+      expect(keys(row('top-toggles'))).toEqual(['top-toggles', 'context', 'usage', 'band', 'keep-warm', 'track-tasks'])
       expect(keys(row('tabs'))).toEqual(['tabs', 'tab-active', 'tab-finished', 'tab-archive', 'tab-trash'])
       // the group comes after Context, Usage and Band
       const order = walk(root).map(keyOfNode)

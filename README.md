@@ -20,6 +20,7 @@ The screenshots are rendered from the mod's own drawing code with sample data (s
 - [Install](#install), [Update](#update), [Uninstall](#uninstall)
 - [How it works](#how-it-works)
 - [Features](#features)
+- [Task tracking](#task-tracking)
 - [Configuration and data](#configuration-and-data)
 - [Privacy: what it reads, writes and runs](#privacy-what-it-reads-writes-and-runs)
 - [Known limits](#known-limits)
@@ -54,9 +55,10 @@ Check it loaded: `/plugin` shows a dim line such as `1 mod active · flowdeck` u
 
 First run:
 
-1. `/flowdeck-agents` opens the panel: the top row (`▼ Context`, `▼ Usage`, `● Band`, `● Keep warm` and the version), then the tabs, all at `(0)` in a new project. Context and Usage fill in once Claude Code reports them, at the latest after the first reply.
-2. After the first reply, the band above the prompt shows the `WARM` cache chip.
-3. `/flowdeck <a small task>` starts a flow: the orchestrator shows its plan, the band shows the running task with `Tasks X/Y`, and each worker appears in the panel's Active tab with its steps. When every task is done and the turn ends, the band reads `Done` and the flow is saved to the Archive tab.
+1. `/flowdeck-panel` opens the panel: the top row (`▼ Context`, `▼ Usage`, `● Band`, `● Keep warm`, `○ Track tasks` and the version), then the tabs, all at `(0)` in a new project. Context and Usage fill in once Claude Code reports them, at the latest after the first reply.
+2. The Active tab asks `Track every task in flowdeck?` with `Track all tasks` and `Not now` (see [Task tracking](#task-tracking)). Until the user chooses, the mod adds nothing to the system prompt.
+3. After the first reply, the band above the prompt shows the `WARM` cache chip.
+4. `/flowdeck <a small task>` starts a flow, whatever the tracking choice: the orchestrator shows its plan, the band shows the running task with `Tasks X/Y`, and each worker appears in the panel's Active tab with its steps. When every task is done and the turn ends, the band reads `Done` and the flow is saved to the Archive tab.
 
 To see what the mod hooks and calls before you install it, clone the repository and run `claude plugin validate <folder>`: its `hooks:` and `calls:` lines list every event and engine call.
 
@@ -70,7 +72,9 @@ To see what the mod hooks and calls before you install it, clone the repository 
 claude plugin update flowdeck@flowdeck-mod
 ```
 
-then `/reload-plugins` in open sessions. Every release raises `version` in `.claude-plugin/plugin.json`, so `update` always sees the new one. The panel's top row shows the version of the code that is running (`v1.0.0036`); after an update without a reload it still names the old one. [CHANGELOG.md](CHANGELOG.md) lists what each version changed.
+then `/reload-plugins` in open sessions. Every release raises `version` in `.claude-plugin/plugin.json`, so `update` always sees the new one. The panel's top row shows the version of the code that is running (`v1.0.0037`); after an update without a reload it still names the old one. [CHANGELOG.md](CHANGELOG.md) lists what each version changed.
+
+From 1.0.0036 or earlier: task tracking became a choice in 1.0.0037. An install that already ran flowdeck keeps its rule (`on`); see [Task tracking](#task-tracking) for how that is decided. `/flowdeck-agents` still opens the panel for this release; its new name is `/flowdeck-panel`.
 
 From 1.0.0034 or earlier: the Plans tab and the `plan` tool are gone (1.0.0035). An old `plans.json` is ignored and never deleted, and a panel left on the Plans tab opens on Active.
 
@@ -106,7 +110,8 @@ The session model is the orchestrator: it reads the code, splits the work into s
 |---|---|
 | `/flowdeck <task>` | Starts a flow on the task: plan, design (when the task touches UI), delegate, review, close. A flow already open is saved and replaced. |
 | `/flowdeck` | With no task: adopts the work already under way in the session into a flow. |
-| `/flowdeck-agents` | Shows or hides the side panel. |
+| `/flowdeck-panel` | Shows or hides the side panel. `/flowdeck-agents`, its old name, still works in this release. |
+| `/flowdeck-rule on`, `off`, `status` | Turns task tracking on or off for every project, or says what the current choice is and what it means (see [Task tracking](#task-tracking)). |
 
 The skill (`skills/flowdeck/SKILL.md`) tells the orchestrator how to plan, how to pick a tier and how to review. Five worker agents ship with the mod; the orchestrator picks the cheapest one likely to get the task right:
 
@@ -124,14 +129,10 @@ Tasks that edit the same files are chained with `after` and never run in paralle
 
 | Tool | Called by | Purpose |
 |---|---|---|
-| `mcp__flowdeck__progress` | the main session | The flow's title and phase, its tasks (`title`, `tier`, `after`, `goal`), `add` for a new task, `done: [numbers]` for accepted tasks, `notes` for handoff notes, `finished` and `restart`. |
+| `mcp__flowdeck__progress` | the main session | The flow's title and phase, its tasks (`title`, `tier`, `after`, `goal`), `add` for a new task, `done: [numbers]` for accepted tasks, `notes` for handoff notes, `finished` and `restart`. One call can carry `add`, `done` and `notes` together. |
 | `mcp__flowdeck__step` | workers | A worker's own plan as a `steps` list, then `next`, `done`, `active`, `failed`. |
 
 The flow's task list is the only task list: there is no separate plan tool.
-
-### The prompt rule
-
-The mod adds one short section to the system prompt of every session (about 950 characters, no CLAUDE.md or setting needed): `flowdeck:flow-rule` says that every task goes through flowdeck, how to report it with `progress`, and to begin each worker's Agent description with `#<n> <title>`. It blocks no edit or tool call. Disable the plugin to remove it.
 
 ### The band above the prompt
 
@@ -177,9 +178,9 @@ Keeps the prompt cache warm through a long idle stretch so the next message read
 
 ### The panel
 
-The panel opens with `/flowdeck-agents`, the band's `×N` button, or by itself when the first worker of a flow starts.
+The panel opens with `/flowdeck-panel`, the band's `×N` button, or by itself when the first worker of a flow starts.
 
-**Top row**: `▼ Context`, `▼ Usage`, `● Band` and `● Keep warm`, with the running version (`v1.0.0036`) at the far end. Context and Usage fold their sections and remember the choice (`▼` open, `▶︎` folded, the same glyphs as every fold in the panel); Band and Keep warm are dot switches (`●` on or shown, `○` off or hidden). Band shows or hides the band.
+**Top row**: `▼ Context`, `▼ Usage`, `● Band`, `● Keep warm` and `● Track tasks`, with the running version (`v1.0.0037`) at the far end. Context and Usage fold their sections and remember the choice (`▼` open, `▶︎` folded, the same glyphs as every fold in the panel); Band, Keep warm and Track tasks are dot switches (`●` on or shown, `○` off or hidden). Band shows or hides the band; Track tasks turns task tracking on or off (`○` until it is on).
 
 | Section | Shows |
 |---|---|
@@ -256,6 +257,39 @@ There are no Start or Finish buttons.
 - **Restore**: asks first, then moves the session back to the Archive.
 - **Empty Trash (n)**: asks `Erase n sessions for good? This cannot be undone.` with `Erase` / `Cancel`, then erases each trashed session's files permanently, with no system trash and no undo. This is the only place flowdeck deletes a file. It erases only files whose names the archive itself gives the trashed sessions, directly inside `.trash/` or `archive/`, never a link, one file at a time; a session that cannot be erased whole stays in the Trash and the tab says how many failed.
 
+## Task tracking
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/images/panel-tracking-off-dark.png">
+  <img alt="The Active tab with task tracking off: the heading Task tracking is off, what tracking does and costs, and the Track all tasks button above the empty list" src="docs/images/panel-tracking-off-light.png" width="520">
+</picture>
+
+Task tracking decides whether the mod puts its flow rule (`flowdeck:flow-rule`) into the system prompt of every session. The rule tells Claude to report every task through `progress`: the plan once with `title` and `tasks` (`title`, `tier`, `after` for tasks that edit the same files, `goal`), `add` for a new task, `done` with `result` and `feedback` notes when a task is accepted, and `#<n> <title>` at the start of each worker's Agent description; a question or a one-step edit gets no flow. It blocks no edit or tool call.
+
+| Choice | The system prompt | Set by |
+|---|---|---|
+| `unset` | Nothing is added. The Active and Finished tabs show `Track every task in flowdeck?` with `Track all tasks` and `Not now`. | A fresh install |
+| `on` | The flow rule is added to every session. No strip. | `Track all tasks`, `● Track tasks` in the top row, `/flowdeck-rule on` |
+| `off` | Nothing is added. The Active and Finished tabs show `Task tracking is off` with `Track all tasks`. | `Not now`, `○ Track tasks`, `/flowdeck-rule off` |
+
+- **One choice for every project**, kept in Claude Code's mod store (key `rule`). A change counts from the next request, in every open session.
+- **`/flowdeck:flowdeck <task>` always works**: the skill carries every rule in `SKILL.md`, and the mod adds the flow rule for the rest of that session too (held in the session's state, never stored), whatever the choice.
+- **`/flowdeck-rule status`** says the current choice and what it means. The strip never shows on the Archive and Trash tabs.
+- **Existing installs (migration in 1.0.0037)**: when the store holds no `rule` yet, the first session start decides once. If the mod ran before (any of its earlier store keys `history`, `keepWarm`, `contextShown`, `usageShown`, `usageRemaining` or `historyShown` is set, or the project's `.claude/flowdeck/` holds `flow-live.json`, `archive-index.json`, `archive/`, `archive-migrated.json` or a `history*.json`), the choice is saved as `on`, so tracking works as before. Otherwise it is saved as `unset`, so a new user's own later flows never turn it on. A store that cannot be read decides nothing and adds nothing.
+
+### What it costs
+
+Measured on Claude Code 2.1.312. Prose is estimated at about 3.6 characters a token (no tokenizer is available to the mod); tool schemas are given as Claude Code's `/context` counts them (about 2 characters a token of their JSON), and `/context`'s rounded System prompt total is shown too.
+
+| Part | When it is read | 1.0.0036 | 1.0.0037 |
+|---|---|---|---|
+| Flow rule (system prompt) | every request while tracking is on (before: always) | 896 characters, about 250 tokens; `/context` System prompt +0.3k | 476 characters, about 130 tokens; +0.1k, and nothing while `unset` or `off` |
+| `progress` tool schema | once the main session loads the tool | 4,689 characters, `/context` 2.3k tokens | 3,246 characters, `/context` 1.6k tokens |
+| `step` tool schema | once a worker loads the tool | 1,516 characters, `/context` 758 tokens | 1,274 characters, `/context` 638 tokens |
+| `SKILL.md` | when `/flowdeck:flowdeck` runs | 16,712 characters, about 4,640 tokens | 16,828 characters, about 4,670 tokens |
+
+With tracking on, the main session pays about 1,760 tokens (the rule and the `progress` schema; the strip's number is computed from the same texts) and a few `progress` calls per task. With tracking `unset` or `off`, the tools are listed by name only (deferred) and the system prompt is unchanged.
+
 ## Configuration and data
 
 | Setting | Where | Default |
@@ -264,6 +298,7 @@ There are no Start or Finish buttons.
 | Context, Usage folded | panel top row (mod store `contextShown`, `usageShown`) | shown |
 | Reset as time left or exact time | `◷` in Usage (mod store `usageRemaining`) | time left |
 | Keep warm | panel top row (mod store `keepWarm`, per project folder) | on |
+| Task tracking | `Track tasks` in the top row, the strip's buttons, `/flowdeck-rule` (mod store `rule`, all projects) | `unset` on a fresh install, `on` for an install that ran before 1.0.0037 |
 | Band shown | panel top row (per session) | shown |
 | Cache prices | `MODELS` in `hooks/cache.ts` | Fable 10 / 0.25, Opus 4 / 0.20, Sonnet 2 / 0.20, Haiku 0.5 / 0.05 USD per million tokens |
 | Keep warm timing | top of `hooks/cache.ts` | renew at minute 50, at least 80,000 tokens, at most 2 renewals |
@@ -297,7 +332,7 @@ flowdeck makes **no network calls of its own**: there is no `fetch`, no HTTP and
 | Files read | The same folder (`$.fs.read`, `$.fs.list`, `$.fs.stat`, `$.fs.exists`). |
 | Session data | Context breakdown and rate limits (`$.session.usage`), the session's model and id, agent launches with their description and prompt (the first ~600 characters of a worker's prompt become its brief), the name of each tool a worker calls (the live `Running · <tool>` word), TodoWrite, TaskCreate and Agent calls, permission requests (to show `Needs approval`), whether a prompt was typed by the user (keep warm's count), turn usage (tokens and cost), and the transcript path from `SessionStart` (kept to recognise the session after a restart). |
 | Settings and env | `language` from Claude Code's settings, `LC_ALL`, `LC_MESSAGES`, `LANG`; only to pick the panel language. |
-| System prompt | Adds the rule described in [The prompt rule](#the-prompt-rule). |
+| System prompt | Adds the flow rule only while task tracking is on, or in a session that ran `/flowdeck:flowdeck` (see [Task tracking](#task-tracking)). |
 
 What it saves (task titles, goals, briefs, results and feedback, costs and times) is what the user and the orchestrator wrote during the session. It stays in the project folder, git-ignored.
 
@@ -316,6 +351,8 @@ What it saves (task titles, goals, briefs, results and feedback, costs and times
 - On the desktop, a button pressed right as the panel redraws can land on an old handle and be ignored; while workers run, the panel redraws every 5 seconds, so elapsed times move in 5-second steps.
 - The cache chip assumes Claude Code's 1-hour prompt cache, and its prices are estimates.
 - Keep warm was tested through the test kit only (with `$.model.fork` answered by the test), not yet measured in a live session. A renewal can come up to 5 seconds after minute 50; while the machine sleeps nothing runs.
+- The token numbers in [What it costs](#what-it-costs) are estimates: no tokenizer is available to the mod, and `/context` estimates too. The session switch from `/flowdeck:flowdeck` was tested through the test kit's `skill.prompt` only, not in a live session.
+- A task list (TodoWrite) or a flowdeck worker still starts a flow in the panel while tracking is `unset` or `off`; that adds nothing to the system prompt.
 - The `✎` glyph and the desktop layout estimates (chevron width, the cache chevron's room) were checked in tests, not measured in a live desktop window.
 
 ## Troubleshooting
@@ -323,7 +360,7 @@ What it saves (task titles, goals, briefs, results and feedback, costs and times
 | Problem | Try |
 |---|---|
 | Nothing changed after install or update | `/reload-plugins`, or start a new session. Check `/plugin` lists `flowdeck` among the active mods. |
-| The band is gone | Press `Band` in the panel's top row (`/flowdeck-agents` opens the panel). `✕` on the band only hides it. |
+| The band is gone | Press `Band` in the panel's top row (`/flowdeck-panel` opens the panel). `✕` on the band only hides it. |
 | The band never shows, and `Band` cannot bring it back | Another mod that draws above the prompt and is listed before flowdeck in `enabledPlugins` (in `~/.claude/settings.json`) can answer the band without passing it on, so flowdeck's hook never runs. Mods nest in the order of `enabledPlugins`, first outermost: move `"flowdeck@flowdeck-mod": true` above such mods, then `/reload-plugins`. The `replay-theater` sample mod, for one, takes the band after a turn that edited files. |
 | A line `band error: …` under the top row | The band could not be drawn for that reason; flowdeck gives way to what other mods draw and says so once. `/reload-plugins` clears it. `claude --debug` logs the details. |
 | A panel button does nothing | The desktop app may have pressed an old handle while the panel redrew; press again. Right after `/reload-plugins` the app refuses presses on buttons drawn before the reload until it redraws the panel. |
@@ -338,6 +375,7 @@ cd flowdeck-mod
 claude plugin validate .        # ✔ Validation passed
 claude plugin test .            # the whole suite
 sh scripts/check-version.sh     # the three version places agree
+sh scripts/check-rules.sh       # SKILL.md carries every flow rule by itself
 ```
 
 To run your working copy, add the folder as a marketplace (`claude plugin marketplace add ./flowdeck-mod`, then install `flowdeck@flowdeck-mod`): a folder marketplace is read in place, so `/reload-plugins` picks up edits. Or start a session with `claude --plugin-dir ./flowdeck-mod`.

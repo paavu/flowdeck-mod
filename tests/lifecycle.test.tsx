@@ -14,7 +14,7 @@ const DIR = '/work/app/.claude/flowdeck'
 const LIVE = `${DIR}/flow-live.json`
 const SURFACES = ['desktop', 'terminal'] as const
 
-function engine(on: any, opts: { files?: Record<string, string>; sid?: string; storeFails?: boolean; noSettings?: boolean } = {}) {
+function engine(on: any, opts: { files?: Record<string, string>; sid?: string; storeFails?: boolean; noSettings?: boolean; rule?: string } = {}) {
   const fs = fakeFs(on, { files: opts.files ?? {} })
   const clock = { now: NOW }
   const session = { id: opts.sid ?? 's' }
@@ -37,7 +37,7 @@ function engine(on: any, opts: { files?: Record<string, string>; sid?: string; s
   on('ui.panes', () => ({ value: [] }))
   on('ui.open', () => ({ value: undefined }))
   on('ui.log', (_$: any, e: any) => (logs.push(String(e.text)), { value: undefined }))
-  on('store.get', () => ({ value: undefined }))
+  on('store.get', (_$: any, e: any) => ({ value: e.key === 'rule' ? opts.rule : undefined }))
   on('store.set', () => {
     if (opts.storeFails) throw new Error('store down')
     return { value: undefined }
@@ -174,15 +174,16 @@ describe('every task goes through flowdeck', () => {
   })
 
   test('the flow rule in the system prompt names the progress tool and the reporting duties', async ($, on) => {
-    engine(on)
+    engine(on, { rule: 'on' })
     on('prompt.compose', () => ({ sections: [{ id: 'core', text: 'engine', scope: 'shared' }] }))
     const r = await $.prompt.compose({ model: 'm', promptModel: 'm', surfaces: ['terminal'], tools: [], outputStyle: null, traits: [] } as any)
     const rule = r.sections.find((s: any) => s.id === 'flowdeck:flow-rule')
     expect(rule?.scope).toBe('session')
-    for (const word of ['mcp__flowdeck__progress', 'Every task goes through flowdeck', '`tasks`', '`after`', '`add`', 'done: [numbers]', '#<n> <title>', 'Never leave a task unreported', 'finished: true']) {
+    for (const word of ['mcp__flowdeck__progress', 'mcp__flowdeck__step', 'tasks [{title, tier, after, goal}]', '`after`', '`add`', 'done: [n]', 'result, feedback', '#<n> <title>', 'never leave', 'one-step edit']) {
       expect(rule.text).toContain(word)
     }
-    expect(rule.text.length).toBeLessThan(900)
+    // Trimmed in 1.0.0037 to about half of the 896 characters it had.
+    expect(rule.text.length).toBeLessThan(560)
   })
 })
 
@@ -522,8 +523,9 @@ describe('with an empty store and no settings, as on a new machine', () => {
     const { files, clock, session } = engine(on, { noSettings: true })
     on('prompt.compose', () => ({ sections: [] }))
     await start($)
-    const prompt = await $.prompt.compose({ model: 'm', promptModel: 'm', surfaces: ['terminal'], tools: [], outputStyle: null, traits: [] } as any)
-    expect(prompt.sections.map((s: any) => s.id)).toEqual(['flowdeck:flow-rule'])
+    const compose = () => $.prompt.compose({ model: 'm', promptModel: 'm', surfaces: ['terminal'], tools: [], outputStyle: null, traits: [] } as any)
+    // A fresh install has made no choice: nothing goes into the system prompt until the user turns tracking on.
+    expect((await compose()).sections.map((s: any) => s.id)).toEqual([])
     // a task list starts the flow; a worker does one task, the list completes the other
     await todo($, [['Build the thing', 'in_progress'], ['Check the thing', 'pending']])
     await launch($, 'w1', 'Build the thing', 'medium')
@@ -548,5 +550,7 @@ describe('with an empty store and no settings, as on a new machine', () => {
     expect(sessionPaths(files, DIR)).toHaveLength(1)
     expect(await bandSays($)).toBe('')
     for (const surface of SURFACES) expect(await paneText($, surface)).toMatch(/v\d+\.\d+\.\d{4}/)
+    await $.command.run({ command: 'flowdeck-rule', args: 'on' } as any)
+    expect((await compose()).sections.map((s: any) => s.id)).toEqual(['flowdeck:flow-rule'])
   })
 })
