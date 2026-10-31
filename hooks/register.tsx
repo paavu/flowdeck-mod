@@ -1943,9 +1943,6 @@ function topToggleRow($: EngineInterface, ui: Pick<Elements['desktop'], 'Box' | 
       }}
     />
   )
-  const toggleRule = (
-    <Button key="track-tasks" label={`${p.rule === 'on' ? '●' : '○'} Track tasks`} plain onPress={() => setRule($, toggledRule(p.rule))} />
-  )
   // One line, never wrapped: the buttons keep their width and only the spacer gives way.
   return (
     <Box key="top-toggles" flexDirection="row" flexWrap="nowrap" gap={1}>
@@ -1954,11 +1951,27 @@ function topToggleRow($: EngineInterface, ui: Pick<Elements['desktop'], 'Box' | 
         {toggleUsage}
         {toggleBand}
         {toggleKeepWarm}
-        {toggleRule}
       </Box>
       <Box flexGrow={1} />
       <Box flexShrink={0}>
         <Text key="version" dimColor>{`v${VERSION}`}</Text>
+      </Box>
+    </Box>
+  )
+}
+
+// The flowdeck group's title, with the task-tracking switch beside it; it reads only the stored choice, so the fallback panel draws it too.
+function flowTitleRow($: EngineInterface, ui: Pick<Elements['desktop'], 'Box' | 'Text' | 'Button'>, p: Panel): RenderChildren {
+  const { Box, Text, Button } = ui
+  return (
+    <Box key="flowdeck-title" flexDirection="row" flexWrap="nowrap" gap={1}>
+      <Box flexShrink={1} minWidth={0} overflow="hidden">
+        <Text bold wrap="truncate-end">
+          FlowDeck
+        </Text>
+      </Box>
+      <Box flexShrink={0}>
+        <Button key="track-tasks" label={`${p.rule === 'on' ? '●' : '○'} Track tasks`} plain onPress={() => setRule($, toggledRule(p.rule))} />
       </Box>
     </Box>
   )
@@ -3148,6 +3161,7 @@ export const register: Register = (on, options) => {
         {contextSection}
         {usageSection}
         <Box key="flowdeck-group" flexDirection="column" marginTop={1}>
+          {flowTitleRow($, { Box, Text, Button }, p)}
           {tabs}
           {strip}
           {shown}
@@ -3179,6 +3193,7 @@ export const register: Register = (on, options) => {
     return (
       <Box flexDirection="column">
         {topToggleRow($, { Box, Text, Button }, p)}
+        {flowTitleRow($, { Box, Text, Button }, p)}
         {tabRow($, { Box, Text, Button }, p, { active: null, finished: null, archive: null, trash: null }, tabGap(e.surface))}
         <Text dimColor>flowdeck could not draw this panel</Text>
       </Box>

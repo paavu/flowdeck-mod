@@ -2,6 +2,9 @@
 
 Versions are `M.m.xxxx`; every build bumps the 4-digit build number. Details and rulings: `docs/ledger.md`, `docs/design.md`.
 
+## 1.0.0050 (2026-10-31)
+- The `Track tasks` switch moved from the panel's top row to a new `FlowDeck` title row above the tabs (title, then the button beside it). Same key, label, press and stored choice. README, design notes and the panel screenshots follow.
+
 ## 1.0.0049 (2026-10-31)
 - README: a features-at-a-glance table, and one section per feature with an annotated screenshot (numbered callouts), a numbered "What you see" legend and a short "How to use". The screenshot pipeline draws the callouts from data (`scripts/screenshots/callouts.tsv`) and renders the new images (band, context, usage, cache card, keep warm states, top-row switches, flow row, handoff note, Empty Trash confirmation, task tracking strip). `scripts/check-readme.sh` checks that every README image exists and has alt text, and that each legend matches the callout data. No change to the mod's behaviour.
 

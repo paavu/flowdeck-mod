@@ -40,8 +40,7 @@ panel-toggles	1	context	-	-	-	-	bottom	0	0
 panel-toggles	2	usage	-	-	-	-	bottom	0	0
 panel-toggles	3	band	-	-	-	-	bottom	0	0
 panel-toggles	4	keep-warm	-	-	-	-	bottom	0	0
-panel-toggles	5	track-tasks	-	-	-	-	bottom	0	0
-panel-toggles	6	-	v1.	-	-	-	bottom	0	0
+panel-toggles	5	-	v1.	-	-	-	bottom	0	0
 panel-context	1	-	-	0	394	4	top	0	0
 panel-context	2	-	-	0	110	24	top	0	0
 panel-context	3	-	-	0	474	36	bottom	0	0
@@ -54,8 +53,8 @@ panel-usage	5	usage-five_hour	-	0	192	21	bottom	0	0
 panel-usage	6	usage-five_hour	-	0	150	34	right	0	0
 panel-usage	7	usage-five_hour	-	0	445	22	bottom	0	0
 panel-usage	8	usage-seven_day	This week	-	-	-	right	0	0
-panel-tabs	1	tab-active	-	-	-	-	top	0	0
-panel-tabs	2	tab-finished	-	-	-	-	top	0	0
+panel-tabs	1	track-tasks	-	-	-	-	right	0	0
+panel-tabs	2	tabs	-	-	-	-	right	0	0
 panel-tabs	3	-	-	0	240	44	bottom	0	0
 panel-flow	1	agent-fold-w2	-	-	-	-	top	0	0
 panel-flow	2	w2	2. Add retry	-	-	-	top	0	0
@@ -72,7 +71,7 @@ panel-flow	12	note-task-3	-	-	-	-	right	0	0
 panel-flow	13	plan-3	-	1	322	19	right	0	0
 panel-flow	14	plan-3	-	2	225	16	right	0	0
 panel-flow	15	plan-4	-	1	214	16	right	0	0
-panel-finished-list	1	tab-finished	-	-	-	-	top	0	0
+panel-finished-list	1	tab-finished	-	-	-	-	top	440	0
 panel-finished-list	2	agent-fold-w1	-	-	-	-	left	0	0
 panel-finished-list	3	note-w1	-	-	-	-	bottom	0	0
 panel-finished-list	4	w1	18:17	-	-	-	top	0	0

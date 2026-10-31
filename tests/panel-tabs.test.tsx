@@ -108,7 +108,8 @@ const walk = (n: any, out: any[] = []): any[] => {
   for (const c of kidsOf(n)) walk(c, out)
   return out
 }
-const keyOfNode = (n: any) => String(n?.props?.key ?? n?.key ?? '')
+const textOf = (n: any): string => (typeof n === 'string' ? n : (n?.children ?? []).map(textOf).join(''))
+const keyOfNode =(n: any) => String(n?.props?.key ?? n?.key ?? '')
 
 describe('the tabs', () => {
   test('Active is selected by default; a press selects another tab, and the choice holds for later draws', async ($, on) => {
@@ -217,7 +218,15 @@ describe('the tabs', () => {
       await p.unmount()
       const row = (key: string) => walk(root).find(n => keyOfNode(n) === key)
       const keys = (n: any) => walk(n).map(keyOfNode).filter(Boolean)
-      expect(keys(row('top-toggles'))).toEqual(['top-toggles', 'context', 'usage', 'band', 'keep-warm', 'track-tasks'])
+      expect(keys(row('top-toggles'))).toEqual(['top-toggles', 'context', 'usage', 'band', 'keep-warm'])
+      expect(keys(row('top-toggles'))).not.toContain('track-tasks')
+      expect(keys(row('flowdeck-title'))).toEqual(['flowdeck-title', 'track-tasks'])
+      expect(textOf(row('flowdeck-title'))).toContain('FlowDeck')
+      const at = walk(root).map(keyOfNode)
+      expect(at.indexOf('usage')).toBeLessThan(at.indexOf('flowdeck-title'))
+      expect(at.indexOf('flowdeck-title')).toBeLessThan(at.indexOf('tabs'))
+      expect(at.indexOf('flowdeck-title')).toBeGreaterThan(at.indexOf('flowdeck-group'))
+      expect(row('flowdeck-title')?.props?.flexWrap).toBe('nowrap')
       expect(keys(row('tabs'))).toEqual(['tabs', 'tab-active', 'tab-finished', 'tab-archive', 'tab-trash'])
       // the group comes after Context, Usage and Band
       const order = walk(root).map(keyOfNode)

@@ -24,7 +24,7 @@ The screenshots are rendered from the mod's own drawing code with sample data (s
 | [WARM/COLD cache chip and card](#the-prompt-cache-chip-and-card) | Whether the prompt cache is still warm (minutes left) or cold (idle time and the cost of the next message), and a card with the cost per model. |
 | [Keep warm](#keep-warm) | Renews the prompt cache with one small side request during a long idle stretch; the card says when it renews and how often it did. |
 | [Track all tasks](#task-tracking) | One choice for every project: whether Claude reports every task to flowdeck. The Active tab asks on a fresh install; `/flowdeck:flowdeck` always works. |
-| [Panel top row and tabs](#the-panel) | Switches for Context, Usage, Band, Keep warm and Track tasks, the version, and the tabs `Active`, `Finished`, `Archive`, `Trash` with live counts. |
+| [Panel top row and tabs](#the-panel) | Switches for Context, Usage, Band and Keep warm, the version, the `FlowDeck` title with the Track tasks switch, and the tabs `Active`, `Finished`, `Archive`, `Trash` with live counts. |
 | [Flows and workers](#flows-and-workers) | A flow is a task list the orchestrator plans and delegates to five worker tiers; each worker row shows its tier, model, effort, `after` waits, state, steps and times. |
 | [Handoff notes](#handoff-notes) | A note per task with Goal, Brief, Result and Feedback, opened with `ⓘ`. |
 | [Finished](#finished) | Runs that ended (Done, Error, Incomplete) and accepted tasks, latest first. |
@@ -74,7 +74,7 @@ Check it loaded: `/plugin` shows a dim line such as `1 mod active · flowdeck` u
 
 First run:
 
-1. `/flowdeck-panel` opens the panel: the top row (`▼ Context`, `▼ Usage`, `● Band`, `● Keep warm`, `○ Track tasks` and the version), then the tabs, all at `(0)` in a new project. Context and Usage fill in once Claude Code reports them, at the latest after the first reply.
+1. `/flowdeck-panel` opens the panel: the top row (`▼ Context`, `▼ Usage`, `● Band`, `● Keep warm` and the version), then the `FlowDeck` title with `○ Track tasks` beside it, then the tabs, all at `(0)` in a new project. Context and Usage fill in once Claude Code reports them, at the latest after the first reply.
 2. The Active tab asks `Track every task in flowdeck?` with `Track all tasks` and `Not now` (see [Task tracking](#task-tracking)). Until the user chooses, the mod adds nothing to the system prompt.
 3. After the first reply, the band above the prompt shows the `WARM` cache chip.
 4. `/flowdeck <a small task>` starts a flow, whatever the tracking choice: the orchestrator shows its plan, the band shows the running task with `Tasks X/Y`, and each worker appears in the panel's Active tab with its steps. When every task is done and the turn ends, the band reads `Done` and the flow is saved to the Archive tab.
@@ -91,7 +91,7 @@ To see what the mod hooks and calls before you install it, clone the repository 
 claude plugin update flowdeck@flowdeck-mod
 ```
 
-then `/reload-plugins` in open sessions. Every release raises `version` in `.claude-plugin/plugin.json`, so `update` always sees the new one. The panel's top row shows the version of the code that is running (`v1.0.0049`); after an update without a reload it still names the old one. [CHANGELOG.md](CHANGELOG.md) lists what each version changed.
+then `/reload-plugins` in open sessions. Every release raises `version` in `.claude-plugin/plugin.json`, so `update` always sees the new one. The panel's top row shows the version of the code that is running (`v1.0.0050`); after an update without a reload it still names the old one. [CHANGELOG.md](CHANGELOG.md) lists what each version changed.
 
 From 1.0.0036 or earlier: task tracking became a choice in 1.0.0037. An install that already ran flowdeck keeps its rule (`on`); see [Task tracking](#task-tracking) for how that is decided. `/flowdeck-agents` still opens the panel for this release; its new name is `/flowdeck-panel`.
 
@@ -272,7 +272,7 @@ The panel opens with `/flowdeck-panel`, the band's `×N` button, or by itself wh
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="docs/images/panel-toggles-dark.png">
-  <img alt="The panel's top row twice, with every switch on and with every switch off; six numbered callouts: Context, Usage, Band, Keep warm, Track tasks and the version" src="docs/images/panel-toggles-light.png" width="520">
+  <img alt="The panel's top row twice, with every switch on and with every switch off; five numbered callouts: Context, Usage, Band, Keep warm and the version" src="docs/images/panel-toggles-light.png" width="520">
 </picture>
 
 The top row, with every switch on and then off.
@@ -283,20 +283,19 @@ What you see:
 2. `▼ Usage`: folds the Usage section. Remembered.
 3. `● Band`: shows or hides the band (`○` hidden).
 4. `● Keep warm`: keep warm on or off, per project folder.
-5. `● Track tasks`: task tracking on or off for every project (`○` until it is on). See [Task tracking](#task-tracking).
-6. The version of the code that is running.
+5. The version of the code that is running.
 
 How to use: press a switch to flip it; `●` is on or shown, `○` is off or hidden.
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="docs/images/panel-tabs-dark.png">
-  <img alt="The tab row and the three tiles of the Active tab, with three numbered callouts: the selected tab, another tab with its count and the cost, tokens and time tiles" src="docs/images/panel-tabs-light.png" width="520">
+  <img alt="The FlowDeck title with the Track tasks switch, the tab row and the three tiles of the Active tab, with three numbered callouts: the Track tasks switch, the tabs with their counts and the cost, tokens and time tiles" src="docs/images/panel-tabs-light.png" width="520">
 </picture>
 
 What you see:
 
-1. The selected tab, bold, in the accent colour and underlined; pressing it changes nothing.
-2. The other tabs, each with its live count: `Active (n)`, `Finished (n)`, `Archive (n)`, `Trash (n)`. One list shows at a time.
+1. `● Track tasks`, beside the `FlowDeck` title above the tabs: task tracking on or off for every project (`○` until it is on). See [Task tracking](#task-tracking).
+2. The tabs, each with its live count: `Active (n)`, `Finished (n)`, `Archive (n)`, `Trash (n)`. One list shows at a time. The selected tab is bold, in the accent colour and underlined; pressing it changes nothing.
 3. The tiles: the flow's estimated cost, its tokens and its time.
 
 How to use: press a tab to change the list.
@@ -530,16 +529,16 @@ What you see:
 
 1. `Task tracking is off`: the current choice.
 2. The same explanation as on a fresh install.
-3. `Track all tasks`: turns tracking on. The `● Track tasks` switch in the panel's top row does the same, and `/flowdeck-rule on` or `off` from the prompt.
+3. `Track all tasks`: turns tracking on. The `● Track tasks` switch beside the `FlowDeck` title above the tabs does the same, and `/flowdeck-rule on` or `off` from the prompt.
 
-How to use: switch tracking from the strip, the top row or `/flowdeck-rule`; the choice is kept for every project.
+How to use: switch tracking from the strip, the switch beside the `FlowDeck` title or `/flowdeck-rule`; the choice is kept for every project.
 
 Task tracking decides whether the mod puts its flow rule (`flowdeck:flow-rule`) into the system prompt of every session. The rule tells Claude to report every task through `progress`: the plan once with `title` and `tasks` (`title`, `tier`, `after` for tasks that edit the same files, `goal`), `add` for a new task, `done` with `result` and `feedback` notes when a task is accepted, and `#<n> <title>` at the start of each worker's Agent description; a question or a one-step edit gets no flow. It blocks no edit or tool call.
 
 | Choice | The system prompt | Set by |
 |---|---|---|
 | `unset` | Nothing is added. The Active and Finished tabs show `Track every task in flowdeck?` with `Track all tasks` and `Not now`. | A fresh install |
-| `on` | The flow rule is added to every session. No strip. | `Track all tasks`, `● Track tasks` in the top row, `/flowdeck-rule on` |
+| `on` | The flow rule is added to every session. No strip. | `Track all tasks`, `● Track tasks` beside the `FlowDeck` title, `/flowdeck-rule on` |
 | `off` | Nothing is added. The Active and Finished tabs show `Task tracking is off` with `Track all tasks`. | `Not now`, `○ Track tasks`, `/flowdeck-rule off` |
 
 - **One choice for every project**, kept in Claude Code's mod store (key `rule`). Switching applies when the prompt is next composed (a new session, `/clear` or a compaction); running and queued tasks are not affected. A switch never changes a flow, a task or a worker that already exists.
@@ -569,7 +568,7 @@ With tracking on, the main session pays about 1,760 tokens (the rule and the `pr
 | Context, Usage folded | panel top row (mod store `contextShown`, `usageShown`) | shown |
 | Reset as time left or exact time | `◷` in Usage (mod store `usageRemaining`) | time left |
 | Keep warm | panel top row (mod store `keepWarm`, per project folder) | on |
-| Task tracking | `Track tasks` in the top row, the strip's buttons, `/flowdeck-rule` (mod store `rule`, all projects) | `unset` on a fresh install, `on` for an install that ran before 1.0.0037 |
+| Task tracking | `Track tasks` beside the `FlowDeck` title, the strip's buttons, `/flowdeck-rule` (mod store `rule`, all projects) | `unset` on a fresh install, `on` for an install that ran before 1.0.0037 |
 | Band shown | panel top row (per session) | shown |
 | Cache prices | `MODELS` in `hooks/cache.ts` | Fable 10 / 0.25, Opus 4 / 0.20, Sonnet 2 / 0.20, Haiku 0.5 / 0.05 USD per million tokens |
 | Keep warm timing | top of `hooks/cache.ts` | renew at minute 50, at least 80,000 tokens, at most 2 renewals |

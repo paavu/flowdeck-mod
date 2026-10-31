@@ -39,7 +39,7 @@ describe('the running version', () => {
   })
 
   for (const surface of ['desktop', 'terminal'] as const) {
-    test(`a dim v<version> at the far end of the top row, after Context, Usage, Band, Keep warm and Track tasks (${surface})`, async ($, on) => {
+    test(`a dim v<version> at the far end of the top row, after Context, Usage, Band and Keep warm (${surface})`, async ($, on) => {
       engine(on)
       await $.session.start({ surface: 'terminal', isInteractive: true, cwd: '/work/app' } as any)
       const p = await pane($, surface)
@@ -48,7 +48,7 @@ describe('the running version', () => {
       const row = walk(root).find(n => n?.props?.key === 'top-toggles')
       const kids: any[] = row.children
       const buttons: any[] = kids[0]?.children ?? []
-      expect(buttons.map(c => c?.props?.key)).toEqual(['context', 'usage', 'band', 'keep-warm', 'track-tasks'])
+      expect(buttons.map(c => c?.props?.key)).toEqual(['context', 'usage', 'band', 'keep-warm'])
       expect(kids[1]?.props?.flexGrow).toBe(1)
       const label = walk(kids[2]).find(n => n?.type === 'Text')
       expect(textOf(label)).toBe(`v${VERSION}`)
@@ -64,6 +64,8 @@ describe('the running version', () => {
       const p = await pane($, surface)
       expect(await p.find({ type: 'Text', text: 'flowdeck could not draw this panel' })).toBeDefined()
       expect(await p.find({ type: 'Text', text: `v${VERSION}` })).toBeDefined()
+      expect(await p.find({ type: 'Text', text: 'FlowDeck' })).toBeDefined()
+      expect(await p.find({ type: 'Button', text: /Track tasks/ })).toBeDefined()
       await p.unmount()
     }
   })
