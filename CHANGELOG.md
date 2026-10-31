@@ -2,6 +2,9 @@
 
 Versions are `M.m.xxxx`; every build bumps the 4-digit build number. Details and rulings: `docs/ledger.md`, `docs/design.md`.
 
+## 1.0.0054 (2026-10-31)
+- README: every screenshot regenerated for the current panel; a new `note-view` image (one task row with its handoff note open) and a short handoff-note block in The idea. No change to the mod's behaviour.
+
 ## 1.0.0053 (2026-10-31)
 - The version label at the right of the panel's top row uses the same small size as the `Resets in` text (11, `SMALL_SIZE`). On the desktop it is a small right-aligned drawing (muted colour, tabular numerals); the terminal keeps its dim text.
 

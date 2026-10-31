@@ -71,7 +71,7 @@ panel-flow	12	note-task-3	-	-	-	-	right	0	0
 panel-flow	13	plan-3	-	1	322	19	right	0	0
 panel-flow	14	plan-3	-	2	225	16	right	0	0
 panel-flow	15	plan-4	-	1	214	16	right	0	0
-panel-finished-list	1	tab-finished	-	-	-	-	top	440	0
+panel-finished-list	1	-	Finished (1)	-	-	-	bottom	0	0
 panel-finished-list	2	agent-fold-w1	-	-	-	-	left	0	0
 panel-finished-list	3	note-w1	-	-	-	-	bottom	0	0
 panel-finished-list	4	w1	18:17	-	-	-	top	0	0
@@ -84,6 +84,12 @@ panel-finished	2	w1	-	1	58	8	left	0	0
 panel-finished	3	w1	-	1	58	42	left	0	0
 panel-finished	4	w1	-	1	58	91	left	0	0
 panel-finished	5	w1	-	1	58	125	left	0	0
+note-view	1	note-w1	-	-	-	-	right	0	0
+note-view	2	w1	-	1	58	8	left	0	0
+note-view	3	w1	-	1	58	42	left	0	0
+note-view	4	w1	-	1	58	91	left	0	0
+note-view	5	w1	-	1	58	125	left	0	0
+note-view	6	w1	-	2	150	3	top	0	0
 panel-archive	1	tab-archive	-	-	-	-	top	0	0
 panel-archive	2	-	/Oct 31, 2026.*\)/	-	-	-	right	0	0
 panel-archive	3	archive-del-*	-	-	-	-	top	0	0

@@ -32,6 +32,8 @@ body{font:13px/18px -apple-system,BlinkMacSystemFont,"Segoe UI",system-ui,sans-s
       return { left: r.left + c.x, right: r.left + c.x, top: r.top + c.y, bottom: r.top + c.y }
     }
     if (c.text) {
+      const drawn = [...scope.querySelectorAll('img')].find(i => i.alt.includes(c.text))
+      if (drawn) return drawn.getBoundingClientRect()
       const walk = document.createTreeWalker(scope, NodeFilter.SHOW_TEXT)
       const isPattern = c.text.length > 2 && c.text.startsWith('/') && c.text.endsWith('/')
       const pattern = isPattern ? new RegExp(c.text.slice(1, -1)) : null

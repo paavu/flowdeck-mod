@@ -42,6 +42,7 @@ const SHOTS = {
   'panel-flow': { from: 'panel-active', width: 520, pick: { key: 'flowdeck-group', keep: ['w2', 'plan-3', 'plan-4'] } },
   'panel-finished-list': { width: 520, pick: { key: 'flowdeck-group' } },
   'panel-finished': { width: 520, pick: { key: 'flowdeck-group' } },
+  'note-view': { from: 'panel-finished', width: 520, pick: { key: 'w1' } },
   'panel-archive': { width: 520, pick: { key: 'flowdeck-group' } },
   'panel-trash': { width: 520, pick: { key: 'flowdeck-group' } },
   'panel-trash-confirm': { width: 520, pick: { key: 'flowdeck-group' } },
@@ -213,6 +214,8 @@ const PLACE = `(${function place(list) {
       return { left: r.left + c.x, right: r.left + c.x, top: r.top + c.y, bottom: r.top + c.y }
     }
     if (c.text) {
+      const drawn = [...scope.querySelectorAll('img')].find(i => i.alt.includes(c.text))
+      if (drawn) return drawn.getBoundingClientRect()
       const walk = document.createTreeWalker(scope, NodeFilter.SHOW_TEXT)
       const isPattern = c.text.length > 2 && c.text.startsWith('/') && c.text.endsWith('/')
       const pattern = isPattern ? new RegExp(c.text.slice(1, -1)) : null
