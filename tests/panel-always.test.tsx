@@ -240,7 +240,6 @@ describe('a panel held from an older flowdeck', () => {
     // the newest group (e1) is open by default
     ['open archive group', `archive-${keyOf('e1')}`, 'archive', p => p.find({ type: 'Button', key: `archive-${keyOf('e1')}`, text: /^▼/ }), p => p.find({ type: 'Button', key: `archive-${keyOf('e1')}`, text: /^▶︎/ })],
     ['folded archive group', `archive-${keyOf('e2')}`, 'archive', p => p.find({ type: 'Button', key: `archive-${keyOf('e2')}`, text: /^▶︎/ }), p => p.find({ type: 'Button', key: `archive-${keyOf('e2')}`, text: /^▼/ })],
-    ['archive item', 'archive-item-w1', 'finished', p => p.find({ type: 'Button', key: 'archive-item-w1' }), p => p.find({ type: 'Text', text: /1 archived/ })],
   ]
   for (const [name, key, tab, before, after] of presses) {
     for (const surface of SURFACES) {

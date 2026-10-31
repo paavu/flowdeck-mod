@@ -174,28 +174,14 @@ describe('one order everywhere: latest completion first', () => {
     expect(d.alts.filter(a => /^task \d: /.test(a)).map(a => Number(a[5]))).toEqual([2, 4, 1, 3])
   })
 
-  test('⤓ archives the pressed row and every row that finished before it, whatever their start order', async ($, on) => {
-    const { clock, files } = engine(on)
+  test('closing the flow archives the rows in the same order as the Finished list', async ($, on) => {
+    const { clock } = engine(on)
     await start($)
-    await runs($, clock, [3, 1, 4, 2]) // finished: w3, w1, w4, w2 (newest)
-    await press($, 'archive-item-w1')
-    // w1 and w3 finished at or before w1: they go; w4 and w2 stay.
-    expect(rowOrder((await look($)).texts)).toEqual([2, 4])
-    const saved = sessions(files, DIR)[0]
-    expect(saved.agents.map((a: any) => a.id).sort()).toEqual(['w1', 'w3'])
+    await runs($, clock, [3, 1, 4, 2])
+    await progress($, { finished: true })
+    await settle()
+    expect(rowOrder((await look($, 'terminal', 'archive')).texts)).toEqual([2, 4, 1, 3])
   })
-
-  for (const presses of [['w4', 'w2'], ['w2'], ['w1', 'w4', 'w2']]) {
-    test(`archive presses ${presses.join(' then ')} leave the same rows in the same order in the Archive group`, async ($, on) => {
-      const { clock } = engine(on)
-      await start($)
-      await runs($, clock, [3, 1, 4, 2])
-      for (const id of presses) await press($, `archive-item-${id}`)
-      await progress($, { finished: true })
-      await settle()
-      expect(rowOrder((await look($, 'terminal', 'archive')).texts)).toEqual([2, 4, 1, 3])
-    })
-  }
 
   test('the Archive list is ordered by each session’s end, whatever order they were saved in', async ($, on) => {
     const files: Record<string, string> = {}

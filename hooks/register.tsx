@@ -4,7 +4,7 @@ import type { Elements, EngineInterface, Register, RenderChildren } from 'claude
 import type { AgentRun, ArchiveDetail, ArchiveEntry, ArchiveLists, ArchiveRecord, Flow, Panel, PanelTab, Phase, PlannedTask, Reading, Rule, Samples, TaskPlan, UsageWindow } from '../types'
 import { derive, finishItems, hasItemOps, ITEM_H, itemAlt, itemLine, itemsOf, itemSvg, noteSvg, stepItems, timedItems } from './agent-items'
 import type { StepInput } from './agent-items'
-import { agentState, HOUSEKEEPING, isComplete, isIncomplete, isLive, isSettled, markOf, progressOf, splitHead, stateText, stepCount } from './agent-state'
+import { agentState, HOUSEKEEPING, isComplete, isIncomplete, isLive, markOf, progressOf, splitHead, stateText, stepCount } from './agent-state'
 import { contextRows, contextSvg, toReading } from './context'
 import { isWorthKeeping, keyOf, snapshot } from './archive'
 import { INDEX_FILE, parseIndexFile, recordOf, TRASH_DIR, TRASH_INDEX } from './archive-index'
@@ -938,8 +938,6 @@ const headerSvg = (W: number, t: ReturnType<typeof totals>): string => {
   return svg(W, HEADER_H, `${tile(0, s.cost, '≈' + fmtCost(t.cost))}${tile(1, s.tokens, fmtTokens(t.tokens))}${tile(2, s.time, fmtTime(t.time))}`)
 }
 
-// The archive icon: one single-width glyph, never an emoji.
-const ARCHIVE_ICON = '⤓'
 // The usage reset switch: a clock face, single width and without an emoji form (U+23F1 draws as an emoji in some fonts).
 const RESET_ICON = '◷'
 
@@ -1054,7 +1052,7 @@ ${statusMark(W - 8, out ? 12 : 16, 'planned', color)}
 }
 
 // An accepted task no worker run belongs to: its number and title, its tier, `Accepted · no worker run` in green and the
-// tick; no step bar and no archive icon.
+// tick; no step bar.
 const ACCEPTED_H = 46
 // `titleOutside`: the title and when it was accepted are drawn natively above (a row with a note), so neither is here.
 const acceptedSvg = (W: number, p: Planned, done = '', titleOutside = false): string => {
@@ -1325,50 +1323,8 @@ const queueArchive = <T,>(run: () => Promise<T>): Promise<T> => {
   return next
 }
 
-// The archive presses, one after another; a flow's own record waits for the one under way, so a partial entry never
-// lands after the flow's full one.
+// The archive saves, one after another; a flow's own record waits for the one under way.
 let archiving: Promise<unknown> = Promise.resolve()
-
-// The finished rows of the flow that can still be archived, latest completion first as the live Finished list shows
-// them: rows that began before the flow belong to the flow before it. An Incomplete row is not finished work: it stays,
-// and a press on a newer row passes over it.
-const archivable = (list: AgentRun[], meta: Meta | null): AgentRun[] =>
-  finishedFirst(list.filter(a => isSettled(a) && !a.archived && (!meta || a.startedAt >= meta.startedAt)))
-
-// Archives the row and every finished row not archived yet that completed before it (by completion time, whatever the
-// order of the presses): the open flow's entry is saved with all its archived rows (`partial`), and only once it was
-// kept do they leave the live list. Never throws into the press.
-async function archiveRows($: EngineInterface, id: string): Promise<void> {
-  try {
-    const f = await readFlow($)
-    if (!f || f.isFinished) return
-    const list = await readAgents($)
-    const endedAt = await $.clock.now()
-    let meta = await readMeta($)
-    if (!meta) {
-      // As recordFlow starts one, but from the first run's start, so the flow's later records keep these rows.
-      const fresh = { startedAt: Math.min(endedAt, ...list.map(a => a.startedAt)), project }
-      meta = (await updateMeta($, m => m ?? fresh)) ?? fresh
-    }
-    const shown = archivable(list, meta)
-    const at = shown.findIndex(a => a.id === id)
-    if (at < 0) return
-    const ids = new Set(shown.slice(at).map(a => a.id))
-    const start = meta.startedAt
-    const rows = list.filter(a => a.status !== 'running' && a.startedAt >= start && (a.archived || ids.has(a.id)))
-    const entry: ArchiveEntry = { ...snapshot({ flow: f, agents: rows, project: meta.project, startedAt: start, endedAt, status: 'open' }), partial: true }
-    if (!(await saveArchive($, entry))) return
-    await updateAgents($, l => l.map(a => (ids.has(a.id) && a.status !== 'running' ? { ...a, archived: true } : a)))
-  } catch {
-    // A failing clock or store leaves the rows where they are.
-  }
-}
-
-const pressArchive = ($: EngineInterface, id: string): Promise<unknown> => {
-  const run = archiving.then(() => archiveRows($, id))
-  archiving = run.catch(() => {})
-  return run
-}
 
 type Meta = { startedAt: number; project: string }
 const isSameMeta = (a: Meta | null, b: Meta | null): boolean => !!a && !!b && a.startedAt === b.startedAt && a.project === b.project
@@ -2563,8 +2519,6 @@ export const register: Register = (on, options) => {
         [a.effort ? `${modelName(a.model)} · ${a.effort}` : modelName(a.model), `${s.started} ${doneText(a.startedAt, today)}`, `${fmtTokens(a.tokens)} ${s.tokensWord}`, `≈${fmtCost(a.costUsd)}`].join(' · '),
         s.noSteps,
       ]
-      const archiveButton = (a: AgentRun) =>
-        v.archive?.can(a) ? <Button key={`archive-item-${a.id}`} label={ARCHIVE_ICON} plain dimColor onPress={() => v.archive?.press(a)} /> : null
       // A row's handoff note: its task's (a run linked to none: its own brief); a task without a brief shows its run's.
       const runNote = (a: AgentRun): TaskNote => {
         const t = taskFor(a)
@@ -2619,12 +2573,11 @@ export const register: Register = (on, options) => {
           return <Svg key={key} source={svg(W, d.height, d.body)} alt={noteAlt(parts)} width={W} height={d.height} />
         }
         // Every row: line 1 is native (a Button cannot sit inside a drawing): the fold chevron at the far left, the indent
-        // that puts the task name at the drawing's text column, the note and archive icons after the name and when it
+        // that puts the task name at the drawing's text column, the note icon after the name and when it
         // finished at the far end; then the drawing at the full width without its title line.
         const agentRow = (a: AgentRun, word: string) => {
           const alt = `${a.description}: ${modelName(a.model)}, ${word}`
           const items = timedItems(itemsOf(a.items), a)
-          const toArchive = archiveButton(a)
           const done = doneOf(a)
           const note = runNote(a)
           const toNote = runNoteButton(a, note)
@@ -2640,7 +2593,6 @@ export const register: Register = (on, options) => {
                     </Text>
                   </Box>
                   {toNote && <Box flexShrink={0}>{toNote}</Box>}
-                  {toArchive && <Box flexShrink={0}>{toArchive}</Box>}
                   <Box flexGrow={1} />
                   {done && (
                     <Box flexShrink={0}>
@@ -2746,7 +2698,7 @@ export const register: Register = (on, options) => {
         const done = doneOf(a)
         const note = runNote(a)
         const toNote = runNoteButton(a, note)
-        // The fold chevron right before the name (dim on a row with no step list yet), the note and archive icons and the
+        // The fold chevron right before the name (dim on a row with no step list yet), the note icon and the
         // state glyph after it, when it finished at the far end.
         return (
           <Box key={`${kp}${a.id}`} flexDirection="column" marginBottom={1}>
@@ -2759,7 +2711,6 @@ export const register: Register = (on, options) => {
                 </Text>
               </Box>
               {toNote}
-              {archiveButton(a)}
               <Text color={glyphColor(a, color)}>{STATUS_GLYPH[markOf(a)]}</Text>
               {done ? <Box flexGrow={1} /> : null}
               {done ? <Text dimColor>{done}</Text> : null}
@@ -3084,8 +3035,6 @@ export const register: Register = (on, options) => {
       const at = Math.max(await readNow($), ...list.map(a => a.startedAt), 0)
       const planned = plannedOf(f, list)
       const t = totals(list, at)
-      // Only an open flow's own finished rows.
-      const archivableIds = new Set(f && !f.isFinished ? archivable(list, meta).map(a => a.id) : [])
       const view = flowView({
         kp: '',
         fp: '',
@@ -3097,7 +3046,6 @@ export const register: Register = (on, options) => {
         at,
         t,
         rows,
-        archive: { can: a => archivableIds.has(a.id), press: a => pressArchive($, a.id) },
       })
       if (Svg) return [view.header, view.body()]
       return [

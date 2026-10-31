@@ -31,8 +31,6 @@ export type FlowView = {
   planned: Planned[]
   at: number
   t: Totals
-  /** The live flow only: which finished rows get an Archive button, and its press. */
-  archive?: { can: (a: AgentRun) => boolean; press: (a: AgentRun) => unknown }
   rows: 'active' | 'finished' | 'all'
 }
 export type FlowDrawing = { header: RenderChildren; body: () => RenderChildren }

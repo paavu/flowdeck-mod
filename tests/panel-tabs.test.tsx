@@ -327,7 +327,7 @@ describe('one list at a time', () => {
     expect(header?.source).toContain('height="44"')
   })
 
-  test('Finished lists the finished rows newest first under the flow header, each with its archive icon', async ($, on) => {
+  test('Finished lists the finished rows newest first under the flow header, with no archive button', async ($, on) => {
     const { clock } = engine(on)
     await start($)
     await progress($, { title: 'Ship', phase: 'delegate', tasks: [{ title: 'one', tier: 'light' }, { title: 'two', tier: 'light' }] })
@@ -347,7 +347,7 @@ describe('one list at a time', () => {
       expect(await p.find({ type: 'Button', key: 'flow-finish' })).toBeUndefined()
       expect(drawn).not.toContain('Ship')
       await p.unmount()
-      expect(keys.filter((k: string) => k.startsWith('archive-item-'))).toEqual(['archive-item-w2', 'archive-item-w1'])
+      expect(keys.filter((k: string) => k.startsWith('archive-item-'))).toEqual([])
       expect(names).toEqual(['2. two', '1. one'])
     }
   })

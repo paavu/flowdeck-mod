@@ -229,25 +229,6 @@ describe('the band counts the rows the tabs count', () => {
     await progress($, { title: 'Ship', phase: 'delegate', tasks: SIX.slice(0, 5) })
     await expectBand($, '0/5', '0%')
   })
-
-  test('archived rows stay counted as finished: archiving never moves the band back', async ($, on) => {
-    const { clock } = engine(on)
-    await start($)
-    await progress($, { title: 'Ship', phase: 'delegate', tasks: SIX.slice(0, 3) })
-    await spawn($, 'w1', 'Read code')
-    await spawn($, 'w2', 'Wire it')
-    clock.now = NOW + 60_000
-    await complete($, 'w1')
-    clock.now = NOW + 61_000
-    await complete($, 'w2')
-    await expectBand($, '2/3', '67%')
-    const p = await pane($, 'terminal', 'finished')
-    await p.press({ key: 'archive-item-w2' })
-    await settle()
-    await p.unmount()
-    expect(await tabCounts($)).toEqual({ active: 'Active (1)', finished: 'Finished (0)' })
-    await expectBand($, '2/3', '67%')
-  })
 })
 
 describe('every agent row folds', () => {

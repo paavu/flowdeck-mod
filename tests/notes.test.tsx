@@ -317,14 +317,13 @@ describe('the note button and panel', () => {
       }
       expect(new Set([...a.keys]).size).toBe(a.keys.length)
     }
-    // the terminal row: the button right after the name, before the archive icon and the glyph
+    // the terminal row: the button right after the name, before the state glyph
     await showTab($, 'finished')
     const p = await mount($, 'terminal')
     const tree = JSON.stringify(await p.drawn())
     await p.unmount()
     const at = (s: string) => tree.indexOf(s)
     expect(at('"note-w1"')).toBeGreaterThan(at('1. Read code'))
-    expect(at('"archive-item-w1"')).toBeGreaterThan(at('"note-w1"'))
   })
 
   test('the icon is the circled i', () => {

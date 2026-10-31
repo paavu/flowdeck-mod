@@ -2,6 +2,9 @@
 
 Versions are `M.m.xxxx`; every build bumps the 4-digit build number. Details and rulings: `docs/ledger.md`, `docs/design.md`.
 
+## 1.0.0042 (2026-10-31)
+- The per-row archive button (`⤓`) is gone from the Finished list, on the desktop and in the terminal. A flow's rows are archived together when the flow closes (at the next session start, or on idle or auto finish); the Archive tab keeps its move-to-Trash and Restore buttons.
+
 ## 1.0.0041 (2026-10-31)
 - Archive and Trash: an opened session draws its cost, tokens and time as the same three tiles as the Active and Finished tabs (desktop); the folded row and the terminal keep the one dim text line.
 

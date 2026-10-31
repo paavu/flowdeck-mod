@@ -146,12 +146,12 @@ describe('Incomplete rows in the live panel', () => {
     expect(d.source('broke')).toContain('>Error</tspan>')
   })
 
-  test('no Archive button on the Incomplete row; Done, Done without steps and Error rows keep theirs', async ($, on) => {
+  test('no row of the Finished list has an Archive button', async ($, on) => {
     const { clock } = engine(on)
     await start($)
     await fourRuns($, clock)
     for (const keys of [(await desktop($)).keys, (await terminal($)).keys]) {
-      expect(keys.filter(k => k.startsWith('archive-item-'))).toEqual(['archive-item-w4', 'archive-item-w3', 'archive-item-w1'])
+      expect(keys.filter(k => k.startsWith('archive-item-'))).toEqual([])
     }
   })
 
@@ -177,19 +177,6 @@ describe('Incomplete rows in the live panel', () => {
     expect(row).toBeDefined()
   })
 
-  test('archiving a newer row passes over the Incomplete one: it stays in the live list', async ($, on) => {
-    const { clock } = engine(on, { store: { historyShown: false } })
-    await start($, '/work/app')
-    await fourRuns($, clock)
-    const p = await pane($, 'terminal')
-    await p.press({ key: 'archive-item-w4' })
-    await settle()
-    await p.unmount()
-    const t = await terminal($)
-    expect(t.text).toContain('one of six')
-    expect(t.text).not.toMatch(/all six|no steps|broke/)
-    expect(t.keys.filter(k => k.startsWith('archive-item-'))).toEqual([])
-  })
 })
 
 describe('Incomplete rows in an Archive group', () => {

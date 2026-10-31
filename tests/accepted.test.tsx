@@ -159,7 +159,7 @@ describe('accepted tasks in the panel', () => {
     const d = await desktop($)
     expect(d.source(/^#2 Wire it:/)).toContain('>Done</tspan>')
     expect(d.svgs.some((s: any) => /Accepted/.test(String(s.props.alt)))).toBe(false)
-    expect(d.keys).toContain('archive-item-w2')
+    expect(d.keys.some(k => k.startsWith('archive-item-'))).toBe(false)
   })
 
   test('an accepted task whose run stays Incomplete reads Incomplete · accepted; a bare count never hides it either', async ($, on) => {
