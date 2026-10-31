@@ -2,6 +2,9 @@
 
 Versions are `M.m.xxxx`; every build bumps the 4-digit build number. Details and rulings: `docs/ledger.md`, `docs/design.md`.
 
+## 1.0.0052 (2026-10-31)
+- README: a new top (centred logo, tagline, badges and links, The problem, The idea, Install, Your first two minutes) with Requirements and Known limits moved near the end; a new logo (`docs/images/logo.svg`, `logo.png`) and plugin icon. `scripts/check-readme.sh` also checks that every in-page README link resolves to a heading. No change to the mod's behaviour.
+
 ## 1.0.0051 (2026-10-31)
 - Context and Usage type: the Context title reads `Context`; `Current session` and `This week` use the same size and weight as it (12, semibold), and the reset text and the `% left` figures the same small size as the Context head figures (11). The sizes are shared constants in `hooks/sizes.ts`. On the desktop the Usage titles and reset lines are now drawn (one header drawing per window, the reset switch beside it) so their size can match.
 

@@ -1,6 +1,48 @@
-# flowdeck
+<p align="center">
+  <img src="docs/images/logo.png" alt="FlowDeck logo" width="120">
+</p>
 
-A Claude Code mod that runs a session's work as a planned, delegated flow and shows it live: a band above the prompt, a side panel with the agents, context and usage, and an archive of past flows.
+<h1 align="center">FlowDeck</h1>
+
+<p align="center"><strong>Orchestrate Claude Code work, and keep the record.</strong></p>
+
+<p align="center">
+  A Claude Code mod that plans each task, hands it to a worker on the model that fits, and logs what was asked, done, reviewed and spent. A band above the prompt and a side panel show the crew live, and every finished session is archived as a file you can reopen.
+</p>
+
+<p align="center">
+  <img alt="Version 1.0.0052" src="https://img.shields.io/badge/version-1.0.0052-8f8cf4">
+  <img alt="MIT license" src="https://img.shields.io/badge/license-MIT-5fbf8f">
+  <img alt="Claude Code 2.1.295 or later" src="https://img.shields.io/badge/Claude%20Code-%E2%89%A5%202.1.295-8f8cf4">
+  <img alt="Terminal and desktop" src="https://img.shields.io/badge/surfaces-terminal%20%2B%20desktop-5fbf8f">
+</p>
+
+<p align="center">
+  <a href="#install">Install</a> &middot;
+  <a href="#features-at-a-glance">Features</a> &middot;
+  <a href="#model-routing">Model routing</a> &middot;
+  <a href="CHANGELOG.md">Changelog</a> &middot;
+  <a href="#privacy-what-it-reads-writes-and-runs">Privacy</a>
+</p>
+
+---
+
+## The problem
+
+Long Claude Code sessions run work the user cannot see. Subagents start and finish out of view, so the user does not know which model did what, what it cost, which task is still open, or why a choice was made. When the session ends, the plan and the decisions go with it.
+
+The real cost is repeated work, lost context and surprise bills.
+
+## The idea
+
+FlowDeck turns each request into a flow of tasks.
+
+- **Orchestration**: the session plans the flow, delegates each task to a worker and reviews the result before accepting it.
+- **Logging and history**: every task, run, step, time, cost and handoff note is recorded. Each session is archived as its own file that can be reopened, restored or moved to the Trash.
+- **Model routing**: each task goes to the model that fits. Sonnet takes clear, checkable work, Opus takes judgement work, and Fable is used only after the user approves it. The orchestrator assigns the model per task following written routing rules; the mod shows the choice, keeps the tier defaults and enforces the Fable approval in code.
+- **Visibility**: a band above the prompt, a side panel with live status, a WARM/COLD cache chip and card, and keep-warm renewals.
+
+A *flow* is the task list for one request. A *task* is one self-contained piece of it. A *worker* is the subagent that does a task. A *handoff note* is the record of a task's goal, brief, result and feedback. The *archive* is the per-project folder of finished sessions.
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="docs/images/band-overview-dark.png">
@@ -13,6 +55,40 @@ A Claude Code mod that runs a session's work as a planned, delegated flow and sh
 </picture>
 
 The screenshots are rendered from the mod's own drawing code with sample data (see [Screenshots](#screenshots)); nothing in them comes from a real session. In the feature sections below, each screenshot carries numbered circles, and the "What you see" list under it says what each number points at.
+
+## Install
+
+In your shell:
+
+```sh
+claude plugin marketplace add paavu/flowdeck-mod
+claude plugin install flowdeck@flowdeck-mod
+```
+
+Then run `/reload-plugins` in an open session (new sessions load the mod by themselves).
+
+### Other ways to install
+
+In one step: `claude plugin install flowdeck --marketplace paavu/flowdeck-mod` from the shell (Claude Code 2.1.292 or later), or `/plugin install flowdeck --marketplace paavu/flowdeck-mod` inside a session (2.1.275 or later). In the desktop app, where `/plugin` does not run: click **+** next to the prompt box, then **Plugins**, **Add marketplace** with `paavu/flowdeck-mod`, then add `flowdeck`.
+
+The install may print `1 userConfig option not yet set`: that is the panel language, which defaults to `auto`; nothing needs setting.
+
+Check it loaded: `/plugin` shows a dim line such as `1 mod active · flowdeck` under its tabs (the count includes other mods).
+
+To see what the mod hooks and calls before you install it, clone the repository and run `claude plugin validate <folder>`: its `hooks:` and `calls:` lines list every event and engine call.
+
+**Overlapping mods.** flowdeck was built from savvy-flow, savvy-progress, context-bar and plan-progress and does what the first three do; plan-progress's separate plans are replaced by the flow's own task list. Running them side by side gives two progress bands and two sets of tools; disable them first (`claude plugin disable <name>@<marketplace>`, or `/plugin`).
+
+**Optional: panel language.** `auto` (default), `en` or `ru`: `claude plugin configure flowdeck@flowdeck-mod`, or `/plugin configure flowdeck@flowdeck-mod` in a session. `auto` follows Claude Code's `language` setting, then `LC_ALL`, `LC_MESSAGES` and `LANG`.
+
+## Your first two minutes
+
+1. Open the panel with `/flowdeck-panel`. It shows the top row, the `FlowDeck` title and the tabs `Active`, `Finished`, `Archive` and `Trash`, all at `(0)` in a new project.
+2. On the Active tab, choose `Track all tasks` (or run `/flowdeck-rule on`) so Claude reports every task to flowdeck. Until the user chooses, the mod adds nothing to the system prompt (see [Task tracking](#task-tracking)).
+3. Run `/flowdeck:flowdeck <a small task>`. It starts a flow whatever the tracking choice.
+4. Watch the band above the prompt (the running task, `Tasks X/Y`, the progress bar) and the Active tab, where each worker appears with its steps.
+5. Open a task's handoff note with `ⓘ` and read its Goal, Brief, Result and Feedback.
+6. When every task is done and the turn ends, the band reads `Done`; check the Finished tab, then the Archive tab, where the flow is saved.
 
 ## Features at a glance
 
@@ -32,94 +108,6 @@ The screenshots are rendered from the mod's own drawing code with sample data (s
 | [Trash and Empty Trash](#archive-trash-and-empty-trash) | Archived sessions can be moved to the Trash and restored; `Empty Trash` erases them for good after a confirmation. |
 | [Model routing and the Fable approval](#model-routing) | The orchestrator may pick a model per task; the Fable tier launches only after the user approves it in Claude Code's own dialog. |
 | [Commands](#commands) | `/flowdeck-panel`, `/flowdeck-rule on, off or status`, `/flowdeck:flowdeck <task>`. |
-
-## Contents
-
-- [Requirements](#requirements)
-- [Install](#install), [Update](#update), [Uninstall](#uninstall)
-- [How it works](#how-it-works)
-- [Features](#features)
-- [Task tracking](#task-tracking)
-- [Configuration and data](#configuration-and-data)
-- [Privacy: what it reads, writes and runs](#privacy-what-it-reads-writes-and-runs)
-- [Known limits](#known-limits)
-- [Troubleshooting](#troubleshooting)
-- [Development](#development)
-- [Credits and license](#credits-and-license)
-
-## Requirements
-
-| | |
-|---|---|
-| Claude Code | **2.1.295 or later**. The full test suite passes on 2.1.295 and 2.1.312 (built and tested on 2.1.312); 2.1.212 refuses the manifest (`userConfig` `options` needs 2.1.271). Mods themselves need 2.1.287 in the terminal and 2.1.286 in the desktop app. |
-| Surfaces | Terminal (`claude`) and the Code tab of the Claude desktop app. Both draw the band and the panel; the desktop draws them as graphics, the terminal as text. `claude -p` and the Agent SDK run the hooks but draw nothing. |
-| Models | The `flowdeck-fable` worker runs on the Fable model; without access to it, change `model:` in `agents/flowdeck-fable.md`. The `light` and `medium` workers run on Sonnet, `careful` and `heavy` on Opus. |
-| Usage section | A Claude subscription that reports rate limits (Pro, Max). Without one the section says there is no data yet. |
-| Empty Trash | `unlink` on macOS and Linux, `powershell.exe` on Windows (see [Privacy](#privacy-what-it-reads-writes-and-runs)). |
-
-## Install
-
-In your shell:
-
-```sh
-claude plugin marketplace add paavu/flowdeck-mod
-claude plugin install flowdeck@flowdeck-mod
-```
-
-Or in one step: `claude plugin install flowdeck --marketplace paavu/flowdeck-mod` from the shell (Claude Code 2.1.292 or later), or `/plugin install flowdeck --marketplace paavu/flowdeck-mod` inside a session (2.1.275 or later). In the desktop app, where `/plugin` does not run: click **+** next to the prompt box, then **Plugins**, **Add marketplace** with `paavu/flowdeck-mod`, then add `flowdeck`.
-
-The install may print `1 userConfig option not yet set`: that is the panel language, which defaults to `auto`; nothing needs setting. Then, in an open session, run `/reload-plugins` (new sessions load it by themselves).
-
-Check it loaded: `/plugin` shows a dim line such as `1 mod active · flowdeck` under its tabs (the count includes other mods).
-
-First run:
-
-1. `/flowdeck-panel` opens the panel: the top row (`▼ Context`, `▼ Usage`, `● Band`, `● Keep warm` and the version), then the `FlowDeck` title with `○ Track tasks` beside it, then the tabs, all at `(0)` in a new project. Context and Usage fill in once Claude Code reports them, at the latest after the first reply.
-2. The Active tab asks `Track every task in flowdeck?` with `Track all tasks` and `Not now` (see [Task tracking](#task-tracking)). Until the user chooses, the mod adds nothing to the system prompt.
-3. After the first reply, the band above the prompt shows the `WARM` cache chip.
-4. `/flowdeck <a small task>` starts a flow, whatever the tracking choice: the orchestrator shows its plan, the band shows the running task with `Tasks X/Y`, and each worker appears in the panel's Active tab with its steps. When every task is done and the turn ends, the band reads `Done` and the flow is saved to the Archive tab.
-
-To see what the mod hooks and calls before you install it, clone the repository and run `claude plugin validate <folder>`: its `hooks:` and `calls:` lines list every event and engine call.
-
-**Overlapping mods.** flowdeck was built from savvy-flow, savvy-progress, context-bar and plan-progress and does what the first three do; plan-progress's separate plans are replaced by the flow's own task list. Running them side by side gives two progress bands and two sets of tools; disable them first (`claude plugin disable <name>@<marketplace>`, or `/plugin`).
-
-**Optional: panel language.** `auto` (default), `en` or `ru`: `claude plugin configure flowdeck@flowdeck-mod`, or `/plugin configure flowdeck@flowdeck-mod` in a session. `auto` follows Claude Code's `language` setting, then `LC_ALL`, `LC_MESSAGES` and `LANG`.
-
-## Update
-
-```sh
-claude plugin update flowdeck@flowdeck-mod
-```
-
-then `/reload-plugins` in open sessions. Every release raises `version` in `.claude-plugin/plugin.json`, so `update` always sees the new one. The panel's top row shows the version of the code that is running (`v1.0.0051`); after an update without a reload it still names the old one. [CHANGELOG.md](CHANGELOG.md) lists what each version changed.
-
-From 1.0.0036 or earlier: task tracking became a choice in 1.0.0037. An install that already ran flowdeck keeps its rule (`on`); see [Task tracking](#task-tracking) for how that is decided. `/flowdeck-agents` still opens the panel for this release; its new name is `/flowdeck-panel`.
-
-From 1.0.0034 or earlier: the Plans tab and the `plan` tool are gone (1.0.0035). An old `plans.json` is ignored and never deleted, and a panel left on the Plans tab opens on Active.
-
-## Uninstall
-
-```sh
-claude plugin uninstall flowdeck@flowdeck-mod
-claude plugin marketplace remove flowdeck-mod
-```
-
-Saved flows stay in each project's `.claude/flowdeck/` folder (git-ignored), with any `plans.json` an older version left there. Move that folder to your system's trash if you want them gone.
-
-## How it works
-
-```mermaid
-flowchart LR
-  user([User]) -- "/flowdeck task" --> orch[Orchestrator:<br/>the main session plans, designs, reviews]
-  orch -- "Agent: #n title" --> workers[Worker subagents:<br/>light, medium, careful, heavy, fable]
-  orch -- "progress tool:<br/>tasks, done, notes" --> mod[(flowdeck mod)]
-  workers -- "step tool:<br/>their own steps" --> mod
-  mod --> band[Band above the prompt]
-  mod --> panel[Side panel]
-  mod --> files[".claude/flowdeck/<br/>archive"]
-```
-
-The session model is the orchestrator: it reads the code, splits the work into self-contained tasks, picks a worker tier for each, delegates, and reviews every result before accepting it. It reports the plan and each accepted task through the `progress` tool; each worker reports its own steps through the `step` tool. The mod draws all of it and saves finished flows per project.
 
 ## Features
 
@@ -590,6 +578,21 @@ All times are 24-hour `HH:MM`.
 
 Without a project folder, or when the folder cannot be written, saves go to Claude Code's mod store (key `history`), so nothing is lost.
 
+## How it works
+
+```mermaid
+flowchart LR
+  user([User]) -- "/flowdeck task" --> orch[Orchestrator:<br/>the main session plans, designs, reviews]
+  orch -- "Agent: #n title" --> workers[Worker subagents:<br/>light, medium, careful, heavy, fable]
+  orch -- "progress tool:<br/>tasks, done, notes" --> mod[(flowdeck mod)]
+  workers -- "step tool:<br/>their own steps" --> mod
+  mod --> band[Band above the prompt]
+  mod --> panel[Side panel]
+  mod --> files[".claude/flowdeck/<br/>archive"]
+```
+
+The session model is the orchestrator: it reads the code, splits the work into self-contained tasks, picks a worker tier for each, delegates, and reviews every result before accepting it. It reports the plan and each accepted task through the `progress` tool; each worker reports its own steps through the `step` tool. The mod draws all of it and saves finished flows per project.
+
 ## Privacy: what it reads, writes and runs
 
 flowdeck makes **no network calls of its own**: there is no `fetch`, no HTTP and no telemetry in the code. Everything it keeps stays on the local machine.
@@ -607,24 +610,28 @@ flowdeck makes **no network calls of its own**: there is no `fetch`, no HTTP and
 
 What it saves (task titles, goals, briefs, results and feedback, costs and times) is what the user and the orchestrator wrote during the session. It stays in the project folder, git-ignored.
 
-## Known limits
+## Updating and uninstalling
 
-- The terminal text is English only; the `ru` language covers part of the panel.
-- No sounds.
-- No edit gate: work is never blocked by the mod.
-- No separate plans (removed in 1.0.0035): the flow's task list is the only task list. A `plans.json` or `plans-extra-<session>.json` an older version left in `.claude/flowdeck/` is ignored and never deleted; plans an older version saved to the Archive still show there.
-- A worker still running when its flow is saved is kept as `Running at finish`; what it spends after that is not recorded.
-- Handoff notes sent after a flow finished are ignored: send `result` and `feedback` with the `done` that accepts the task.
-- The archive index is one file: past about 7,500 sessions it warns, and past 3,900,000 bytes it can no longer be written (the session files are kept). Index volumes would fix this; they are not built.
-- The engine's file API cannot move or delete, so a trashed session keeps its file in `archive/` as well as its copy in `.trash/` until `Empty Trash`. Its small index record stays, hidden.
-- Two sessions saving at once can each write the index without the other's session for a moment; the next load lists it again.
-- A session that ends without its end being written (a crash) looks alive for 3 minutes, so the next session closes its flow up to 3 minutes later.
-- On the desktop, a button pressed right as the panel redraws can land on an old handle and be ignored; while workers run, the panel redraws every 5 seconds, so elapsed times move in 5-second steps.
-- The cache chip assumes Claude Code's 1-hour prompt cache, and its prices are estimates.
-- Keep warm was tested through the test kit only (with `$.model.fork` answered by the test), not yet measured in a live session. A renewal can come up to 5 seconds after minute 50; while the machine sleeps nothing runs.
-- The token numbers in [What it costs](#what-it-costs) are estimates: no tokenizer is available to the mod, and `/context` estimates too. The session switch from `/flowdeck:flowdeck` was tested through the test kit's `skill.prompt` only, not in a live session.
-- A task list (TodoWrite) or a flowdeck worker still starts a flow in the panel while tracking is `unset` or `off`; that adds nothing to the system prompt.
-- The `ⓘ` glyph and the desktop layout estimates (chevron width, the cache chevron's room) were checked in tests, not measured in a live desktop window.
+### Update
+
+```sh
+claude plugin update flowdeck@flowdeck-mod
+```
+
+then `/reload-plugins` in open sessions. Every release raises `version` in `.claude-plugin/plugin.json`, so `update` always sees the new one. The panel's top row shows the version of the code that is running (`v1.0.0052`); after an update without a reload it still names the old one. [CHANGELOG.md](CHANGELOG.md) lists what each version changed.
+
+From 1.0.0036 or earlier: task tracking became a choice in 1.0.0037. An install that already ran flowdeck keeps its rule (`on`); see [Task tracking](#task-tracking) for how that is decided. `/flowdeck-agents` still opens the panel for this release; its new name is `/flowdeck-panel`.
+
+From 1.0.0034 or earlier: the Plans tab and the `plan` tool are gone (1.0.0035). An old `plans.json` is ignored and never deleted, and a panel left on the Plans tab opens on Active.
+
+### Uninstall
+
+```sh
+claude plugin uninstall flowdeck@flowdeck-mod
+claude plugin marketplace remove flowdeck-mod
+```
+
+Saved flows stay in each project's `.claude/flowdeck/` folder (git-ignored), with any `plans.json` an older version left there. Move that folder to your system's trash if you want them gone.
 
 ## Troubleshooting
 
@@ -671,6 +678,35 @@ To run your working copy, add the folder as a marketplace (`claude plugin market
 `sh scripts/screenshots.sh` renders the images in `docs/images/`. It runs `scripts/screenshots/shots.tsx` through the engine's test kit (sample flows, a warm and a cold cache, archive sessions; no real session data), prints each drawn tree, and `scripts/screenshots/render.mjs` lays the trees out as HTML and captures them with [agent-browser](https://github.com/vercel-labs/agent-browser), light and dark. The mod's own SVG drawings are used as drawn; the desktop app's native elements (text, buttons, boxes) are approximated with plain CSS. `docs/images/src/` keeps each page's HTML and the band and cache-card SVGs. Times in the images are in the local time zone of the machine that rendered them. Smaller PNG files come from ImageMagick (`magick`, a 96-colour palette) when it is installed.
 
 **Callouts.** The numbered circles are data, not drawing code: `scripts/screenshots/callouts.tsv` has one line per circle (image name, number, the part it points at, which side it sits on, a nudge). A part is found by the key of the element the mod drew, by its text, or, for what the mod draws as one picture (the band, the context bar, a step row), by a point in that picture. `render.mjs` places the circles in the page before the capture and adds a thin leader line to a nudged one. The text of each legend is in this README; `sh scripts/check-readme.sh` fails when a legend has a different number of items than the data has circles. To move or add a callout, edit the `.tsv` and run `sh scripts/screenshots.sh`.
+
+## Requirements
+
+| | |
+|---|---|
+| Claude Code | **2.1.295 or later**. The full test suite passes on 2.1.295 and 2.1.312 (built and tested on 2.1.312); 2.1.212 refuses the manifest (`userConfig` `options` needs 2.1.271). Mods themselves need 2.1.287 in the terminal and 2.1.286 in the desktop app. |
+| Surfaces | Terminal (`claude`) and the Code tab of the Claude desktop app. Both draw the band and the panel; the desktop draws them as graphics, the terminal as text. `claude -p` and the Agent SDK run the hooks but draw nothing. |
+| Models | The `flowdeck-fable` worker runs on the Fable model; without access to it, change `model:` in `agents/flowdeck-fable.md`. The `light` and `medium` workers run on Sonnet, `careful` and `heavy` on Opus. |
+| Usage section | A Claude subscription that reports rate limits (Pro, Max). Without one the section says there is no data yet. |
+| Empty Trash | `unlink` on macOS and Linux, `powershell.exe` on Windows (see [Privacy](#privacy-what-it-reads-writes-and-runs)). |
+
+## Known limits
+
+- The terminal text is English only; the `ru` language covers part of the panel.
+- No sounds.
+- No edit gate: work is never blocked by the mod.
+- No separate plans (removed in 1.0.0035): the flow's task list is the only task list. A `plans.json` or `plans-extra-<session>.json` an older version left in `.claude/flowdeck/` is ignored and never deleted; plans an older version saved to the Archive still show there.
+- A worker still running when its flow is saved is kept as `Running at finish`; what it spends after that is not recorded.
+- Handoff notes sent after a flow finished are ignored: send `result` and `feedback` with the `done` that accepts the task.
+- The archive index is one file: past about 7,500 sessions it warns, and past 3,900,000 bytes it can no longer be written (the session files are kept). Index volumes would fix this; they are not built.
+- The engine's file API cannot move or delete, so a trashed session keeps its file in `archive/` as well as its copy in `.trash/` until `Empty Trash`. Its small index record stays, hidden.
+- Two sessions saving at once can each write the index without the other's session for a moment; the next load lists it again.
+- A session that ends without its end being written (a crash) looks alive for 3 minutes, so the next session closes its flow up to 3 minutes later.
+- On the desktop, a button pressed right as the panel redraws can land on an old handle and be ignored; while workers run, the panel redraws every 5 seconds, so elapsed times move in 5-second steps.
+- The cache chip assumes Claude Code's 1-hour prompt cache, and its prices are estimates.
+- Keep warm was tested through the test kit only (with `$.model.fork` answered by the test), not yet measured in a live session. A renewal can come up to 5 seconds after minute 50; while the machine sleeps nothing runs.
+- The token numbers in [What it costs](#what-it-costs) are estimates: no tokenizer is available to the mod, and `/context` estimates too. The session switch from `/flowdeck:flowdeck` was tested through the test kit's `skill.prompt` only, not in a live session.
+- A task list (TodoWrite) or a flowdeck worker still starts a flow in the panel while tracking is `unset` or `off`; that adds nothing to the system prompt.
+- The `ⓘ` glyph and the desktop layout estimates (chevron width, the cache chevron's room) were checked in tests, not measured in a live desktop window.
 
 ## Credits and license
 

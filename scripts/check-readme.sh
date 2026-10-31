@@ -1,7 +1,7 @@
 #!/bin/sh
 # Checks README.md against docs/images/ and the callout data: every image path exists, every <img> has alt text, and each
 # annotated image's numbered legend (the "1. ..." list after its <picture>) has the same count, numbered 1..N, as the callouts in
-# scripts/screenshots/callouts.tsv for that image. Exits 1 on the first kind of failure found, listing every problem.
+# scripts/screenshots/callouts.tsv for that image, and that every in-page #link names a heading. Exits 1 on the first kind of failure found, listing every problem.
 cd "$(dirname "$0")/.." || exit 1
 status=0
 
@@ -60,6 +60,35 @@ awk -F'\t' '
     exit bad
   }
 ' scripts/screenshots/callouts.tsv README.md || status=1
+
+awk '
+  /^```/ { fence = !fence; next }
+  fence { next }
+  /^#+ / {
+    h = $0
+    sub(/^#+ /, "", h)
+    h = tolower(h)
+    gsub(/[^a-z0-9 _-]/, "", h)
+    gsub(/ /, "-", h)
+    heading[h] = 1
+  }
+  {
+    line = $0
+    while (match(line, /(\]\(|href=")#[A-Za-z0-9_-]+/)) {
+      a = substr(line, RSTART, RLENGTH)
+      sub(/^.*#/, "", a)
+      link[a] = 1
+      line = substr(line, RSTART + RLENGTH)
+    }
+  }
+  END {
+    for (a in link) if (!(a in heading)) {
+      printf "README.md: the link #%s matches no heading\n", a > "/dev/stderr"
+      bad = 1
+    }
+    exit bad
+  }
+' README.md || status=1
 
 if [ "$status" -eq 0 ]; then
   echo "README images, alt text and legends agree with the callouts"
