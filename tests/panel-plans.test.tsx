@@ -416,7 +416,7 @@ describe('agent rows: live tool word and state colours', () => {
     expect(await svgOf($, /^1\. wire it/)).toBe('')
     const planned = await svgOf($, /^2\. later/)
     expect(planned).toContain('later')
-    const plain = planned.replace(/<tspan fill="[^"]+" font-weight="600">ready<\/tspan>/, '')
+    const plain = planned.replace(/<tspan fill="[^"]+" font-weight="600">ready<\/tspan>/, '').replace(/<g transform="translate\([^\n]*/, '') // the card sprite has its own palette
     expect(plain).not.toBe(planned)
     for (const hex of STATE_HEX) expect(plain).not.toContain(hex)
     expect(planned).not.toMatch(/Running|Needs approval/)

@@ -62,7 +62,7 @@ describe('the band crew control', () => {
     const icon = idle.svgs[idle.svgs.length - 1]
     expect(idle.svgs.length).toBe(2)
     expect(String(icon.props.alt)).toBe('no workers running')
-    expect(String(row.props.source)).not.toContain('class="c-') // the crab left the title row
+    expect(String(row.props.source)).not.toContain('class="bd"') // the sprite is not in the title row
     expect(idle.json.indexOf(String(icon.props.alt))).toBeLessThan(idle.json.indexOf('×0'))
     expect(String(icon.props.source)).not.toMatch(/class="[^"]*\brun\b/)
     await spawn($, 'w1')
@@ -70,7 +70,7 @@ describe('the band crew control', () => {
     const busyIcon = busy.svgs[busy.svgs.length - 1]
     expect(String(busyIcon.props.alt)).toBe('1 worker running')
     expect(String(busyIcon.props.source)).toMatch(/class="[^"]*\brun\b/)
-    expect(String(busy.svgs[0].props.source)).not.toContain('class="c-')
+    expect(String(busy.svgs[0].props.source)).not.toContain('class="bd"')
   })
 
   test('the title row plus the icon and the button stay within the pane width', async ($, on) => {

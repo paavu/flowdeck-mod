@@ -1,7 +1,7 @@
 import { describe, expect, test } from 'claude-code/testing'
 
 // The desktop panel stays small enough for the desktop app to take. A 19-task flow with 17 finished runs drew a
-// 267,000-character Finished tab (each row's drawing about 12,000: its crab as one rect per pixel and the crab's motion
+// 267,000-character Finished tab (each row's drawing about 12,000: its sprite as one rect per pixel and the sprite's motion
 // CSS on rows that do not move); past about 240,000 the desktop app kept the panel it had, its presses came back
 // `ui_press not handled`, and the reopened panel stayed blank. The engine drew it without an error, so nothing caught it.
 
@@ -103,6 +103,12 @@ async function draw($: any, surface: 'desktop' | 'terminal') {
   return { json, svgs, texts, buttons, text: texts.map((t: any) => String(t.text)).join('\n') }
 }
 
+// The sprite's group inside a row's drawing (it ends at the line break after it).
+const spriteOf = (source: string): string => {
+  const i = source.indexOf('<g transform="translate(')
+  return i < 0 ? '' : source.slice(i, source.indexOf('\n', i))
+}
+
 const rowSvgs = (svgs: any[]) => svgs.filter((s: any) => /^#\d+ Task \d+/.test(String(s.props.alt)))
 
 describe('the desktop panel stays within what the desktop takes', () => {
@@ -115,27 +121,75 @@ describe('the desktop panel stays within what the desktop takes', () => {
     expect(d.text).not.toMatch(/drawn as text|too large/)
   })
 
-  test("a finished row's drawing is small: its crab is a few paths, without the crab's motion CSS", async ($, on) => {
+  test("a finished row's drawing is small: its sprite is a few paths, still, without the sprite's motion CSS", async ($, on) => {
     engine(on)
     hold(on, 19, 17)
     const rows = rowSvgs((await draw($, 'desktop')).svgs)
     for (const s of rows) {
       const source = String(s.props.source)
       expect(source.length).toBeLessThan(4_000)
-      expect(source).not.toContain('@keyframes st')
+      expect(source).not.toContain('@keyframes bob')
       expect(source).not.toContain(' run"')
-      expect((source.match(/<rect x="\d+" y="\d+" width="1" height="1"/g) ?? []).length).toBe(0)
+      expect(source).not.toMatch(/class="p[abr]"/)
+      expect(spriteOf(source).length).toBeLessThan(1_500)
     }
   })
 
-  test('a running row keeps its walking crab and the CSS that moves it', async ($, on) => {
+  test('a running row keeps its stepping sprite and the CSS that moves it', async ($, on) => {
     engine(on)
     hold(on, 19, 17, 1, 'active')
     const rows = rowSvgs((await draw($, 'desktop')).svgs)
     expect(rows).toHaveLength(1)
     const source = String(rows[0].props.source)
     expect(source).toContain(' run"')
-    expect(source).toContain('@keyframes st')
+    expect(source).toContain('@keyframes bob')
+    expect(source).toContain('@media (prefers-reduced-motion: reduce){.run .bd')
+    expect(source).toMatch(/\.run \.bd\{animation:bob \.8s steps\(1\)/)
+    expect(source).toMatch(/class="pa"/)
+    expect(source).toMatch(/class="pb"/)
+    expect(spriteOf(source).length).toBeLessThan(1_500)
+  })
+
+  test('the sprite: palette, card body, equal legs at rest, three poses', async ($, on) => {
+    engine(on)
+    hold(on, 19, 17, 1, 'active')
+    const sprite = spriteOf(String(rowSvgs((await draw($, 'desktop')).svgs)[0].props.source))
+    const pose = (name: string) => sprite.match(new RegExp(`<g class="${name}">(.*?)</g>`))![1]
+    const cells = (markup: string) => (markup.match(/M\d+ \d+h\d+v1/g) ?? []).length
+    for (const c of ['#8f8cf4', '#ffffff', '#26242f', '#5fbf8f']) expect(sprite).toContain(`fill="${c}"`)
+    expect(sprite).toContain('M2 1h8v1h-8z') // card row 1
+    expect(sprite).toContain('M2 9h8v1h-8z') // green back card, row 8 of the card
+    const legs = (markup: string) => [...markup.matchAll(/M(\d+) (\d+)h2v1/g)].filter(m => Number(m[2]) >= 10).map(m => `${m[1]}@${m[2]}`).sort()
+    expect(legs(pose('pr'))).toEqual(['3@10', '3@11', '7@10', '7@11'])
+    expect(legs(pose('pa'))).toEqual(['3@10', '3@11', '7@10'])
+    expect(legs(pose('pb'))).toEqual(['3@10', '7@10', '7@11'])
+    for (const name of ['pa', 'pr', 'pb']) expect(cells(pose(name))).toBeLessThanOrEqual(8)
+  })
+
+  test('the hat shows the tier colour on each row, and other has none', async ($, on) => {
+    engine(on)
+    hold(on, 19, 17)
+    const rows = rowSvgs((await draw($, 'desktop')).svgs)
+    const hats = new Set<string>()
+    for (const r of rows) {
+      const m = spriteOf(String(r.props.source)).match(/d="M3 0h6v1h-6z" fill="(#[0-9A-Fa-f]{6})"/)
+      if (m) hats.add(m[1].toUpperCase())
+    }
+    expect([...hats].sort()).toEqual(['#1D9E75', '#378ADD', '#BA7517', '#D85A30'])
+  })
+
+  test('queued and planned rows use the dim rest sprite, still', async ($, on) => {
+    engine(on)
+    hold(on, 5, 2, 0, 'active')
+    const d = await draw($, 'desktop')
+    const dim = d.svgs.filter((s: any) => String(s.props.source).includes('opacity="0.45"'))
+    expect(dim.length).toBeGreaterThan(0)
+    for (const s of dim) {
+      const source = String(s.props.source)
+      expect(source).not.toContain(' run"')
+      expect(source).not.toContain('@keyframes bob')
+      expect(spriteOf(source).length).toBeLessThan(1_500)
+    }
   })
 
   test('a flow past the limit draws its text rows on the desktop and says so; never a blank panel', async ($, on) => {

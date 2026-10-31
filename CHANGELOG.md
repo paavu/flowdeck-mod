@@ -2,6 +2,9 @@
 
 Versions are `M.m.xxxx`; every build bumps the 4-digit build number. Details and rulings: `docs/ledger.md`, `docs/design.md`.
 
+## 1.0.0055 (2026-10-31)
+- The worker sprite is now an original pixel "card buddy" (a violet card with eyes and a smile, a green card behind it, a hat in the tier colour) in place of the old sprite: on agent rows, planned and accepted rows and the band's crew icon. It steps, waves and bobs while a worker runs and rests still, both legs level, on idle, queued and finished rows; the reduced-motion setting keeps the rest pose. The sprite's markup is under 1 KB per row. Screenshots regenerated; NOTICE no longer credits a sprite source.
+
 ## 1.0.0054 (2026-10-31)
 - README: every screenshot regenerated for the current panel; a new `note-view` image (one task row with its handoff note open) and a short handoff-note block in The idea. No change to the mod's behaviour.
 
@@ -21,7 +24,7 @@ Versions are `M.m.xxxx`; every build bumps the 4-digit build number. Details and
 - README: a features-at-a-glance table, and one section per feature with an annotated screenshot (numbered callouts), a numbered "What you see" legend and a short "How to use". The screenshot pipeline draws the callouts from data (`scripts/screenshots/callouts.tsv`) and renders the new images (band, context, usage, cache card, keep warm states, top-row switches, flow row, handoff note, Empty Trash confirmation, task tracking strip). `scripts/check-readme.sh` checks that every README image exists and has alt text, and that each legend matches the callout data. No change to the mod's behaviour.
 
 ## 1.0.0048 (2026-10-31)
-- Desktop panel no longer freezes or reopens blank with a big flow: the panel's tree for a 19-task flow had grown to about 270,000 characters (each row's drawing about 12,000), past what the desktop app takes, so it kept the old panel (presses answered `ui_press not handled`) and a reopened panel stayed blank. Each crab is now drawn as a few paths (a row's run of one colour as one shape) and its motion CSS goes only into drawings where a crab walks: the same pixels, and a row's drawing is about 2,500 characters, so the same flow draws in about 80,000. A desktop tab still past 200,000 characters draws its text rows, with a dim line saying so, instead of a panel the app will not show.
+- Desktop panel no longer freezes or reopens blank with a big flow: the panel's tree for a 19-task flow had grown to about 270,000 characters (each row's drawing about 12,000), past what the desktop app takes, so it kept the old panel (presses answered `ui_press not handled`) and a reopened panel stayed blank. Each sprite is now drawn as a few paths (a row's run of one colour as one shape) and its motion CSS goes only into drawings where a worker runs: the same pixels, and a row's drawing is about 2,500 characters, so the same flow draws in about 80,000. A desktop tab still past 200,000 characters draws its text rows, with a dim line saying so, instead of a panel the app will not show.
 
 ## 1.0.0047 (2026-10-31)
 - Step reporting that workers follow: the Progress reporting paragraph of all five worker agents is now a numbered procedure (plan once, do step 1, call `step` with `next: true` as soon as it is finished, only then start step 2) with an explicit "never batch" rule, and SKILL.md has every brief start with the line "Update your step list after each finished step, before starting the next." (the mod leaves that line out of the handoff-note brief). `scripts/check-rules.sh` checks the wording in SKILL.md and in each agent file.

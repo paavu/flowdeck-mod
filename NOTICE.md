@@ -4,7 +4,7 @@ flowdeck is released under the MIT License (see LICENSE). It is built from the M
 
 ## savvy-flow and savvy-progress (claude-kit)
 MIT License. Copyright (c) 2026 johnnyvizz. Source: https://github.com/JohnnyVizz/claude-kit
-The orchestrated flow (skill and the five worker agents), the band above the prompt, the agents panel and its pixel crab drawings come from these two mods (savvy-progress credits its crab sprites to DockCrab).
+The orchestrated flow (skill and the five worker agents), the band above the prompt, and the agents panel come from these two mods. The worker sprite is flowdeck's own.
 
 ## context-bar (claude-code-mods)
 MIT License. Copyright (c) 2026 Hamza Zafar. Source: https://github.com/hamzafer/claude-code-mods

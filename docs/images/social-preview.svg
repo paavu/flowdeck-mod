@@ -1,0 +1,30 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1280" height="640" viewBox="0 0 1280 640" role="img" aria-labelledby="t d">
+  <title id="t">FlowDeck</title>
+  <desc id="d">FlowDeck logo, the name and the tagline Orchestrate Claude Code work, and keep the record, above a progress bar</desc>
+  <rect width="1280" height="640" fill="#17161c"/>
+  <g transform="translate(96 118) scale(3.1)">
+    <rect x="14" y="40" width="56" height="30" rx="7" fill="#5fbf8f" opacity=".55"/>
+    <rect x="14" y="30" width="56" height="30" rx="7" fill="#8f8cf4" opacity=".75"/>
+    <rect x="14" y="18" width="56" height="30" rx="7" fill="#8f8cf4"/>
+    <rect x="24" y="29" width="26" height="4" rx="2" fill="#fff"/>
+    <rect x="24" y="37" width="16" height="4" rx="2" fill="#fff" opacity=".7"/>
+  </g>
+  <rect x="444" y="84" width="476" height="46" rx="23" fill="#26242f" stroke="#8f8cf4" stroke-width="2"/>
+  <text x="682" y="114" text-anchor="middle" font-family="-apple-system,BlinkMacSystemFont,'SF Pro Text','Helvetica Neue',Arial,sans-serif" font-size="20" font-weight="700" letter-spacing="2.4" fill="#c9c8f9">CLAUDE MOD  ·  FOR CLAUDE CODE</text>
+  <text x="440" y="236" font-family="-apple-system,BlinkMacSystemFont,'SF Pro Display','Helvetica Neue',Arial,sans-serif" font-size="124" font-weight="700" letter-spacing="-3" fill="#ffffff">FlowDeck</text>
+  <text x="444" y="304" font-family="-apple-system,BlinkMacSystemFont,'SF Pro Text','Helvetica Neue',Arial,sans-serif" font-size="38" font-weight="500" fill="#c9c8d6">Orchestrate Claude Code work,</text>
+  <text x="444" y="354" font-family="-apple-system,BlinkMacSystemFont,'SF Pro Text','Helvetica Neue',Arial,sans-serif" font-size="38" font-weight="500" fill="#c9c8d6">and keep the record.</text>
+  <g font-family="-apple-system,BlinkMacSystemFont,'SF Pro Text','Helvetica Neue',Arial,sans-serif" font-size="26" font-weight="600">
+    <rect x="444" y="392" width="116" height="46" rx="23" fill="#8f8cf4"/>
+    <text x="502" y="424" text-anchor="middle" fill="#ffffff">Plan</text>
+    <rect x="576" y="392" width="136" height="46" rx="23" fill="#8f8cf4" opacity=".6"/>
+    <text x="644" y="424" text-anchor="middle" fill="#ffffff">Route</text>
+    <rect x="728" y="392" width="148" height="46" rx="23" fill="#5fbf8f"/>
+    <text x="802" y="424" text-anchor="middle" fill="#14231c">Record</text>
+  </g>
+  <rect x="96" y="520" width="1088" height="28" rx="14" fill="#2c2b35"/>
+  <rect x="96" y="520" width="760" height="28" rx="14" fill="#8f8cf4"/>
+  <rect x="760" y="514" width="156" height="40" rx="20" fill="#5fbf8f"/>
+  <text x="838" y="542" text-anchor="middle" font-family="-apple-system,BlinkMacSystemFont,'SF Pro Text','Helvetica Neue',Arial,sans-serif" font-size="22" font-weight="700" fill="#14231c">Tasks 5/6</text>
+  <text x="1184" y="590" text-anchor="end" font-family="-apple-system,BlinkMacSystemFont,'SF Pro Text','Helvetica Neue',Arial,sans-serif" font-size="22" font-weight="500" fill="#8a8a98">github.com/paavu/flowdeck-mod</text>
+</svg>

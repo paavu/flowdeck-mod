@@ -11,7 +11,7 @@
 </p>
 
 <p align="center">
-  <img alt="Version 1.0.0054" src="https://img.shields.io/badge/version-1.0.0054-8f8cf4">
+  <img alt="Version 1.0.0055" src="https://img.shields.io/badge/version-1.0.0055-8f8cf4">
   <img alt="MIT license" src="https://img.shields.io/badge/license-MIT-5fbf8f">
   <img alt="Claude Code 2.1.295 or later" src="https://img.shields.io/badge/Claude%20Code-%E2%89%A5%202.1.295-8f8cf4">
   <img alt="Terminal and desktop" src="https://img.shields.io/badge/surfaces-terminal%20%2B%20desktop-5fbf8f">
@@ -145,7 +145,7 @@ What you see:
 4. The percent: the done fraction. The bar and the label turn green and read `Done` when the flow is finished.
 5. The cache chip: `WARM` (red) with the minutes left, or `COLD` (blue) with the idle time and the cost of the next message. See [the cache chip and card](#the-prompt-cache-chip-and-card).
 6. The chevron: opens and folds the cache card under the band.
-7. The worker icon: walks while at least one worker runs and stands still otherwise.
+7. The worker icon, a small card buddy: it bobs, steps and waves while at least one worker runs and rests still otherwise.
 8. `×N`: the workers running now (queued tasks and finished runs do not count; `×0` when none runs). Pressing it opens or closes the panel.
 9. `✕`: hides the band only. The panel's `Band` switch, or a new flow, brings it back.
 
@@ -633,7 +633,7 @@ What it saves (task titles, goals, briefs, results and feedback, costs and times
 claude plugin update flowdeck@flowdeck-mod
 ```
 
-then `/reload-plugins` in open sessions. Every release raises `version` in `.claude-plugin/plugin.json`, so `update` always sees the new one. The panel's top row shows the version of the code that is running (`v1.0.0054`); after an update without a reload it still names the old one. [CHANGELOG.md](CHANGELOG.md) lists what each version changed.
+then `/reload-plugins` in open sessions. Every release raises `version` in `.claude-plugin/plugin.json`, so `update` always sees the new one. The panel's top row shows the version of the code that is running (`v1.0.0055`); after an update without a reload it still names the old one. [CHANGELOG.md](CHANGELOG.md) lists what each version changed.
 
 From 1.0.0036 or earlier: task tracking became a choice in 1.0.0037. An install that already ran flowdeck keeps its rule (`on`); see [Task tracking](#task-tracking) for how that is decided. `/flowdeck-agents` still opens the panel for this release; its new name is `/flowdeck-panel`.
 

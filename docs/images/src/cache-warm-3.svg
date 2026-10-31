@@ -1,27 +1,11 @@
 <svg xmlns="http://www.w3.org/2000/svg" width="26" height="22" viewBox="0 0 26 22">
 <style>
-.run .la{animation:st .5s steps(1) infinite}.run .lb{animation:st .5s steps(1) infinite -.25s}
-.run .bd{animation:bob .5s steps(1) infinite -.125s}
-.run g{transform-box:fill-box}
-@keyframes st{50%{transform:translateY(-1px)}}@keyframes bob{50%{transform:translateY(1px)}}
-.c-fable.run{animation:float 1s ease-in-out infinite}
-.c-fable.run .la,.c-fable.run .lb,.c-fable.run .bd{animation:none}
-.c-fable.run .ant{animation:blink 1s steps(1) infinite}
-.c-fable.run .star{animation:blink .5s steps(1) infinite -.25s}
-@keyframes float{50%{transform:translateY(-2px)}}@keyframes blink{50%{opacity:.15}}
-.c-heavy.run .it{animation:scan 1s steps(1) infinite}
-.c-heavy.run .gl{animation:blink 1s steps(1) infinite -.5s}
-@keyframes scan{25%{transform:translate(-1px,1px)}50%{transform:translate(-2px,2px)}75%{transform:translate(-1px,1px)}}
-.c-careful.run .it{transform-origin:100% 100%;animation:twist .5s ease-in-out infinite}
-@keyframes twist{50%{transform:rotate(-35deg)}}
-.c-medium.run .pan{transform-origin:0 50%;animation:tilt 1s ease-in-out infinite}
-.c-medium.run .egg{animation:flip 1s ease-in-out infinite}
-@keyframes tilt{20%,40%{transform:rotate(-12deg)}}@keyframes flip{30%{transform:translateY(-5px) scaleY(-1)}60%{transform:translateY(0)}}
-.c-light.run .la{animation-duration:.25s}.c-light.run .lb{animation-duration:.25s;animation-delay:-.125s}
-.c-light.run .flag{transform-origin:0 50%;animation:wave .25s steps(1) infinite}
-@keyframes wave{50%{transform:skewY(-12deg) scaleX(.85)}}
-.c-explore.run .it{transform-origin:50% 100%;animation:fence .5s ease-in-out infinite}
-@keyframes fence{50%{transform:rotate(25deg)}}
-@media (prefers-reduced-motion: reduce){.run,.run g{animation:none!important}}
-</style><g transform="translate(1,0) scale(0.8)" opacity="1" shape-rendering="crispEdges"><g class="c-other run"><g class="bd"><path d="M7 10h16v12h-16zM3 14h4v4h-4zM23 14h4v4h-4z" fill="#D97757"/><path d="M9 12h2v2h-2zM19 12h2v2h-2z" fill="#1F1E1D"/></g><g class="la"><path d="M7 22h2v4h-2zM17 22h2v4h-2z" fill="#D97757"/></g><g class="lb"><path d="M11 22h2v4h-2zM21 22h2v4h-2z" fill="#D97757"/></g></g></g>
+.run .pa,.run .pb{opacity:0}
+.run .pa{animation:fa .8s steps(1) infinite}.run .pb{animation:fb .8s steps(1) infinite}.run .pr{animation:fr .8s steps(1) infinite}
+.run .bd{animation:bob .8s steps(1) infinite}
+@keyframes fa{0%{opacity:1}25%{opacity:0}}@keyframes fb{0%{opacity:0}50%{opacity:1}75%{opacity:0}}
+@keyframes fr{0%{opacity:0}25%{opacity:1}50%{opacity:0}75%{opacity:1}}
+@keyframes bob{0%,50%{transform:translateY(-1px)}25%,75%{transform:none}}
+@media (prefers-reduced-motion: reduce){.run .bd,.run .pa,.run .pb,.run .pr{animation:none!important}.run .pa,.run .pb{opacity:0}.run .pr{opacity:1}}
+</style><g transform="translate(1,0) scale(1.85)" opacity="1" shape-rendering="crispEdges"><g class="sp run"><g class="bd"><path d="M2 1h8v1h-8zM1 2h10v1h-10zM1 3h2v1h-2zM5 3h2v1h-2zM9 3h2v1h-2zM1 4h2v1h-2zM5 4h2v1h-2zM9 4h2v1h-2zM1 5h10v1h-10zM1 6h3v1h-3zM8 6h3v1h-3zM1 7h10v1h-10zM1 8h10v1h-10z" fill="#8f8cf4"/><path d="M3 3h2v1h-2zM7 3h2v1h-2zM3 4h1v1h-1zM7 4h1v1h-1z" fill="#ffffff"/><path d="M4 4h1v1h-1zM8 4h1v1h-1zM4 6h4v1h-4z" fill="#26242f"/><path d="M2 9h8v1h-8z" fill="#5fbf8f"/><g class="pa"><path d="M0 4h1v1h-1zM0 5h1v1h-1zM11 6h1v1h-1zM11 7h1v1h-1zM3 10h2v1h-2zM7 10h2v1h-2zM3 11h2v1h-2z" fill="#8f8cf4"/></g><g class="pr"><path d="M0 6h1v1h-1zM11 6h1v1h-1zM0 7h1v1h-1zM11 7h1v1h-1zM3 10h2v1h-2zM7 10h2v1h-2zM3 11h2v1h-2zM7 11h2v1h-2z" fill="#8f8cf4"/></g><g class="pb"><path d="M11 4h1v1h-1zM11 5h1v1h-1zM0 6h1v1h-1zM0 7h1v1h-1zM3 10h2v1h-2zM7 10h2v1h-2zM7 11h2v1h-2z" fill="#8f8cf4"/></g></g></g></g>
 </svg>
