@@ -155,7 +155,14 @@ function groupBody(v: ArchiveView, rec: ArchiveRecord, key: string): RenderChild
     t: { cost: entry.cost, tokens: entry.tokens, time: entry.time },
     rows: 'all',
   })
-  return v.Svg ? view.body() : <Box flexDirection="column" marginTop={1}>{view.body()}</Box>
+  return v.Svg ? [view.header, view.body()] : <Box flexDirection="column" marginTop={1}>{view.body()}</Box>
+}
+
+// Whether an opened group draws the three tiles (the desktop, a flow saved with runs): its summary line then gives way to them.
+function hasTiles(v: ArchiveView, rec: ArchiveRecord, isOpen: boolean): boolean {
+  if (!isOpen || !v.Svg) return false
+  const d = v.details.find(x => x.list === v.list && x.id === rec.id)
+  return d?.state === 'ok' && !!d.entry && !d.entry.plan && (d.entry.agents ?? []).length > 0
 }
 
 // The confirmation that takes a row's place: the session's date and item count, title, summary and file, what the move
@@ -216,9 +223,11 @@ function sessionRow(v: ArchiveView, rec: ArchiveRecord, i: number): RenderChildr
             <Box flexGrow={1} />
             {action && <Box flexShrink={0}>{action}</Box>}
           </Box>
-          <Text dimColor wrap="truncate-end">
-            {`  ${summaryLine(v, rec)}`}
-          </Text>
+          {!hasTiles(v, rec, isOpen) && (
+            <Text dimColor wrap="truncate-end">
+              {`  ${summaryLine(v, rec)}`}
+            </Text>
+          )}
           {isOpen && groupBody(v, rec, key)}
         </Box>
       )}

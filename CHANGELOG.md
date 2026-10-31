@@ -2,6 +2,9 @@
 
 Versions are `M.m.xxxx`; every build bumps the 4-digit build number. Details and rulings: `docs/ledger.md`, `docs/design.md`.
 
+## 1.0.0041 (2026-10-31)
+- Archive and Trash: an opened session draws its cost, tokens and time as the same three tiles as the Active and Finished tabs (desktop); the folded row and the terminal keep the one dim text line.
+
 ## 1.0.0040 (2026-10-31)
 - The handoff note button is now `ⓘ` (was `✎`), and an opened note appears directly under the task's title, before the worker line, the progress bar and the steps, on running, queued, Accepted, finished and archived rows, on the desktop and in the terminal.
 

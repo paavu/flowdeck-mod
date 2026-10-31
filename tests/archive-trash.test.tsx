@@ -180,6 +180,38 @@ describe('the Archive list draws from the index alone', () => {
   })
 })
 
+describe('an opened session shows its totals as the Active and Finished tabs do', () => {
+  const tileTexts = async ($: any, tab: Tab) => {
+    const p = await pane($, 'desktop', tab)
+    const sources = (await p.findAll({ type: 'Svg' })).map((s: any) => String(s.props.source ?? ''))
+    await p.unmount()
+    const tiles = sources.find(x => x.includes('class="tile"'))
+    return tiles ? [...tiles.matchAll(/<text[^>]*>([^<]*)<\/text>/g)].map(m => m[1]) : []
+  }
+
+  test('desktop: the three tiles in the open Archive and Trash groups, the plain summary only on folded rows', async ($, on) => {
+    const { clock } = engine(on, { files: seeded(2) })
+    await start($)
+    await settle()
+    expect(await tileTexts($, 'archive')).toEqual(['Cost', '≈$1.25', 'Tokens', '12k', 'Time', '30:00'])
+    const a = await look($, 'desktop')
+    expect(a.texts.filter(x => x === '  ≈$1.25 · 12k tokens · 30:00')).toHaveLength(1) // the folded second row only
+    clock.now = NOW + MIN
+    await press($, `archive-del-${K(1)}`)
+    await press($, `archive-trash-${K(1)}`)
+    expect(await tileTexts($, 'trash')).toEqual(await tileTexts($, 'archive'))
+    expect((await tileTexts($, 'trash')).length).toBe(6)
+  })
+
+  test('terminal: the same text form on the open and the folded rows', async ($, on) => {
+    engine(on, { files: seeded(2) })
+    await start($)
+    await settle()
+    const t = await look($)
+    expect(t.texts.filter(x => x === '  ≈$1.25 · 12k tokens · 30:00')).toHaveLength(2)
+  })
+})
+
 describe('moving a session to the trash', () => {
   test('✕ asks first: the confirmation shows the session and changes nothing until confirmed; Cancel keeps everything', async ($, on) => {
     const { files } = engine(on, { files: seeded(3) })
@@ -235,7 +267,7 @@ describe('moving a session to the trash', () => {
       expect(t.keys.filter(k => /^trash-k[a-z0-9]+$/.test(k))).toEqual([`trash-${K(2)}`])
       expect(t.buttons.find(b => b.key === `trash-${K(2)}`)?.text).toMatch(/^▼ Oct 30, 2026 · \d\d:\d\d \(1\)$/)
       expect(t.buttons.find(b => b.key === `trash-restore-${K(2)}`)?.text).toBe('Restore')
-      expect(t.texts).toContain('  ≈$1.25 · 12k tokens · 30:00')
+      if (surface === 'terminal') expect(t.texts).toContain('  ≈$1.25 · 12k tokens · 30:00')
       // Its first group opens with the trash copy's rows.
       expect(t.texts.some(x => /task 2/.test(x))).toBe(true)
       expect(t.keys.some(k => k.startsWith('archive-del-'))).toBe(false)

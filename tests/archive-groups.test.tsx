@@ -389,10 +389,13 @@ describe('archive groups in the panel', () => {
 
     const d = await desktop($)
     expect(d.svgs.some((s: any) => /Flow [AB]/.test(String(s.props.alt)) || /Flow [AB]/.test(String(s.props.source)))).toBe(false)
-    // no header drawing for a group: its summary is a dim line of text, as in the terminal
-    expect(d.svgs.some((s: any) => /≈\$(1\.50|0\.75)/.test(String(s.props.source)) || /≈\$(1\.50|0\.75)/.test(String(s.props.alt)))).toBe(false)
+    // the open group draws the three tiles of the Active tab; the folded one keeps its dim summary line
+    const tiled = d.svgs.filter((s: any) => String(s.props.source).includes('class="tile"'))
+    expect(tiled.length).toBe(1)
+    expect(String(tiled[0].props.source)).toContain('≈$1.50')
+    expect(String(tiled[0].props.source)).not.toContain('≈$0.75')
     const summaries = d.texts.filter((x: any) => /≈\$/.test(String(x.text)))
-    expect(summaries.map((x: any) => String(x.text))).toEqual(['  ≈$1.50 · 12k tokens · 30:00', '  ≈$0.75 · 3k tokens · 1:30'])
+    expect(summaries.map((x: any) => String(x.text))).toEqual(['  ≈$0.75 · 3k tokens · 1:30'])
     for (const x of summaries) expect(x.props.dimColor).toBe(true)
     expect(d.buttons.find((b: any) => String(b.props.key) === `archive-${keyOf('gA')}`).text).toMatch(/^▼ .* \(2\)$/)
     // (a row's own alt may say its run finished; the group itself never does)
