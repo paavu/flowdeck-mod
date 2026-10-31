@@ -1,6 +1,6 @@
 # Contributing
 
-Issues and pull requests are welcome at https://github.com/paavu/flowdeck-mod.
+flowdeck is a Claude mod for Claude Code. Issues and pull requests are welcome at https://github.com/paavu/flowdeck-mod.
 
 Before a pull request:
 

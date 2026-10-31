@@ -83,14 +83,15 @@ export function applyNotes<T extends object>(tasks: T[], notes: unknown): { task
 }
 
 // Sentences every brief carries that say nothing about the task itself: the step-list closing line, and the standard
-// preamble (repo line, tool, delete, commit, comment and time-format rules). Only whole sentences that start so are dropped.
+// preamble (repo line, tooling, delete, commit, comment and time-format rules). Only whole sentences that start so are dropped.
 const BOILERPLATE: readonly RegExp[] = [
   /close your step list\b/i,
   /^update your step list\b/i,
   /^repo(sitory)?\s*:/i,
   /^(working directory|cwd)\s*:/i,
   /^read\s+(readme|claude\.md|changelog)\b/i,
-  /^use lean-ctx\b/i,
+  /^use\s+[^.]{0,60}\btools?\b/i,
+  /^before your final report\b/i,
   /^never delete files\b/i,
   /^(do not|don't) delete files\b/i,
   /^no rm\b/i,

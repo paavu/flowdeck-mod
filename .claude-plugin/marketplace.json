@@ -1,12 +1,12 @@
 {
   "name": "flowdeck-mod",
   "owner": { "name": "Paavu", "url": "https://github.com/paavu" },
-  "description": "flowdeck: an orchestrated delivery flow for Claude Code with a live band and agents panel",
+  "description": "Claude mod: orchestrate subagents, route each task to the right model, and keep a live record of every task, cost and handoff note.",
   "plugins": [
     {
       "name": "flowdeck",
       "source": "./",
-      "description": "Orchestrated delivery flow with a live band above the prompt and a side panel of agents, context, usage and past flows",
+      "description": "Claude mod: orchestrate subagents, route each task to the right model, and keep a live record of every task, cost and handoff note.",
       "homepage": "https://github.com/paavu/flowdeck-mod",
       "repository": "https://github.com/paavu/flowdeck-mod",
       "license": "MIT",

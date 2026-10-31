@@ -2,6 +2,9 @@
 
 Versions are `M.m.xxxx`; every build bumps the 4-digit build number. Details and rulings: `docs/ledger.md`, `docs/design.md`.
 
+## 1.0.0056 (2026-10-31)
+- Handoff-note brief filter: the tool-specific `Use <named tool>` rule is now a generic one (a sentence starting `Use … tools`), plus `Before your final report…`; no private tool names remain in code, tests or docs. SECURITY.md points to private vulnerability reporting. "Claude mod" wording made consistent in the README intro, plugin and marketplace descriptions, CONTRIBUTING and SECURITY.
+
 ## 1.0.0055 (2026-10-31)
 - The worker sprite is now an original pixel "card buddy" (a violet card with eyes and a smile, a green card behind it, a hat in the tier colour) in place of the old sprite: on agent rows, planned and accepted rows and the band's crew icon. It steps, waves and bobs while a worker runs and rests still, both legs level, on idle, queued and finished rows; the reduced-motion setting keeps the rest pose. The sprite's markup is under 1 KB per row. Screenshots regenerated; NOTICE no longer credits a sprite source.
 
@@ -88,7 +91,7 @@ Versions are `M.m.xxxx`; every build bumps the 4-digit build number. Details and
 
 ## 1.0.0033 (2026-10-31)
 - Handoff notes on every task row: up to four plain-text parts, `Goal` (300 characters), `Brief` (about 600), `Result` (300) and `Feedback` (300), cleaned and capped by the mod. The orchestrator sends `goal` with each task in `progress` `tasks` and `add`, and `result` and `feedback` through the new `notes: [{task, goal?, result?, feedback?}]` with the `done` that accepts the task; `notes` updates any task by number at any time (a part sent again replaces it, `""` clears it); unknown numbers are ignored with a reply line, and a finished flow takes no notes.
-- The brief is taken by the mod from the worker's Agent `prompt` when it starts (`agent.spawn`'s `prompt`): headings, code fences, blank runs and the standard preamble (the step-list closing line, `Repo:`, `Read README…`, lean-ctx, no-delete, no-commit, comments and 24-hour sentences) left out, the start of the real task kept, `…` when cut. A return round replaces it until the task is accepted; without a prompt the description stands in when it says more than the title; a run linked to no task keeps its own brief.
+- The brief is taken by the mod from the worker's Agent `prompt` when it starts (`agent.spawn`'s `prompt`): headings, code fences, blank runs and the standard preamble (the step-list closing line, `Repo:`, `Read README…`, `Use … tools`, no-delete, no-commit, comments and 24-hour sentences) left out, the start of the real task kept, `…` when cut. A return round replaces it until the task is accepted; without a prompt the description stands in when it says more than the title; a run linked to no task keeps its own brief.
 - A small dim `✎` right after the name on every row with a note (queued, running, finished, Accepted, and in Archive groups) opens the note under the row: dim labels, the text wrapped to the panel's width; the open state survives `/reload-plugins`, Archive rows keep their own. On the desktop a queued or Accepted row with a note draws its title natively beside the `✎`, over a shorter drawing; rows without notes are unchanged.
 - Notes are saved with the flow's tasks in the session file (a run's own brief with the run) and read back from the Archive; older flows and sessions read as no note. The archive index holds no notes.
 - The flow rule, the `progress` tool's description and schema, SKILL.md and README say when to send each part.

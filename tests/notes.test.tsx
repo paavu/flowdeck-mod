@@ -13,7 +13,7 @@ const STEP_LINE = 'Before your final report, close your step list with `mcp__flo
 const PROMPT = [
   '## Task',
   '',
-  'Repo: /work/app (a web app, 1.2.0003, git-clean). Read README.md and docs/design.md first. Use lean-ctx tools (ctx_read/ctx_search) for reading; edit with Edit/Write. Never delete files (no rm). No commit/push/tag (orchestrator does it). Comments sparingly. 24-hour time everywhere.',
+  'Repo: /work/app (a web app, 1.2.0003, git-clean). Read README.md and docs/design.md first. Use the search tools for reading; edit with Edit/Write. Never delete files (no rm). No commit/push/tag (orchestrator does it). Comments sparingly. 24-hour time everywhere.',
   '',
   '',
   '**FEATURE**: add a **retry** button to the upload dialog.',
@@ -62,7 +62,7 @@ describe('note texts', () => {
   test('briefOf: headings, blank runs and the standard boilerplate dropped, emphasis and list marks off, the task text kept', () => {
     const b = briefOf(PROMPT)
     expect(b).toBe('FEATURE: add a retry button to the upload dialog. keep the dialog width')
-    for (const gone of ['Repo:', 'lean-ctx', 'no rm', 'commit', 'sparingly', '24-hour', 'mcp__flowdeck__step', '##', '**']) expect(b).not.toContain(gone)
+    for (const gone of ['Repo:', 'search tools', 'no rm', 'commit', 'sparingly', '24-hour', 'mcp__flowdeck__step', '##', '**']) expect(b).not.toContain(gone)
     expect(briefOf(STEP_LINE)).toBe('')
     expect(briefOf(undefined)).toBe('')
     const long = briefOf(`Build the thing. ${'Then more detail follows here. '.repeat(60)}`)
@@ -260,7 +260,7 @@ describe('the brief from the delegation prompt', () => {
     await press($, 'active', 'note-w2')
     let t = await look($, 'active')
     expect(t.text).toContain('   Brief\n   FEATURE: add a retry button to the upload dialog. keep the dialog width')
-    expect(t.text).not.toContain('lean-ctx')
+    expect(t.text).not.toContain('search tools')
     clock.now = NOW + 60_000
     await complete($, 'w2')
     clock.now = NOW + 70_000
