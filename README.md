@@ -4,14 +4,14 @@
 
 <h1 align="center">FlowDeck</h1>
 
-<p align="center"><strong>Orchestrate Claude Code work, and keep the record.</strong></p>
+<p align="center"><strong>A Claude mod for Claude Code: orchestrate the work, keep the record.</strong></p>
 
 <p align="center">
-  A Claude mod for Claude Code that plans each task, hands it to a worker on the model that fits, and logs what was asked, done, reviewed and spent. A band above the prompt and a side panel show the crew live, and every finished session is archived as a file you can reopen.
+  FlowDeck plans each task, hands it to a worker on the model that fits, and logs what was asked, done, reviewed and spent. A band above the prompt and a side panel show the crew live, and every finished session is archived as a file you can reopen.
 </p>
 
 <p align="center">
-  <img alt="Version 1.0.0058" src="https://img.shields.io/badge/version-1.0.0058-8f8cf4">
+  <img alt="Version 1.0.0059" src="https://img.shields.io/badge/version-1.0.0059-8f8cf4">
   <img alt="MIT license" src="https://img.shields.io/badge/license-MIT-5fbf8f">
   <img alt="Claude Code 2.1.295 or later" src="https://img.shields.io/badge/Claude%20Code-%E2%89%A5%202.1.295-8f8cf4">
   <img alt="Terminal and desktop" src="https://img.shields.io/badge/surfaces-terminal%20%2B%20desktop-5fbf8f">
@@ -633,7 +633,7 @@ What it saves (task titles, goals, briefs, results and feedback, costs and times
 claude plugin update flowdeck@flowdeck-mod
 ```
 
-then `/reload-plugins` in open sessions. Every release raises `version` in `.claude-plugin/plugin.json`, so `update` always sees the new one. The panel's top row shows the version of the code that is running (`v1.0.0058`); after an update without a reload it still names the old one. [CHANGELOG.md](CHANGELOG.md) lists what each version changed.
+then `/reload-plugins` in open sessions. Every release raises `version` in `.claude-plugin/plugin.json`, so `update` always sees the new one. The panel's top row shows the version of the code that is running (`v1.0.0059`); after an update without a reload it still names the old one. [CHANGELOG.md](CHANGELOG.md) lists what each version changed.
 
 From 1.0.0036 or earlier: task tracking became a choice in 1.0.0037. An install that already ran flowdeck keeps its rule (`on`); see [Task tracking](#task-tracking) for how that is decided. `/flowdeck-agents` still opens the panel for this release; its new name is `/flowdeck-panel`.
 
