@@ -2,6 +2,9 @@
 
 Versions are `M.m.xxxx`; every build bumps the 4-digit build number. Details and rulings: `docs/ledger.md`, `docs/design.md`.
 
+## 1.0.0058 (2026-10-31)
+- README: a `/reload-plugins` typed while a turn is still running is queued and runs only when that turn ends, so the old code keeps showing until then (Troubleshooting and Install). The code is unchanged; every version from 1.0.0051 on loads in Claude Code 2.1.309, 2.1.312 and 2.1.316.
+
 ## 1.0.0057 (2026-10-31)
 - The panel tab's title reads `FlowDeck` (it read `flowdeck`).
 

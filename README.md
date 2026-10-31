@@ -11,7 +11,7 @@
 </p>
 
 <p align="center">
-  <img alt="Version 1.0.0057" src="https://img.shields.io/badge/version-1.0.0057-8f8cf4">
+  <img alt="Version 1.0.0058" src="https://img.shields.io/badge/version-1.0.0058-8f8cf4">
   <img alt="MIT license" src="https://img.shields.io/badge/license-MIT-5fbf8f">
   <img alt="Claude Code 2.1.295 or later" src="https://img.shields.io/badge/Claude%20Code-%E2%89%A5%202.1.295-8f8cf4">
   <img alt="Terminal and desktop" src="https://img.shields.io/badge/surfaces-terminal%20%2B%20desktop-5fbf8f">
@@ -80,7 +80,7 @@ claude plugin marketplace add paavu/flowdeck-mod
 claude plugin install flowdeck@flowdeck-mod
 ```
 
-Then run `/reload-plugins` in an open session (new sessions load the mod by themselves).
+Then run `/reload-plugins` in an open session while it is idle (new sessions load the mod by themselves).
 
 ### Other ways to install
 
@@ -633,7 +633,7 @@ What it saves (task titles, goals, briefs, results and feedback, costs and times
 claude plugin update flowdeck@flowdeck-mod
 ```
 
-then `/reload-plugins` in open sessions. Every release raises `version` in `.claude-plugin/plugin.json`, so `update` always sees the new one. The panel's top row shows the version of the code that is running (`v1.0.0057`); after an update without a reload it still names the old one. [CHANGELOG.md](CHANGELOG.md) lists what each version changed.
+then `/reload-plugins` in open sessions. Every release raises `version` in `.claude-plugin/plugin.json`, so `update` always sees the new one. The panel's top row shows the version of the code that is running (`v1.0.0058`); after an update without a reload it still names the old one. [CHANGELOG.md](CHANGELOG.md) lists what each version changed.
 
 From 1.0.0036 or earlier: task tracking became a choice in 1.0.0037. An install that already ran flowdeck keeps its rule (`on`); see [Task tracking](#task-tracking) for how that is decided. `/flowdeck-agents` still opens the panel for this release; its new name is `/flowdeck-panel`.
 
@@ -652,7 +652,7 @@ Saved flows stay in each project's `.claude/flowdeck/` folder (git-ignored), wit
 
 | Problem | Try |
 |---|---|
-| Nothing changed after install or update | `/reload-plugins`, or start a new session. Check `/plugin` lists `flowdeck` among the active mods. |
+| Nothing changed after install or update | `/reload-plugins`, or start a new session. Check `/plugin` lists `flowdeck` among the active mods. A `/reload-plugins` typed while a turn is still running is queued and runs only when that turn ends, so the old code keeps showing until then; run it when the session is idle, or wait for the turn to finish. |
 | The band is gone | Press `Band` in the panel's top row (`/flowdeck-panel` opens the panel). `✕` on the band only hides it. |
 | The band never shows, and `Band` cannot bring it back | Another mod that draws above the prompt and is listed before flowdeck in `enabledPlugins` (in `~/.claude/settings.json`) can answer the band without passing it on, so flowdeck's hook never runs. Mods nest in the order of `enabledPlugins`, first outermost: move `"flowdeck@flowdeck-mod": true` above such mods, then `/reload-plugins`. The `replay-theater` sample mod, for one, takes the band after a turn that edited files. |
 | A line `band error: …` under the top row | The band could not be drawn for that reason; flowdeck gives way to what other mods draw and says so once. `/reload-plugins` clears it. `claude --debug` logs the details. |
