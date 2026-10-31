@@ -23,5 +23,5 @@
 .c-explore.run .it{transform-origin:50% 100%;animation:fence .5s ease-in-out infinite}
 @keyframes fence{50%{transform:rotate(25deg)}}
 @media (prefers-reduced-motion: reduce){.run,.run g{animation:none!important}}
-</style><g transform="translate(1,0) scale(0.8)" opacity="1" shape-rendering="crispEdges"><g class="c-other"><g class="bd"><rect x="7" y="10" width="16" height="12" fill="#D97757"/><rect x="3" y="14" width="4" height="4" fill="#D97757"/><rect x="23" y="14" width="4" height="4" fill="#D97757"/><rect x="9" y="12" width="2" height="2" fill="#1F1E1D"/><rect x="19" y="12" width="2" height="2" fill="#1F1E1D"/></g><g class="la"><rect x="7" y="22" width="2" height="4" fill="#D97757"/><rect x="17" y="22" width="2" height="4" fill="#D97757"/></g><g class="lb"><rect x="11" y="22" width="2" height="4" fill="#D97757"/><rect x="21" y="22" width="2" height="4" fill="#D97757"/></g></g></g>
+</style><g transform="translate(1,0) scale(0.8)" opacity="1" shape-rendering="crispEdges"><g class="c-other"><g class="bd"><path d="M7 10h16v12h-16zM3 14h4v4h-4zM23 14h4v4h-4z" fill="#D97757"/><path d="M9 12h2v2h-2zM19 12h2v2h-2z" fill="#1F1E1D"/></g><g class="la"><path d="M7 22h2v4h-2zM17 22h2v4h-2z" fill="#D97757"/></g><g class="lb"><path d="M11 22h2v4h-2zM21 22h2v4h-2z" fill="#D97757"/></g></g></g>
 </svg>

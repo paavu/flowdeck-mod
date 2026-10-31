@@ -3,16 +3,35 @@
 A Claude Code mod that runs a session's work as a planned, delegated flow and shows it live: a band above the prompt, a side panel with the agents, context and usage, and an archive of past flows.
 
 <picture>
-  <source media="(prefers-color-scheme: dark)" srcset="docs/images/band-running-dark.png">
-  <img alt="The flowdeck band above the prompt: the running task, Tasks 2/4, the progress bar, 25%, the WARM cache chip with 42m left, the worker icon with the crew button and the dismiss button" src="docs/images/band-running-light.png">
+  <source media="(prefers-color-scheme: dark)" srcset="docs/images/band-overview-dark.png">
+  <img alt="The flowdeck band above the prompt: the running task, Tasks 2/4, the progress bar, 25%, the WARM cache chip with 42m left, the worker icon with the crew button and the dismiss button" src="docs/images/band-overview-light.png">
 </picture>
 
 <picture>
-  <source media="(prefers-color-scheme: dark)" srcset="docs/images/panel-active-dark.png">
-  <img alt="The flowdeck panel: Context and Usage sections, the tab row, a running worker with its steps open and a queued task with its handoff note open" src="docs/images/panel-active-light.png" width="520">
+  <source media="(prefers-color-scheme: dark)" srcset="docs/images/panel-overview-dark.png">
+  <img alt="The flowdeck panel: Context and Usage sections, the tab row, a running worker with its steps open and a queued task with its handoff note open" src="docs/images/panel-overview-light.png" width="520">
 </picture>
 
-The screenshots are rendered from the mod's own drawing code with sample data (see [Screenshots](#screenshots)); nothing in them comes from a real session.
+The screenshots are rendered from the mod's own drawing code with sample data (see [Screenshots](#screenshots)); nothing in them comes from a real session. In the feature sections below, each screenshot carries numbered circles, and the "What you see" list under it says what each number points at.
+
+## Features at a glance
+
+| Feature | What it shows or does |
+|---|---|
+| [Band](#the-band-above-the-prompt) | One row above the prompt: the running task, `Tasks X/Y`, a progress bar and percent, the cache chip, the running workers and a dismiss button. |
+| [Context](#context) | The context window as a stacked bar by category, with the point where auto-compaction runs. |
+| [Usage](#usage) | The five-hour and weekly limits as bars that drain, an even-pace mark, a forecast to the reset and the reset time. |
+| [WARM/COLD cache chip and card](#the-prompt-cache-chip-and-card) | Whether the prompt cache is still warm (minutes left) or cold (idle time and the cost of the next message), and a card with the cost per model. |
+| [Keep warm](#keep-warm) | Renews the prompt cache with one small side request during a long idle stretch; the card says when it renews and how often it did. |
+| [Track all tasks](#task-tracking) | One choice for every project: whether Claude reports every task to flowdeck. The Active tab asks on a fresh install; `/flowdeck:flowdeck` always works. |
+| [Panel top row and tabs](#the-panel) | Switches for Context, Usage, Band, Keep warm and Track tasks, the version, and the tabs `Active`, `Finished`, `Archive`, `Trash` with live counts. |
+| [Flows and workers](#flows-and-workers) | A flow is a task list the orchestrator plans and delegates to five worker tiers; each worker row shows its tier, model, effort, `after` waits, state, steps and times. |
+| [Handoff notes](#handoff-notes) | A note per task with Goal, Brief, Result and Feedback, opened with `ⓘ`. |
+| [Finished](#finished) | Runs that ended (Done, Error, Incomplete) and accepted tasks, latest first. |
+| [Archive](#archive-trash-and-empty-trash) | Every finished flow of the project, one foldable row each, kept in `.claude/flowdeck/`. |
+| [Trash and Empty Trash](#archive-trash-and-empty-trash) | Archived sessions can be moved to the Trash and restored; `Empty Trash` erases them for good after a confirmation. |
+| [Model routing and the Fable approval](#model-routing) | The orchestrator may pick a model per task; the Fable tier launches only after the user approves it in Claude Code's own dialog. |
+| [Commands](#commands) | `/flowdeck-panel`, `/flowdeck-rule on, off or status`, `/flowdeck:flowdeck <task>`. |
 
 ## Contents
 
@@ -72,7 +91,7 @@ To see what the mod hooks and calls before you install it, clone the repository 
 claude plugin update flowdeck@flowdeck-mod
 ```
 
-then `/reload-plugins` in open sessions. Every release raises `version` in `.claude-plugin/plugin.json`, so `update` always sees the new one. The panel's top row shows the version of the code that is running (`v1.0.0048`); after an update without a reload it still names the old one. [CHANGELOG.md](CHANGELOG.md) lists what each version changed.
+then `/reload-plugins` in open sessions. Every release raises `version` in `.claude-plugin/plugin.json`, so `update` always sees the new one. The panel's top row shows the version of the code that is running (`v1.0.0049`); after an update without a reload it still names the old one. [CHANGELOG.md](CHANGELOG.md) lists what each version changed.
 
 From 1.0.0036 or earlier: task tracking became a choice in 1.0.0037. An install that already ran flowdeck keeps its rule (`on`); see [Task tracking](#task-tracking) for how that is decided. `/flowdeck-agents` still opens the panel for this release; its new name is `/flowdeck-panel`.
 
@@ -104,109 +123,233 @@ The session model is the orchestrator: it reads the code, splits the work into s
 
 ## Features
 
-### `/flowdeck` and the worker tiers
-
-| Command | What it does |
-|---|---|
-| `/flowdeck <task>` | Starts a flow on the task: plan, design (when the task touches UI), delegate, review, close. A flow already open is saved and replaced. |
-| `/flowdeck` | With no task: adopts the work already under way in the session into a flow. |
-| `/flowdeck-panel` | Shows or hides the side panel. `/flowdeck-agents`, its old name, still works in this release. |
-| `/flowdeck-rule on`, `off`, `status` | Turns task tracking on or off for every project, or says what the current choice is and what it means (see [Task tracking](#task-tracking)). |
-
-The skill (`skills/flowdeck/SKILL.md`) tells the orchestrator how to plan, how to pick a tier and how to review. Five worker agents ship with the mod; the orchestrator picks the cheapest one likely to get the task right:
-
-| Agent | Model / effort | For |
-|---|---|---|
-| `flowdeck-light` | Sonnet / low | Mechanical edits, renames, config, running builds and tests |
-| `flowdeck-medium` | Sonnet / medium | Standard features, bug fixes with a known cause |
-| `flowdeck-careful` | Opus / high | Delicate work: multi-file refactors, invariants, many edge cases |
-| `flowdeck-heavy` | Opus / xhigh | Unfamiliar code, unclear root causes, non-obvious architecture |
-| `flowdeck-fable` | Fable / high | Used only after the user approved it, for a task that failed on Opus heavy |
-
-### Model routing
-
-Each tier has a default model (the table above). The orchestrator may pick another per task, with the Agent tool's `model` argument: `sonnet` for clear-spec work a test can check, `opus` for judgement and delicate or unfamiliar work, `haiku` only for pure search-and-run jobs. It sends the same value as the task's `model` in the plan (`sonnet`, `opus` or `haiku`; Fable is not selectable there), and a queued row then reads `<tier> · <Model> · <effort>` with that model instead of the tier's default. A running or finished row shows the worker's real model.
-
-A task that fails review on Sonnet goes to Opus careful (Opus heavy if the cause is unclear), one that fails on Opus careful to Opus heavy. One that fails on Opus heavy is never sent to Fable automatically: the orchestrator tells the user which task failed and why, and uses `flowdeck-fable` only after the user says yes. The orchestrator itself may run on any model.
-
-**Fable approval guard.** The rule above is also enforced in code, so it holds even if a model ignores the text. Every Agent launch that names `flowdeck-fable` (or `flowdeck:flowdeck-fable`) as `subagent_type`, or `fable` as `model`, is held while the mod asks the user, in Claude Code's own question dialog: `flowdeck wants to use Fable (the reserve tier) for: <task description>. Reason: <the start of the brief>. Approve?` with `Approve` and `Decline`. The orchestrator is told to state at the top of the Fable brief which task failed on Opus heavy and why; that text is the reason shown (first 300 characters). Approving lets that one launch run; the next Fable launch asks again. Declining, dismissing the question, or running where nobody can be asked (such as `claude -p`) denies the launch, and the orchestrator is told to keep the task on Opus heavy or report to the user, not to retry Fable. If the guard itself fails, the launch is denied. Every other Agent call passes through unchanged. The guard is always on, independent of task tracking, and has no setting to turn it off.
-
-Tasks that edit the same files are chained with `after` and never run in parallel. Workers never make design decisions unless the brief gives them one.
-
-### Tools the model calls
-
-| Tool | Called by | Purpose |
-|---|---|---|
-| `mcp__flowdeck__progress` | the main session | The flow's title and phase, its tasks (`title`, `tier`, `after`, `goal`), `add` for a new task, `done: [numbers]` for accepted tasks, `notes` for handoff notes, `finished` and `restart`. One call can carry `add`, `done` and `notes` together. |
-| `mcp__flowdeck__step` | workers | A worker's own plan as a `steps` list, then `next`, `done`, `active`, `failed`. |
-
-The flow's task list is the only task list: there is no separate plan tool.
+Each section below has a screenshot with numbered circles, a "What you see" list that says what each number points at, and a short "How to use".
 
 ### The band above the prompt
 
 <picture>
-  <source media="(prefers-color-scheme: dark)" srcset="docs/images/band-done-dark.png">
-  <img alt="The band of a finished flow: FlowDeck, the full green bar, Done, 100%" src="docs/images/band-done-light.png">
+  <source media="(prefers-color-scheme: dark)" srcset="docs/images/band-running-dark.png">
+  <img alt="The band of a running flow with nine numbered callouts: the title, the progress bar, the Tasks 2/4 label, the percent, the WARM chip, the cache chevron, the worker icon, the running-workers button and the dismiss button" src="docs/images/band-running-light.png">
 </picture>
 
-One row for the open flow:
+One row for the open flow.
 
-- **Title**: the running task's title (the lowest-numbered one and ` +N` when several run), else the next ready task, else `FlowDeck` once every task is done. It is never the flow's own title.
-- **`Tasks X/Y`, the bar and the percent**: Y counts every row the panel's tabs count; X is the running task's number while one runs, else the done count. The bar and the percent are the done fraction. The bar turns green when the flow is finished (`Done`).
-- **Cache chip**: `WARM` or `COLD` with the time left or the idle time and cost (see below).
-- **Worker icon and `×N`**: `×N` counts the workers running now (queued tasks and finished runs do not count; `×0` when none runs). The worker icon beside it walks while at least one worker runs and stands still otherwise. Pressing the button opens or closes the panel.
-- **`✕`**: hides the band only. The panel's `Band` button, or a new flow, brings it back.
+What you see:
+
+1. The dot and the title: the running task's title (the lowest-numbered one and ` +N` when several run), else the next ready task, else `FlowDeck` once every task is done. It is never the flow's own title. The dot is blue-violet while the flow runs and green when it is finished.
+2. The bar: the dense dots are the done share; the faint dots beyond them are tasks handed to workers and not yet accepted; the small ticks mark the task boundaries still ahead.
+3. The label on the bar: the phase word and a count, `Tasks X/Y`. Y counts every row the panel's tabs count; X is the running task's number while one runs, else the done count. The phase word becomes `Plan`, `Design` or `Review` in those phases.
+4. The percent: the done fraction. The bar and the label turn green and read `Done` when the flow is finished.
+5. The cache chip: `WARM` (red) with the minutes left, or `COLD` (blue) with the idle time and the cost of the next message. See [the cache chip and card](#the-prompt-cache-chip-and-card).
+6. The chevron: opens and folds the cache card under the band.
+7. The worker icon: walks while at least one worker runs and stands still otherwise.
+8. `×N`: the workers running now (queued tasks and finished runs do not count; `×0` when none runs). Pressing it opens or closes the panel.
+9. `✕`: hides the band only. The panel's `Band` switch, or a new flow, brings it back.
+
+How to use:
+
+- Look at it for where the flow stands; press `×N` for the panel and the chevron for the cache card.
+- `✕` hides the band; press `● Band` in the panel's top row to show it again.
+
+A finished flow:
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/images/band-done-dark.png">
+  <img alt="The band of a finished flow with five numbered callouts: FlowDeck, the full green bar, Done, 100% and the zero running workers" src="docs/images/band-done-light.png">
+</picture>
+
+What you see:
+
+1. `FlowDeck`: every task is done, so no task title is left to show.
+2. The bar, full and green.
+3. `Done`: the label on the bar.
+4. `100%`.
+5. `×0`: no worker is running; the worker icon stands still.
+
+### Context
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/images/panel-context-dark.png">
+  <img alt="The Context section with four numbered callouts: the head line, the stacked bar, the autocompact buffer at the end of the bar and the legend" src="docs/images/panel-context-light.png" width="520">
+</picture>
+
+The context window of the session, as Claude Code reports it. The section is the panel's first one; `▼ Context` in the top row folds it (folded, it keeps the head line and the bar).
+
+What you see:
+
+1. The head line: tokens used of the window (`412k of 1M`), where auto-compaction runs (`compacts at 950k`) and the used share (`41%`).
+2. The bar: the window as a stacked bar, one colour per category (system prompt, system tools, messages).
+3. The end of the bar: the autocompact buffer, the room kept for compaction, and the free space before it.
+4. The legend: each category with its tokens and share; a hollow square marks free space and the buffer.
+
+How to use: read it to see how close the session is to compaction. Press `▼ Context` to fold it; the choice is remembered.
+
+### Usage
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/images/panel-usage-dark.png">
+  <img alt="The Usage section with eight numbered callouts: the Current session heading, its reset text and reset switch, the draining bar, the even-pace mark, the forecast lines, the percent left and the This week heading" src="docs/images/panel-usage-light.png" width="520">
+</picture>
+
+The five-hour and weekly rate limits of a Claude subscription (Pro, Max). Without one the section says there is no data yet.
+
+What you see:
+
+1. `Current session`: the five-hour window. The week below it is the seven-day window.
+2. The reset as time left (`Resets in 2h 20m`).
+3. `◷`: switches every project between time left and the exact time (`Resets at 14:40`).
+4. The bar: it drains with use, so its length is what is left. It is amber for the session and blue for the week, and red at 90% used or when the forecast says the limit runs out. The faint strips mark the part of what is left that the forecast says will be used up by the reset: a strip along the bar for the recent pace, a thin one under it for the average.
+5. The even-pace mark: where the fill would end if the use were spread evenly over the window. A fill that ends left of the mark means the use is ahead of an even pace; right of it, behind.
+6. The forecast: `on pace`, or when the limit would run out (`100% at 14:05, 1h 10m early`); the session shows `recent:` (the last 30 minutes, `gathering…` until there are 5 minutes of readings) and `average:` (since the window began), the week only the average.
+7. `62% left`: the percent left.
+8. `This week`: the weekly window, drawn the same way.
+
+How to use: look at the mark and the forecast before a long task. Press `◷` to see the reset as a clock time; `▼ Usage` folds the section.
 
 ### The prompt cache chip and card
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="docs/images/cache-warm-dark.png">
-  <img alt="The cache card, warm: idle 18m, 412k tokens cached, cold in 42m, keep warm renews at a given time, and the next message's cost on four models" src="docs/images/cache-warm-light.png">
+  <img alt="The cache card, warm, with eight numbered callouts: the WARM chip, idle time and cached tokens, the hour bar with cold in 42m, the keep warm line, the renewal and cold costs, the next-message caption with the four model costs, the YOU marker and the estimates note" src="docs/images/cache-warm-light.png">
 </picture>
+
+Once the main thread has made a request, the chip says `WARM` (red) for an hour after its last request or keep warm's last renewal, then `COLD` (blue). Warm, it shows the minutes left (`42m left`); cold, the idle time and what the next message costs on the session's model (`3h 13m · $3.30`). Subagent requests do not count; `/clear` and `/compact` drop the chip until the next request. Warm starts folded, cold starts open.
+
+What you see (the open card, warm):
+
+1. The chip: `WARM`.
+2. The idle time since the main thread's last request (a renewal does not reset it) and the tokens the cache holds.
+3. The hour as a bar, with the time left (`cold in 42m`).
+4. Keep warm's state (see [Keep warm](#keep-warm)).
+5. What one renewal costs, beside what a cold restart costs.
+6. The next message's cost on Fable, Opus, Sonnet and Haiku; the caption names the case (`cache read` when warm).
+7. `YOU`: the session's model.
+8. `prices are estimates`: one table, `MODELS` in `hooks/cache.ts` (USD per million tokens, input and cache read); a cold cache costs the 1-hour cache write (2x input), a warm one a cache read.
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="docs/images/cache-cold-dark.png">
-  <img alt="The cache card, cold: idle 3h 13m, cold for 33m, kept warm twice, limit reached, and the 1-hour cache write cost on four models" src="docs/images/cache-cold-light.png">
+  <img alt="The cache card, cold, with six numbered callouts: the COLD chip, idle time and cached tokens, the full bar with cold for 33m, kept warm twice with the limit reached, the renewal and cold costs, and the 1-hour write caption with the four model costs" src="docs/images/cache-cold-light.png">
 </picture>
 
-Once the main thread has made a request, the chip says `WARM` (red) for an hour after its last request or keep warm's last renewal, then `COLD` (blue). Warm, it shows the minutes left (`42m left`); cold, the idle time and what the next message costs on the session's model (`3h 13m · $3.30`). Subagent requests do not count; `/clear` and `/compact` drop the chip until the next request.
+What you see (cold):
 
-The small chevron after the chip opens a card: idle time and cached tokens, the hour as a bar, keep warm's state, what one renewal costs beside a cold restart, and the next message's cost on Fable, Opus, Sonnet and Haiku with the session's model marked `YOU`. Warm starts folded, cold starts open. The prices are estimates from one table, `MODELS` in `hooks/cache.ts` (USD per million tokens, input and cache read): a cold cache costs the 1-hour cache write (2x input), a warm one a cache read.
+1. The chip: `COLD`.
+2. The idle time (`3h 13m`) and the tokens that would be written again.
+3. The bar, full, with how long the cache has been cold (`cold for 33m`).
+4. Keep warm's record: here two renewals, then `limit reached`.
+5. The renewal cost beside the cold restart cost.
+6. The caption (`next message, re-cache (1-hour write)`) and the cost on each of the four models.
+
+How to use: press the chevron after the chip to open or fold the card. When the chip is `COLD`, the next message writes the context to the cache again at the cost shown.
 
 ### Keep warm
 
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/images/cache-keep-warm-dark.png">
+  <img alt="Three cache cards with the keep warm line numbered: waiting for a renewal (keep warm: renews at 19:42), after one renewal (kept warm x1, renews at 20:32) and switched off (keep warm: off)" src="docs/images/cache-keep-warm-light.png">
+</picture>
+
 Keeps the prompt cache warm through a long idle stretch so the next message reads the context from the cache instead of writing it again.
+
+What you see (the keep warm line of the card):
+
+1. `keep warm: renews at 19:42`: on, waiting for the renewal time.
+2. `kept warm ×1 · renews at 20:32`: one renewal done, the next one due.
+3. `keep warm: off`: the switch is off. The line can also read `failed` (with `retry at <time>`), `limit reached`, `below 80k tokens` or `not renewed`; after renewals it starts with `kept warm ×N`.
+
+How to use: the `● Keep warm` switch in the panel's top row turns it on or off; it is on by default and saved per project folder. Watch the line on the open card.
 
 - **How**: one side request through `$.model.fork`: the main thread's last request again with a one-line prompt asking for `ok`, no tools. Nothing is added to the transcript.
 - **When**: 50 minutes after the cache was last read or written (`RENEW_AT_MS`), when the context holds at least 80,000 tokens (`KEEP_WARM_MIN_TOKENS`), no main turn is running and the user has sent nothing since. At most 2 renewals between two of the user's messages (`KEEP_WARM_MAX_RENEWALS`), so an idle session stays warm for about 2 h 40 min, then goes cold.
 - **Never**: while the cache is already cold, in the hour's last minute, after the session ended, or with the switch off.
 - **Failures**: a failed renewal waits 2 minutes and tries again; after 2 failures in one idle stretch it stops until the user's next message. The card says `failed`; it never shows as an error.
 - **Cost**: a renewal is a real request. It costs about a cache read of the context (two renewals of a 770k-token Opus context are about $0.30, against about $6.16 to write it again) and **counts against the plan's usage limits** like any other message.
-- **Switch**: `Keep warm` in the panel's top row, on by default, saved per project folder. The constants are at the top of `hooks/cache.ts`.
+- **Switch**: the constants are at the top of `hooks/cache.ts`.
 
 ### The panel
 
 The panel opens with `/flowdeck-panel`, the band's `×N` button, or by itself when the first worker of a flow starts.
 
-**Top row**: `▼ Context`, `▼ Usage`, `● Band`, `● Keep warm` and `● Track tasks`, with the running version (`v1.0.0048`) at the far end. Context and Usage fold their sections and remember the choice (`▼` open, `▶︎` folded, the same glyphs as every fold in the panel); Band, Keep warm and Track tasks are dot switches (`●` on or shown, `○` off or hidden). Band shows or hides the band; Track tasks turns task tracking on or off (`○` until it is on).
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/images/panel-toggles-dark.png">
+  <img alt="The panel's top row twice, with every switch on and with every switch off; six numbered callouts: Context, Usage, Band, Keep warm, Track tasks and the version" src="docs/images/panel-toggles-light.png" width="520">
+</picture>
 
-| Section | Shows |
-|---|---|
-| Context | The context window as a stacked bar by category, tokens per category and where auto-compaction runs. Folded, it keeps the head line and the bar. |
-| Usage | The five-hour and weekly limits: a bar that drains with use, percent left, an even-pace mark, a forecast to the reset (`on pace`, or when the limit would run out), and the reset as time left (`Resets in 2h 20m`). The `◷` button switches to the exact time (`Resets at 14:40`) for all projects. |
+The top row, with every switch on and then off.
 
-**Tabs**: `Active (n)`, `Finished (n)`, `Archive (n)`, `Trash (n)`. One list shows at a time; each count is live.
+What you see:
+
+1. `▼ Context`: folds the Context section (`▶︎` when folded, the same glyphs as every fold in the panel). Remembered.
+2. `▼ Usage`: folds the Usage section. Remembered.
+3. `● Band`: shows or hides the band (`○` hidden).
+4. `● Keep warm`: keep warm on or off, per project folder.
+5. `● Track tasks`: task tracking on or off for every project (`○` until it is on). See [Task tracking](#task-tracking).
+6. The version of the code that is running.
+
+How to use: press a switch to flip it; `●` is on or shown, `○` is off or hidden.
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/images/panel-tabs-dark.png">
+  <img alt="The tab row and the three tiles of the Active tab, with three numbered callouts: the selected tab, another tab with its count and the cost, tokens and time tiles" src="docs/images/panel-tabs-light.png" width="520">
+</picture>
+
+What you see:
+
+1. The selected tab, bold, in the accent colour and underlined; pressing it changes nothing.
+2. The other tabs, each with its live count: `Active (n)`, `Finished (n)`, `Archive (n)`, `Trash (n)`. One list shows at a time.
+3. The tiles: the flow's estimated cost, its tokens and its time.
+
+How to use: press a tab to change the list.
 
 | Tab | Lists |
 |---|---|
 | Active | The flow's cost, tokens and time, then the running workers (newest first) and the queued tasks in plan order. |
 | Finished | Done, Error and Incomplete runs and `Accepted · no worker run` rows, latest first. The rows move to the Archive on their own when the flow closes. |
 | Archive | Saved sessions of this project, newest first, one foldable row each; an opened row shows its tasks one level in under it. |
-| Trash | Sessions moved to the trash, with `Restore` and `Empty Trash (n)`. |
+| Trash | Sessions moved to the trash, with `↩` and `Empty Trash (n)`. |
 
-### Flow rows
+### Commands
 
-Each worker run is a row: its tier's pixel crab, the task number and title, model, effort and the tasks it waits for (`Opus 5.5 · high · after 1`), context use, tokens, estimated cost and time, and a state in colour:
+| Command | What it does |
+|---|---|
+| `/flowdeck-panel` | Shows or hides the side panel. `/flowdeck-agents`, its old name, still works in this release. |
+| `/flowdeck-rule on`, `off`, `status` | Turns task tracking on or off for every project, or says what the current choice is and what it means (see [Task tracking](#task-tracking)). |
+| `/flowdeck:flowdeck <task>` | Starts a flow on the task: plan, design (when the task touches UI), delegate, review, close. A flow already open is saved and replaced. Works whatever the tracking choice. |
+| `/flowdeck:flowdeck` | With no task: adopts the work already under way in the session into a flow. |
+
+The skill (`skills/flowdeck/SKILL.md`) tells the orchestrator how to plan, how to pick a tier and how to review.
+
+### Flows and workers
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/images/panel-flow-dark.png">
+  <img alt="A running worker row with its steps open and two queued task rows, with fifteen numbered callouts: fold glyph, title, note icon, tier model effort and after, statistics, state mark, state line, bar, step list, times, the batch dash, a queued row with its note open, the goal, the queued row's meta line and a ready row with a Haiku model" src="docs/images/panel-flow-light.png" width="520">
+</picture>
+
+A flow is the session's task list. The orchestrator plans it, delegates each task to one of five worker agents and reviews every result; the panel draws each worker run as a row.
+
+What you see:
+
+1. The fold glyph (`▼` open, `▶︎` folded): opens or closes the worker's steps.
+2. The task number and title. Queued rows are dim.
+3. `ⓘ`: opens the task's handoff note.
+4. `careful Opus 5.5 · high · after 1`: the tier (coloured), the model, the effort and the tasks it waits for (`after 1`, `after 2, 3`).
+5. `ctx 4% · 45k ≈$0.15 24:00`: context use, tokens, estimated cost and the time the run has taken.
+6. The state mark: `●` running, `✓` done, `✗` error, `◐` incomplete, `◷` queued.
+7. The state word in colour, with the step now worked on out of the step count and its title (`Running · 3/5 · Add retry with backoff`); with no step, the live tool (`Running · Bash`).
+8. The bar: fills as the worker finishes steps. A worker sends its plan once and moves it as each step finishes.
+9. The steps, each with its mark: `✓` done, a dot for the running one, a grey dot for the ones still to do.
+10. The time a step took.
+11. A step not started shows no time. It shows `–` instead of a time when the worker closed it in the same call as other steps it never started (a batch close at the end): the mod does not guess how long those took.
+12. A queued task with its note open (`ⓘ`).
+13. The note's Goal: queued rows have it from the moment the task is planned.
+14. A queued row's line: the tier, the model and effort the task will run with, and what it waits for. `◷` at the end marks it as queued.
+15. A queued task with a model of its own (here `Haiku`) and `ready`: every task it waits for is done, so it can start now, in parallel with others.
+
+How to use:
+
+- Press the fold glyph to read a worker's steps and `ⓘ` for its note; nothing needs pressing to follow a flow.
+- To keep the list current, the mod adds one line to a worker's tool result ("update your step list now") after 8 tool calls without a step call; the user never sees that line.
 
 | State | Colour |
 |---|---|
@@ -216,18 +359,55 @@ Each worker run is a row: its tier's pixel crab, the task number and title, mode
 | Incomplete (ended, steps left) | amber |
 | Error | red |
 
-The chevron before the name folds out the worker's steps, each with its mark and how long it took. A worker sends its plan once and moves it as each step finishes, so the bar fills as the work goes. A step shows `–` instead of a time when the worker closed it in the same call as other steps it never started (a batch close at the end): the mod does not guess how long those took. To keep the list current, the mod adds one line to a worker's tool result ("update your step list now") after 8 tool calls without a step call; the user never sees that line. A queued task shows `ready` once everything it waits for is done: those can start now, in parallel. A finished row shows when it finished (`14:07`, or `Oct 29 · 14:07` on an earlier day).
+A finished row shows when it finished (`14:07`, or `Oct 29 · 14:07` on an earlier day). The mod links each run to its planned task by itself: by the `#n` at the start of the Agent description, else the exact title, else the closest title, else the only open task of the worker's tier.
 
-The mod links each run to its planned task by itself: by the `#n` at the start of the Agent description, else the exact title, else the closest title, else the only open task of the worker's tier.
+Five worker agents ship with the mod; the orchestrator picks the cheapest one likely to get the task right:
+
+| Agent | Model / effort | For |
+|---|---|---|
+| `flowdeck-light` | Sonnet / low | Mechanical edits, renames, config, running builds and tests |
+| `flowdeck-medium` | Sonnet / medium | Standard features, bug fixes with a known cause |
+| `flowdeck-careful` | Opus / high | Delicate work: multi-file refactors, invariants, many edge cases |
+| `flowdeck-heavy` | Opus / xhigh | Unfamiliar code, unclear root causes, non-obvious architecture |
+| `flowdeck-fable` | Fable / high | Used only after the user approved it, for a task that failed on Opus heavy |
+
+Tasks that edit the same files are chained with `after` and never run in parallel. Workers never make design decisions unless the brief gives them one.
+
+#### Tools the model calls
+
+| Tool | Called by | Purpose |
+|---|---|---|
+| `mcp__flowdeck__progress` | the main session | The flow's title and phase, its tasks (`title`, `tier`, `after`, `goal`), `add` for a new task, `done: [numbers]` for accepted tasks, `notes` for handoff notes, `finished` and `restart`. One call can carry `add`, `done` and `notes` together. |
+| `mcp__flowdeck__step` | workers | A worker's own plan as a `steps` list, then `next`, `done`, `active`, `failed`. |
+
+The flow's task list is the only task list: there is no separate plan tool.
+
+#### Automatic flow lifecycle
+
+There are no Start or Finish buttons.
+
+- **Start**: the first `progress` call starts a flow. So does a task list (TodoWrite or TaskCreate) with an open item, or a flowdeck worker launched while no flow is open.
+- **Finish**: when the main turn ends with every task done and no worker running, the flow finishes by itself. A flow with nothing running or queued finishes after 30 minutes idle (`IDLE_FINISH_MS` in `hooks/live.ts`). A finished flow is archived at once and stays in Finished and on the band (`Done`) until the next task starts a new flow.
+- **Across restarts**: the open flow is written to `.claude/flowdeck/flow-live.json` as it changes. The next session restores its own flow, and closes and archives a flow another session left once that session ended or has been quiet for 3 minutes. Runs that were still going read `Running at finish`.
 
 ### Handoff notes
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="docs/images/panel-finished-dark.png">
-  <img alt="The Finished tab: an accepted task with its note open, showing Goal, Brief, Result and Feedback" src="docs/images/panel-finished-light.png" width="520">
+  <img alt="The Finished tab: an accepted task with its note open, with five numbered callouts: the note icon, Goal, Brief, Result and Feedback" src="docs/images/panel-finished-light.png" width="520">
 </picture>
 
 Every task row can carry a short note so whoever reviews the list knows what each task was about and how it ended. Below, "the orchestrator" is the Claude session running `/flowdeck`, and "the mod" is flowdeck itself.
+
+What you see:
+
+1. `ⓘ`: opens the note directly under the task's title, above the worker line, the progress bar and the steps. Every row with a note, queued, running, finished or archived, has it.
+2. Goal: the optimized summary of the user's request.
+3. Brief: the start of the worker's delegation prompt, taken by the mod.
+4. Result: what was achieved.
+5. Feedback: the orchestrator's short review.
+
+How to use: press `ⓘ` to open the note and again to close it.
 
 | Part | Written by | When |
 | --- | --- | --- |
@@ -236,41 +416,123 @@ Every task row can carry a short note so whoever reviews the list knows what eac
 | Result | the orchestrator: what was achieved | when it accepts the task |
 | Feedback | the orchestrator: a short review | when it accepts the task |
 
-Caps: goal 300, brief 600, result 300 and feedback 300 characters; the mod cleans each part to plain text and cuts it at a word with `…`, whatever the caller sends. Every row with a note, queued, running, finished or archived, has a dim `ⓘ` after its name; pressing it opens the note directly under the task's title, above the worker line, the progress bar and the steps.
+Caps: goal 300, brief 600, result 300 and feedback 300 characters; the mod cleans each part to plain text and cuts it at a word with `…`, whatever the caller sends.
 
 The brief leaves out headings, code fences and common preamble lines (repository line, tool and commit rules, the step-list closing line) and keeps the start of the real task text; a return round's prompt replaces it until the task is accepted. The orchestrator can change any part later through `notes` (an empty string clears it), but a finished flow takes no notes. Notes are saved with the flow, so the Archive shows them too.
 
-### Automatic flow lifecycle
+### Finished
 
-There are no Start or Finish buttons.
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/images/panel-finished-list-dark.png">
+  <img alt="The Finished tab with one finished run, with eight numbered callouts: the tab, the fold glyph, the note icon, the finish time, the Done state with its step count, the green bar, the statistics and the check mark" src="docs/images/panel-finished-list-light.png" width="520">
+</picture>
 
-- **Start**: the first `progress` call starts a flow. So does a task list (TodoWrite or TaskCreate) with an open item, or a flowdeck worker launched while no flow is open.
-- **Finish**: when the main turn ends with every task done and no worker running, the flow finishes by itself. A flow with nothing running or queued finishes after 30 minutes idle (`IDLE_FINISH_MS` in `hooks/live.ts`). A finished flow is archived at once and stays in Finished and on the band (`Done`) until the next task starts a new flow.
-- **Across restarts**: the open flow is written to `.claude/flowdeck/flow-live.json` as it changes. The next session restores its own flow, and closes and archives a flow another session left once that session ended or has been quiet for 3 minutes. Runs that were still going read `Running at finish`.
+Runs that ended: `Done`, `Error` and `Incomplete` runs, and `Accepted · no worker run` rows, latest first. The flow's rows move to the Archive on their own when the flow closes.
 
-### Archive and Trash
+What you see:
+
+1. The `Finished (n)` tab with its live count.
+2. The fold glyph (`▶︎` folded): opens the run's steps; then the task number and title.
+3. `ⓘ`: the handoff note.
+4. When the run finished (`18:17`, or `Oct 29 · 14:07` on an earlier day).
+5. The end state in colour with its step count: `Done · 3/3`.
+6. The bar, full and green for a done run.
+7. Context use, tokens, estimated cost and time.
+8. The state mark (`✓`).
+
+How to use: open a row's note or steps to review it; there is nothing to press to archive, the flow does it when it closes.
+
+### Archive, Trash and Empty Trash
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="docs/images/panel-archive-dark.png">
-  <img alt="The Archive tab: the newest session open with its finished runs, an older session folded, and the confirmation to move a third session to the trash" src="docs/images/panel-archive-light.png" width="520">
+  <img alt="The Archive tab with seven numbered callouts: the tab, an opened session row, its trash can, a task of the opened session, a folded session, the move-to-trash confirmation and its button" src="docs/images/panel-archive-light.png" width="520">
 </picture>
+
+What you see (Archive):
+
+1. The `Archive (n)` tab: the saved sessions of this project.
+2. A session row: the fold glyph, the date and time the session ended, and the number of tasks. Opened, it shows cost, tokens and time as three tiles and its tasks below.
+3. The trash can: asks before moving the session to the Trash.
+4. A task of the opened session, one level in under its row (number, title, `ⓘ`, finish time, steps).
+5. A folded session: its cost, tokens and time as one dim line.
+6. The confirmation: what the session is, and what moving it does (it leaves the Archive and shows in the Trash tab; its file is copied to `.claude/flowdeck/.trash/`; nothing is erased).
+7. `Move to trash` (or `Cancel`).
+
+How to use: fold or open a session row to read it; press the trash can and then `Move to trash` to put a session away.
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="docs/images/panel-trash-dark.png">
-  <img alt="The Trash tab: Empty Trash (2) and two trashed sessions, each with Restore" src="docs/images/panel-trash-light.png" width="520">
+  <img alt="The Trash tab with four numbered callouts: the tab, Empty Trash (2), a trashed session and the restore arrow" src="docs/images/panel-trash-light.png" width="520">
 </picture>
 
-- **Archive**: one file per saved session (a flow, or a finished plan an older version saved) in `.claude/flowdeck/archive/`, listed by `archive-index.json`. The list draws from the index alone; a session's file is read only when its row is opened. A folded row shows its cost, tokens and time as one dim line; an opened session shows them as the same three tiles the Active and Finished tabs use (the terminal keeps the one line). The archive icon (`⤓`) on a finished row archives it and every older finished row early, while the flow runs.
+What you see (Trash):
+
+1. The `Trash (n)` tab.
+2. `Empty Trash (2)`: erases every trashed session for good, after a confirmation.
+3. A trashed session, laid out as in the Archive.
+4. `↩`: asks first, then moves the session back to the Archive.
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/images/panel-trash-confirm-dark.png">
+  <img alt="The Empty Trash confirmation: Erase 2 sessions for good? This cannot be undone, with the buttons Erase and Cancel, numbered" src="docs/images/panel-trash-confirm-light.png" width="520">
+</picture>
+
+What you see (after `Empty Trash`):
+
+1. `Erase 2 sessions for good? This cannot be undone.` (`Erase 1 session…` for one).
+2. `Erase`: erases the sessions.
+3. `Cancel`: nothing happens. Leaving the Trash tab also cancels.
+
+How to use: press the `↩` of a session to restore it, or `Empty Trash (n)` and then `Erase` to remove all of them.
+
+- **Archive**: one file per saved session (a flow, or a finished plan an older version saved) in `.claude/flowdeck/archive/`, listed by `archive-index.json`. The list draws from the index alone; a session's file is read only when its row is opened. A folded row shows its cost, tokens and time as one dim line; an opened session shows them as the same three tiles the Active and Finished tabs use (the terminal keeps the one line).
 - **Move to trash** (the trash can on a session row): asks first, then copies the session to `.claude/flowdeck/.trash/` and hides it from the Archive. Nothing is erased.
 - **Restore** (`↩` on a Trash row): asks first, then moves the session back to the Archive.
 - **Empty Trash (n)**: asks `Erase n sessions for good? This cannot be undone.` with `Erase` / `Cancel`, then erases each trashed session's files permanently, with no system trash and no undo. This is the only place flowdeck deletes a file. It erases only files whose names the archive itself gives the trashed sessions, directly inside `.trash/` or `archive/`, never a link, one file at a time; a session that cannot be erased whole stays in the Trash and the tab says how many failed.
 
+### Model routing
+
+Each tier has a default model (the table under [Flows and workers](#flows-and-workers)). The orchestrator may pick another per task, with the Agent tool's `model` argument: `sonnet` for clear-spec work a test can check, `opus` for judgement and delicate or unfamiliar work, `haiku` only for pure search-and-run jobs. It sends the same value as the task's `model` in the plan (`sonnet`, `opus` or `haiku`; Fable is not selectable there), and a queued row then reads `<tier> · <Model> · <effort>` with that model instead of the tier's default (callout 15 in the flow row above). A running or finished row shows the worker's real model.
+
+A task that fails review on Sonnet goes to Opus careful (Opus heavy if the cause is unclear), one that fails on Opus careful to Opus heavy. One that fails on Opus heavy is never sent to Fable automatically: the orchestrator tells the user which task failed and why, and uses `flowdeck-fable` only after the user says yes. The orchestrator itself may run on any model.
+
+**Fable approval guard.** The rule above is also enforced in code, so it holds even if a model ignores the text. Every Agent launch that names `flowdeck-fable` (or `flowdeck:flowdeck-fable`) as `subagent_type`, or `fable` as `model`, is held while the mod asks the user, in Claude Code's own question dialog: `flowdeck wants to use Fable (the reserve tier) for: <task description>. Reason: <the start of the brief>. Approve?` with `Approve` and `Decline`. That dialog belongs to Claude Code, not to the mod, so it has no screenshot here. The orchestrator is told to state at the top of the Fable brief which task failed on Opus heavy and why; that text is the reason shown (first 300 characters). Approving lets that one launch run; the next Fable launch asks again. Declining, dismissing the question, or running where nobody can be asked (such as `claude -p`) denies the launch, and the orchestrator is told to keep the task on Opus heavy or report to the user, not to retry Fable. If the guard itself fails, the launch is denied. Every other Agent call passes through unchanged. The guard is always on, independent of task tracking, and has no setting to turn it off.
+
+How to use: answer the dialog when it appears; `Approve` runs that one Fable launch, `Decline` keeps the task on Opus heavy.
+
 ## Task tracking
+
+A fresh install has not chosen yet; the Active tab asks:
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/images/panel-tracking-unset-dark.png">
+  <img alt="The Active tab on a fresh install: the question Track every task in flowdeck?, what tracking does and costs, and the buttons Track all tasks and Not now above the empty list" src="docs/images/panel-tracking-unset-light.png" width="520">
+</picture>
+
+What you see:
+
+1. The question. It shows on the Active and Finished tabs until the user chooses; until then the mod adds nothing to the system prompt.
+2. What tracking does and what it costs in tokens, and when a switch applies (a new session, `/clear` or a compaction).
+3. `Track all tasks`: turns tracking on for every project.
+4. `Not now`: turns it off; the strip then says `Task tracking is off`.
+
+How to use: press `Track all tasks` to have every task reported, or `Not now` to leave it off and still start flows with `/flowdeck:flowdeck <task>`.
+
+With tracking off, the strip stays as a reminder with one button:
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="docs/images/panel-tracking-off-dark.png">
   <img alt="The Active tab with task tracking off: the heading Task tracking is off, what tracking does and costs, and the Track all tasks button above the empty list" src="docs/images/panel-tracking-off-light.png" width="520">
 </picture>
+
+What you see:
+
+1. `Task tracking is off`: the current choice.
+2. The same explanation as on a fresh install.
+3. `Track all tasks`: turns tracking on. The `● Track tasks` switch in the panel's top row does the same, and `/flowdeck-rule on` or `off` from the prompt.
+
+How to use: switch tracking from the strip, the top row or `/flowdeck-rule`; the choice is kept for every project.
 
 Task tracking decides whether the mod puts its flow rule (`flowdeck:flow-rule`) into the system prompt of every session. The rule tells Claude to report every task through `progress`: the plan once with `title` and `tasks` (`title`, `tier`, `after` for tasks that edit the same files, `goal`), `add` for a new task, `done` with `result` and `feedback` notes when a task is accepted, and `#<n> <title>` at the start of each worker's Agent description; a question or a one-step edit gets no flow. It blocks no edit or tool call.
 
@@ -387,6 +649,7 @@ claude plugin validate .        # ✔ Validation passed
 claude plugin test .            # the whole suite
 sh scripts/check-version.sh     # the three version places agree
 sh scripts/check-rules.sh       # SKILL.md carries every flow rule by itself
+sh scripts/check-readme.sh      # README images exist, have alt text, and each legend matches its callouts
 ```
 
 To run your working copy, add the folder as a marketplace (`claude plugin marketplace add ./flowdeck-mod`, then install `flowdeck@flowdeck-mod`): a folder marketplace is read in place, so `/reload-plugins` picks up edits. Or start a session with `claude --plugin-dir ./flowdeck-mod`.
@@ -402,11 +665,13 @@ To run your working copy, add the folder as a marketplace (`claude plugin market
 
 **Versions** are `M.m.xxxx`: every build raises the 4-digit build number. A release changes three places together: `version` in `.claude-plugin/plugin.json`, `VERSION` in `hooks/version.ts` and a new top heading in `CHANGELOG.md`. `tests/version.test.tsx` fails when the first two differ; `scripts/check-version.sh` checks all three.
 
-**Releasing**: bump the version, run `claude plugin test .`, `claude plugin validate .` and `sh scripts/check-version.sh`, commit, tag `v<version>` and push the tag.
+**Releasing**: bump the version, run `claude plugin test .`, `claude plugin validate .`, `sh scripts/check-version.sh` and `sh scripts/check-readme.sh`, commit, tag `v<version>` and push the tag.
 
 ### Screenshots
 
-`sh scripts/screenshots.sh` renders the images in `docs/images/`. It runs `scripts/screenshots/shots.tsx` through the engine's test kit (sample flows, a warm and a cold cache, archive sessions; no real session data), prints each drawn tree, and `scripts/screenshots/render.mjs` lays the trees out as HTML and captures them with [agent-browser](https://github.com/vercel-labs/agent-browser), light and dark. The mod's own SVG drawings are used as drawn; the desktop app's native elements (text, buttons, boxes) are approximated with plain CSS. `docs/images/src/` keeps each page's HTML and the band and cache-card SVGs. Times in the images are in the local time zone of the machine that rendered them.
+`sh scripts/screenshots.sh` renders the images in `docs/images/`. It runs `scripts/screenshots/shots.tsx` through the engine's test kit (sample flows, a warm and a cold cache, archive sessions; no real session data), prints each drawn tree, and `scripts/screenshots/render.mjs` lays the trees out as HTML and captures them with [agent-browser](https://github.com/vercel-labs/agent-browser), light and dark. The mod's own SVG drawings are used as drawn; the desktop app's native elements (text, buttons, boxes) are approximated with plain CSS. `docs/images/src/` keeps each page's HTML and the band and cache-card SVGs. Times in the images are in the local time zone of the machine that rendered them. Smaller PNG files come from ImageMagick (`magick`, a 96-colour palette) when it is installed.
+
+**Callouts.** The numbered circles are data, not drawing code: `scripts/screenshots/callouts.tsv` has one line per circle (image name, number, the part it points at, which side it sits on, a nudge). A part is found by the key of the element the mod drew, by its text, or, for what the mod draws as one picture (the band, the context bar, a step row), by a point in that picture. `render.mjs` places the circles in the page before the capture and adds a thin leader line to a nudged one. The text of each legend is in this README; `sh scripts/check-readme.sh` fails when a legend has a different number of items than the data has circles. To move or add a callout, edit the `.tsv` and run `sh scripts/screenshots.sh`.
 
 ## Credits and license
 

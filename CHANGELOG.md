@@ -2,6 +2,9 @@
 
 Versions are `M.m.xxxx`; every build bumps the 4-digit build number. Details and rulings: `docs/ledger.md`, `docs/design.md`.
 
+## 1.0.0049 (2026-10-31)
+- README: a features-at-a-glance table, and one section per feature with an annotated screenshot (numbered callouts), a numbered "What you see" legend and a short "How to use". The screenshot pipeline draws the callouts from data (`scripts/screenshots/callouts.tsv`) and renders the new images (band, context, usage, cache card, keep warm states, top-row switches, flow row, handoff note, Empty Trash confirmation, task tracking strip). `scripts/check-readme.sh` checks that every README image exists and has alt text, and that each legend matches the callout data. No change to the mod's behaviour.
+
 ## 1.0.0048 (2026-10-31)
 - Desktop panel no longer freezes or reopens blank with a big flow: the panel's tree for a 19-task flow had grown to about 270,000 characters (each row's drawing about 12,000), past what the desktop app takes, so it kept the old panel (presses answered `ui_press not handled`) and a reopened panel stayed blank. Each crab is now drawn as a few paths (a row's run of one colour as one shape) and its motion CSS goes only into drawings where a crab walks: the same pixels, and a row's drawing is about 2,500 characters, so the same flow draws in about 80,000. A desktop tab still past 200,000 characters draws its text rows, with a dim line saying so, instead of a panel the app will not show.
 

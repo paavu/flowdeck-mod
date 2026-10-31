@@ -1,0 +1,108 @@
+# The numbered callouts drawn on the README's images (scripts/screenshots/render.mjs). One line per callout, tab separated:
+# shot	n	key	text	img	x	y	at	dx	dy      ('-' leaves a column out)
+# key: the part (a node's key, or a prefix ending in *) the callout is looked for in; text: the first text in it that contains this
+# (or matches it, between slashes: /regex/);
+# img, x, y: a point in the img-th picture of that part, for what the mod draws as one Svg; at: top, bottom, left, right or c, the side
+# of the part the number sits on; dx, dy: nudges in px (a nudged number gets a leader line to its part).
+# The legend with the same numbers is in README.md; scripts/check-readme.sh compares the two.
+band-running	1	-	-	0	80	4	top	0	0
+band-running	2	-	-	0	330	19	bottom	0	0
+band-running	3	-	-	0	223	3	top	0	0
+band-running	4	-	-	0	587	3	top	0	0
+band-running	5	-	-	1	58	3	top	0	0
+band-running	6	cache-fold	-	-	-	-	top	0	0
+band-running	7	-	-	2	13	3	top	0	0
+band-running	8	flowdeck-agents	-	-	-	-	top	0	0
+band-running	9	flowdeck-dismiss	-	-	-	-	top	0	0
+band-done	1	-	-	0	40	4	top	0	0
+band-done	2	-	-	0	300	19	bottom	0	0
+band-done	3	-	-	0	540	3	top	0	0
+band-done	4	-	-	0	587	3	top	0	0
+band-done	5	flowdeck-agents	-	-	-	-	top	0	0
+cache-warm	1	-	-	0	35	10	top	0	0
+cache-warm	2	-	-	0	155	10	top	0	0
+cache-warm	3	-	-	0	350	38	top	0	0
+cache-warm	4	-	-	0	90	73	bottom	0	0
+cache-warm	5	-	-	0	280	73	bottom	0	0
+cache-warm	6	-	-	0	536	10	top	0	0
+cache-warm	7	-	-	0	600	42	right	0	0
+cache-warm	8	-	-	0	686	10	top	0	0
+cache-cold	1	-	-	0	35	10	top	0	0
+cache-cold	2	-	-	0	150	10	top	0	0
+cache-cold	3	-	-	0	400	38	top	0	0
+cache-cold	4	-	-	0	90	73	bottom	0	0
+cache-cold	5	-	-	0	290	73	bottom	0	0
+cache-cold	6	-	-	0	617	10	top	0	0
+cache-keep-warm	1	-	-	0	90	73	bottom	0	0
+cache-keep-warm	2	-	-	1	100	73	bottom	0	0
+cache-keep-warm	3	-	-	2	70	73	bottom	0	0
+panel-toggles	1	context	-	-	-	-	bottom	0	0
+panel-toggles	2	usage	-	-	-	-	bottom	0	0
+panel-toggles	3	band	-	-	-	-	bottom	0	0
+panel-toggles	4	keep-warm	-	-	-	-	bottom	0	0
+panel-toggles	5	track-tasks	-	-	-	-	bottom	0	0
+panel-toggles	6	-	v1.	-	-	-	bottom	0	0
+panel-context	1	-	-	0	394	4	top	0	0
+panel-context	2	-	-	0	110	24	top	0	0
+panel-context	3	-	-	0	474	36	bottom	0	0
+panel-context	4	-	-	0	267	50	right	0	0
+panel-usage	1	usage-five_hour	Current session	-	-	-	top	0	0
+panel-usage	2	usage-five_hour	Resets in	-	-	-	top	0	0
+panel-usage	3	usage-reset-session	-	-	-	-	top	0	0
+panel-usage	4	usage-five_hour	-	0	230	8	top	0	0
+panel-usage	5	usage-five_hour	-	0	192	21	bottom	0	0
+panel-usage	6	usage-five_hour	-	0	150	34	right	0	0
+panel-usage	7	usage-five_hour	-	0	445	22	bottom	0	0
+panel-usage	8	usage-seven_day	This week	-	-	-	right	0	0
+panel-tabs	1	tab-active	-	-	-	-	top	0	0
+panel-tabs	2	tab-finished	-	-	-	-	top	0	0
+panel-tabs	3	-	-	0	240	44	bottom	0	0
+panel-flow	1	agent-fold-w2	-	-	-	-	top	0	0
+panel-flow	2	w2	2. Add retry	-	-	-	top	0	0
+panel-flow	3	note-w2	-	-	-	-	top	0	0
+panel-flow	4	w2	-	1	209	11	right	0	0
+panel-flow	5	w2	-	1	400	3	top	0	0
+panel-flow	6	w2	-	1	480	3	top	0	0
+panel-flow	7	w2	-	1	243	26	right	0	0
+panel-flow	8	w2	-	1	466	37	right	0	0
+panel-flow	9	w2	-	2	43	11	left	0	0
+panel-flow	10	w2	-	2	472	11	right	0	0
+panel-flow	11	w2	-	5	466	11	right	0	0
+panel-flow	12	note-task-3	-	-	-	-	right	0	0
+panel-flow	13	plan-3	-	1	322	19	right	0	0
+panel-flow	14	plan-3	-	2	225	16	right	0	0
+panel-flow	15	plan-4	-	1	214	16	right	0	0
+panel-finished-list	1	tab-finished	-	-	-	-	top	0	0
+panel-finished-list	2	agent-fold-w1	-	-	-	-	left	0	0
+panel-finished-list	3	note-w1	-	-	-	-	bottom	0	0
+panel-finished-list	4	w1	18:17	-	-	-	top	0	0
+panel-finished-list	5	w1	-	1	96	26	right	0	0
+panel-finished-list	6	w1	-	1	440	37	bottom	0	0
+panel-finished-list	7	w1	-	1	400	3	top	0	0
+panel-finished-list	8	w1	-	1	476	3	top	0	0
+panel-finished	1	note-w1	-	-	-	-	right	0	0
+panel-finished	2	w1	-	1	58	8	left	0	0
+panel-finished	3	w1	-	1	58	42	left	0	0
+panel-finished	4	w1	-	1	58	91	left	0	0
+panel-finished	5	w1	-	1	58	125	left	0	0
+panel-archive	1	tab-archive	-	-	-	-	top	0	0
+panel-archive	2	-	/Oct 31, 2026.*\)/	-	-	-	right	0	0
+panel-archive	3	archive-del-*	-	-	-	-	top	0	0
+panel-archive	4	-	3. Contrast check	-	-	-	left	0	0
+panel-archive	5	-	/Oct 30, 2026.*\)/	-	-	-	right	0	0
+panel-archive	6	-	Move this session	-	-	-	left	0	0
+panel-archive	7	-	Move to trash	-	-	-	bottom	0	0
+panel-trash	1	tab-trash	-	-	-	-	top	0	0
+panel-trash	2	-	Empty Trash (2)	-	-	-	right	0	0
+panel-trash	3	-	/Oct 28, 2026.*\)/	-	-	-	right	0	0
+panel-trash	4	-	↩	-	-	-	top	0	0
+panel-trash-confirm	1	-	Erase 2 sessions	-	-	-	left	0	0
+panel-trash-confirm	2	trash-empty-yes	-	-	-	-	left	0	0
+panel-trash-confirm	3	trash-empty-cancel	-	-	-	-	right	0	0
+panel-tracking-unset	1	-	Track every task	-	-	-	left	0	0
+panel-tracking-unset	2	-	When on, Claude	-	-	-	left	0	0
+panel-tracking-unset	3	rule-on	-	-	-	-	left	0	0
+panel-tracking-unset	4	rule-off	-	-	-	-	right	0	0
+panel-tracking-off	1	-	Task tracking is off	-	-	-	left	0	0
+panel-tracking-off	2	-	When on, Claude	-	-	-	left	0	0
+panel-tracking-off	3	rule-on	-	-	-	-	left	0	0

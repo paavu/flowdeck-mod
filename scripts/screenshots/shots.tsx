@@ -87,7 +87,7 @@ const TASKS = [
   { title: 'Map the upload code', tier: 'light', goal: 'Find where uploads start, fail and report errors.' },
   { title: 'Add retry to uploads', tier: 'careful', after: [1], goal: 'Retry a failed upload up to 3 times with backoff; keep the progress events as they are.' },
   { title: 'Retry button in dialog', tier: 'medium', after: [2], goal: 'A Retry button in the upload dialog for a failed file.' },
-  { title: 'Update the docs', tier: 'light', after: [1], goal: 'Describe the retry behaviour in the user guide.' },
+  { title: 'Update the docs', tier: 'light', model: 'haiku', after: [1], goal: 'Describe the retry behaviour in the user guide.' },
 ]
 const BRIEF = (t: string) => `Repo: /work/web-app. ${t} Keep the public API unchanged. Before your final report, close your step list with \`mcp__flowdeck__step\`: every step \`done\` or \`failed\`.`
 
@@ -145,9 +145,33 @@ test('band, cache card and panel of a running flow', async ($, on) => {
   await press($, () => pane($), 'agent-fold-w2')
   await press($, () => pane($), 'note-task-3')
   await shot('panel-active', await pane($))
+  // the top row with every switch on, then every one off
+  await shot('panel-toggles-on', await pane($))
   await tab($, 'finished')
+  await shot('panel-finished-list', await pane($))
   await press($, () => pane($), 'note-w1')
   await shot('panel-finished', await pane($))
+  await tab($, 'active')
+  for (const key of ['context', 'usage', 'band', 'keep-warm', 'track-tasks']) await press($, () => pane($), key)
+  await shot('panel-toggles-off', await pane($))
+})
+
+// Keep warm: waiting for its renewal, after one renewal (and below, switched off).
+test('keep warm states', { timeoutMs: 60_000 }, async ($, on) => {
+  const { clock } = engine(on)
+  await runningFlow($, clock)
+  await press($, () => band($), 'cache-fold')
+  await shot('cache-kept-due', await band($))
+  for (const m of [10, 25, 40]) await at(clock, m * MIN)
+  await shot('cache-kept-once', await band($))
+})
+
+test('keep warm switched off', async ($, on) => {
+  const { clock } = engine(on)
+  await runningFlow($, clock)
+  await press($, () => pane($), 'keep-warm')
+  await press($, () => band($), 'cache-fold')
+  await shot('cache-kept-off', await band($))
 })
 
 // Kept warm twice after the last request, then cold an hour after the second renewal.
@@ -241,6 +265,8 @@ test('archive and trash', async ($, on) => {
   await press($, () => pane($), `archive-cancel-${keyOf(list[2]!.id)}`)
   await tab($, 'trash')
   await shot('panel-trash', await pane($))
+  await press($, () => pane($), 'trash-empty')
+  await shot('panel-trash-confirm', await pane($))
 })
 
 // Task tracking turned off: the strip above the Active list says so and offers to turn it on.
@@ -251,4 +277,14 @@ test('task tracking off', async ($, on) => {
   await press($, () => pane($), 'context')
   await press($, () => pane($), 'usage')
   await shot('panel-tracking-off', await pane($))
+})
+
+// A fresh install: nothing chosen yet.
+test('task tracking not chosen', async ($, on) => {
+  const { clock } = engine(on, {}, 'unset')
+  await at(clock, 0)
+  await start($)
+  await press($, () => pane($), 'context')
+  await press($, () => pane($), 'usage')
+  await shot('panel-tracking-unset', await pane($))
 })
