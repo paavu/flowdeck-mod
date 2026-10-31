@@ -16,7 +16,7 @@ export const RENEW_AT_MS = TTL_MS - 10 * 60_000
 /** Keep warm leaves a smaller context alone: writing it again costs little. */
 export const KEEP_WARM_MIN_TOKENS = 80_000
 /** Renewals at most between two of the user's messages; only a user message starts the count again. */
-export const KEEP_WARM_MAX_RENEWALS = 2
+export const KEEP_WARM_MAX_RENEWALS = 8
 /** Failed renewals at most between two of the user's messages; then keep warm waits for the next one. */
 export const KEEP_WARM_MAX_FAILURES = 2
 /** How long the next try waits after a failed renewal. */

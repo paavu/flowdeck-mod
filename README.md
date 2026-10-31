@@ -11,7 +11,7 @@
 </p>
 
 <p align="center">
-  <img alt="Version 1.0.0062" src="https://img.shields.io/badge/version-1.0.0062-8f8cf4">
+  <img alt="Version 1.0.0063" src="https://img.shields.io/badge/version-1.0.0063-8f8cf4">
   <img alt="MIT license" src="https://img.shields.io/badge/license-MIT-5fbf8f">
   <img alt="Claude Code 2.1.295 or later" src="https://img.shields.io/badge/Claude%20Code-%E2%89%A5%202.1.295-8f8cf4">
   <img alt="Terminal and desktop" src="https://img.shields.io/badge/surfaces-terminal%20%2B%20desktop-5fbf8f">
@@ -239,15 +239,15 @@ What you see (the open card, warm):
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="docs/images/cache-cold-dark.png">
-  <img alt="The cache card, cold, with six numbered callouts: the COLD chip, idle time and cached tokens, the full bar with cold for 33m, kept warm twice with the limit reached, the renewal and cold costs, and the 1-hour write caption with the four model costs" src="docs/images/cache-cold-light.png">
+  <img alt="The cache card, cold, with six numbered callouts: the COLD chip, idle time and cached tokens, the full bar with cold for 33m, kept warm eight times with the limit reached, the renewal and cold costs, and the 1-hour write caption with the four model costs" src="docs/images/cache-cold-light.png">
 </picture>
 
 What you see (cold):
 
 1. The chip: `COLD`.
-2. The idle time (`3h 13m`) and the tokens that would be written again.
+2. The idle time (`8h 13m`) and the tokens that would be written again.
 3. The bar, full, with how long the cache has been cold (`cold for 33m`).
-4. Keep warm's record: here two renewals, then `limit reached`.
+4. Keep warm's record: here eight renewals, then `limit reached`.
 5. The renewal cost beside the cold restart cost.
 6. The caption (`next message, re-cache (1-hour write)`) and the cost on each of the four models.
 
@@ -271,10 +271,10 @@ What you see (the keep warm line of the card):
 How to use: the `Keep warm` switch (with its dot) in the panel's top row turns it on or off; it is on by default and saved per project folder. Watch the line on the open card.
 
 - **How**: one side request through `$.model.fork`: the main thread's last request again with a one-line prompt asking for `ok`, no tools. Nothing is added to the transcript.
-- **When**: 50 minutes after the cache was last read or written (`RENEW_AT_MS`), when the context holds at least 80,000 tokens (`KEEP_WARM_MIN_TOKENS`), no main turn is running and the user has sent nothing since. At most 2 renewals between two of the user's messages (`KEEP_WARM_MAX_RENEWALS`), so an idle session stays warm for about 2 h 40 min, then goes cold.
+- **When**: 50 minutes after the cache was last read or written (`RENEW_AT_MS`), when the context holds at least 80,000 tokens (`KEEP_WARM_MIN_TOKENS`), no main turn is running and the user has sent nothing since. At most 8 renewals between two of the user's messages (`KEEP_WARM_MAX_RENEWALS`), so an idle session stays warm for about 7 h 40 min, then goes cold.
 - **Never**: while the cache is already cold, in the hour's last minute, after the session ended, or with the switch off.
 - **Failures**: a failed renewal waits 2 minutes and tries again; after 2 failures in one idle stretch it stops until the user's next message. The card says `failed`; it never shows as an error.
-- **Cost**: a renewal is a real request. It costs about a cache read of the context (two renewals of a 770k-token Opus context are about $0.30, against about $6.16 to write it again) and **counts against the plan's usage limits** like any other message.
+- **Cost**: a renewal is a real request. It costs about a cache read of the context (a renewal of a 770k-token Opus context is about $0.15, against about $6.16 to write it again; eight renewals are about $1.20) and **counts against the plan's usage limits** like any other message.
 - **Switch**: the constants are at the top of `hooks/cache.ts`.
 
 ### The panel
@@ -582,7 +582,7 @@ With tracking on, the main session pays about 1,760 tokens (the rule and the `pr
 | Task tracking | `Track tasks` beside the `FlowDeck` title, the strip's buttons, `/flowdeck-rule` (mod store `rule`, all projects) | `unset` on a fresh install, `on` for an install that ran before 1.0.0037 |
 | Band shown | panel top row (per session) | shown |
 | Cache prices | `MODELS` in `hooks/cache.ts` | Fable 10 / 0.25, Opus 4 / 0.20, Sonnet 2 / 0.20, Haiku 0.5 / 0.05 USD per million tokens |
-| Keep warm timing | top of `hooks/cache.ts` | renew at minute 50, at least 80,000 tokens, at most 2 renewals |
+| Keep warm timing | top of `hooks/cache.ts` | renew at minute 50, at least 80,000 tokens, at most 8 renewals |
 | Idle finish | `IDLE_FINISH_MS` in `hooks/live.ts` | 30 minutes |
 
 All times are 24-hour `HH:MM`.

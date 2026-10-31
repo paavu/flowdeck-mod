@@ -174,11 +174,11 @@ test('keep warm switched off', async ($, on) => {
   await shot('cache-kept-off', await band($))
 })
 
-// Kept warm twice after the last request, then cold an hour after the second renewal.
+// Kept warm eight times after the last request, then cold an hour after the eighth renewal.
 test('the cache gone cold', { timeoutMs: 60_000 }, async ($, on) => {
   const { clock } = engine(on)
   await runningFlow($, clock)
-  for (let m = 10; m <= 175; m += 15) await at(clock, m * MIN)
+  for (let m = 10; m <= 475; m += 15) await at(clock, m * MIN)
   await shot('cache-cold', await band($))
 })
 

@@ -2,6 +2,9 @@
 
 Versions are `M.m.xxxx`; every build bumps the 4-digit build number. Details and rulings: `docs/ledger.md`, `docs/design.md`.
 
+## 1.0.0063 (2026-10-31)
+- Keep warm renews up to 8 times between two of your messages (was 2), so an idle session stays warm for about 7 h 40 min instead of 2 h 40 min. Eight renewals of a 770k-token Opus context cost about $1.20, against about $6.16 to write the cache again; renewals still count against the plan's usage limits. After the eighth the card says `kept warm ×8 · limit reached`. The cold-cache screenshot is redrawn to match.
+
 ## 1.0.0062 (2026-10-31)
 - README: a framed 20-second screen recording of the panel, band, crew and archive (sample data) sits at the top, as a GIF with a link to the full-resolution MP4 in `docs/media/`.
 
