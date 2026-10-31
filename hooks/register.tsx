@@ -512,6 +512,7 @@ const H = 22
 const MAX_BAND_W = 1600 // the widest the desktop band's drawing gets
 const BAR_H = 16
 const CRAB_W = 26
+const CREW_W = CRAB_W + 30 // the crew icon plus the "×N" button (×0 to ×99), the same slack as before
 const CELL = 3
 const FONT = "-apple-system,BlinkMacSystemFont,'SF Pro Text','Segoe UI',sans-serif"
 
@@ -540,11 +541,11 @@ const fitText = (s: string, size: number, maxW: number): string => {
 // The band's title when no task names where the flow is: never the flow's own title (named after the first request).
 const BAND_LABEL = 'FlowDeck'
 
-const rowSvg = (f: Flow, W: number, isWorking: boolean, name: string): string => {
+const rowSvg = (f: Flow, W: number, name: string): string => {
   // The title takes what it needs, up to 40% of the row; the bar takes the rest.
   const title = fitText(name, 13, Math.max(60, W * 0.4))
   const BAR_X = Math.round(16 + textWidth(title, 13) + 12)
-  const BAR_W = Math.max(60, W - BAR_X - 46 - CRAB_W)
+  const BAR_W = Math.max(60, W - BAR_X - 46)
   const color = f.isFinished ? DONE : ACCENT
   const y0 = (H - BAR_H) / 2
   const fillW = Math.round(BAR_W * ratio(f))
@@ -602,10 +603,15 @@ const rowSvg = (f: Flow, W: number, isWorking: boolean, name: string): string =>
 <rect x="${pillX}" width="${pillW}" height="${BAR_H}" rx="${BAR_H / 2}" fill="${color}"/>
 <text x="${pillX + pillW / 2}" y="${BAR_H / 2 + 4}" text-anchor="middle" font-family="${FONT}" font-size="11" font-weight="600" fill="#ffffff">${xml(text)}</text>
 </g>
-<text class="m" x="${W - CRAB_W - 6}" y="${H / 2 + 4.5}" text-anchor="end" font-family="${FONT}" font-size="12.5" font-variant-numeric="tabular-nums">${percent}</text>
-${CRAB_CSS}${crab(W - CRAB_W + 1, 0, 'other', false, isWorking, 0.8)}
+<text class="m" x="${W - 6}" y="${H / 2 + 4.5}" text-anchor="end" font-family="${FONT}" font-size="12.5" font-variant-numeric="tabular-nums">${percent}</text>
 </svg>`
 }
+
+// The worker icon beside the crew button: walks while a worker runs, stands still otherwise.
+const crewSvg = (isWorking: boolean): string =>
+  `<svg xmlns="http://www.w3.org/2000/svg" width="${CRAB_W}" height="${H}" viewBox="0 0 ${CRAB_W} ${H}">
+${CRAB_CSS}${crab(1, 0, 'other', false, isWorking, 0.8)}
+</svg>`
 
 const barText = (f: Flow, width: number): string => {
   const filled = Math.round(width * ratio(f))
@@ -3139,13 +3145,12 @@ export const register: Register = (on, options) => {
       )
     }
     const list = await readAgents($)
-    const crew = list.length + plannedOf(f, list).length
-    const isWorking = list.some(isLive)
+    const running = list.filter(isLive).length
     // X/Y, the bar and the percent come from the rows the panel's tabs count (flowProgress).
     const g = shownFlow(f, list)
     const title = bandTitle(f, list)
     const crewButton = (
-      <Button key="flowdeck-agents" label={`×${crew}`} plain onPress={() => void togglePane($)} />
+      <Button key="flowdeck-agents" label={`×${running}`} plain onPress={() => void togglePane($)} />
     )
     const percent = `${Math.round(ratio(g) * 100)}%`
     const dismiss = (
@@ -3166,12 +3171,13 @@ export const register: Register = (on, options) => {
       // About 9 CSS px per reported column (measured in the desktop app; savvy-progress assumed 8 and stopped
       // short); the count, the dismiss and their gaps take the rest, so the row runs to the right edge like the other bars.
       // The cache chip, between the progress and the buttons, takes its own width from the progress.
-      const width = Math.max(180, Math.min(MAX_BAND_W, (e.props.bodyColumns || 100) * 9 - 180) - (cache?.size ?? 0))
+      const width = Math.max(180, Math.min(MAX_BAND_W, (e.props.bodyColumns || 100) * 9 - 180) - (cache?.size ?? 0) - CREW_W)
       return (
         <Box flexDirection="column">
           <Box flexDirection="row" alignItems="center" gap={1} flexShrink={1} minWidth={0} overflow="hidden">
-            <Svg source={rowSvg(g, width, isWorking, title)} alt={`${title}: ${label(g, true)}, ${percent}`} width={width} height={H} />
+            <Svg source={rowSvg(g, width, title)} alt={`${title}: ${label(g, true)}, ${percent}`} width={width} height={H} />
             {cache?.row ?? null}
+            <Svg source={crewSvg(running > 0)} alt={running ? `${running} ${running === 1 ? 'worker' : 'workers'} running` : 'no workers running'} width={CRAB_W} height={H} />
             {crewButton}
             {dismiss}
           </Box>

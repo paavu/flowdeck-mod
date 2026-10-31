@@ -468,7 +468,7 @@ describe('the card and the band', () => {
     await $.tool.call({ tool: 'mcp__flowdeck__progress', title: 'Ship it', phase: 'delegate', tasks: [{ title: 'a', tier: 'light' }] } as any)
     for (const columns of [60, 100, 200, 400]) {
       const l = await look($, 'desktop', columns)
-      expect(l.widths[0]).toBe(Math.max(180, Math.min(1600, columns * 9 - 180) - (l.widths[1]! + CACHE_FOLD_PX)))
+      expect(l.widths[0]).toBe(Math.max(180, Math.min(1600, columns * 9 - 180) - (l.widths[1]! + CACHE_FOLD_PX) - 56))
       expect(l.widths[1]).toBe(before.widths[0])
     }
     const bar = (await look($, 'terminal', 120)).texts.find(t => /^[█░]+$/.test(t)) ?? ''

@@ -1,7 +1,7 @@
 {
   "name": "flowdeck",
   "displayName": "flowdeck",
-  "version": "1.0.0045",
+  "version": "1.0.0046",
   "description": "Orchestrated delivery flow with a live view: /flowdeck plans the work and delegates it to five tiered worker agents, a band above the prompt shows progress and the prompt-cache state, and a side panel shows the agents, context, usage limits and an archive of past flows.",
   "author": { "name": "Paavu", "url": "https://github.com/paavu" },
   "homepage": "https://github.com/paavu/flowdeck-mod",

@@ -74,7 +74,7 @@ describe('no plan rows in the band', () => {
     const json = await drawn(d)
     await d.unmount()
     expect(json).toMatch(/×\d/)
-    expect(svgCount(json)).toBe(1)
+    expect(svgCount(json)).toBe(2) // the flow row and the crew icon
     expect(json).not.toMatch(PLAN_WORDS)
     expect(json).not.toContain('flowdeck-plan-')
     const t = await band($, 'terminal', 80)

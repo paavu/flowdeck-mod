@@ -352,7 +352,7 @@ describe('the chip in the band', () => {
     for (const columns of [60, 100, 200, 400]) {
       const l = await look($, 'desktop', columns)
       const slot = Math.min(1600, columns * 9 - 180)
-      expect(l.widths[0]).toBe(Math.max(180, slot - (l.widths[1]! + CACHE_FOLD_PX)))
+      expect(l.widths[0]).toBe(Math.max(180, slot - (l.widths[1]! + CACHE_FOLD_PX) - 56)) // 56: the crew icon and its button
       expect(l.json).toContain('"overflow":"hidden"') // still shrinks and clips, never pushes a neighbour
     }
   })

@@ -4,7 +4,7 @@ A Claude Code mod that runs a session's work as a planned, delegated flow and sh
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="docs/images/band-running-dark.png">
-  <img alt="The flowdeck band above the prompt: the running task, Tasks 2/4, the progress bar, 25%, the WARM cache chip with 42m left, the crew button and the dismiss button" src="docs/images/band-running-light.png">
+  <img alt="The flowdeck band above the prompt: the running task, Tasks 2/4, the progress bar, 25%, the WARM cache chip with 42m left, the worker icon with the crew button and the dismiss button" src="docs/images/band-running-light.png">
 </picture>
 
 <picture>
@@ -72,7 +72,7 @@ To see what the mod hooks and calls before you install it, clone the repository 
 claude plugin update flowdeck@flowdeck-mod
 ```
 
-then `/reload-plugins` in open sessions. Every release raises `version` in `.claude-plugin/plugin.json`, so `update` always sees the new one. The panel's top row shows the version of the code that is running (`v1.0.0045`); after an update without a reload it still names the old one. [CHANGELOG.md](CHANGELOG.md) lists what each version changed.
+then `/reload-plugins` in open sessions. Every release raises `version` in `.claude-plugin/plugin.json`, so `update` always sees the new one. The panel's top row shows the version of the code that is running (`v1.0.0046`); after an update without a reload it still names the old one. [CHANGELOG.md](CHANGELOG.md) lists what each version changed.
 
 From 1.0.0036 or earlier: task tracking became a choice in 1.0.0037. An install that already ran flowdeck keeps its rule (`on`); see [Task tracking](#task-tracking) for how that is decided. `/flowdeck-agents` still opens the panel for this release; its new name is `/flowdeck-panel`.
 
@@ -154,7 +154,7 @@ One row for the open flow:
 - **Title**: the running task's title (the lowest-numbered one and ` +N` when several run), else the next ready task, else `FlowDeck` once every task is done. It is never the flow's own title.
 - **`Tasks X/Y`, the bar and the percent**: Y counts every row the panel's tabs count; X is the running task's number while one runs, else the done count. The bar and the percent are the done fraction. The bar turns green when the flow is finished (`Done`).
 - **Cache chip**: `WARM` or `COLD` with the time left or the idle time and cost (see below).
-- **`×N`**: the number of agents and planned tasks; pressing it opens or closes the panel.
+- **Worker icon and `×N`**: `×N` counts the workers running now (queued tasks and finished runs do not count; `×0` when none runs). The worker icon beside it walks while at least one worker runs and stands still otherwise. Pressing the button opens or closes the panel.
 - **`✕`**: hides the band only. The panel's `Band` button, or a new flow, brings it back.
 
 ### The prompt cache chip and card
@@ -188,7 +188,7 @@ Keeps the prompt cache warm through a long idle stretch so the next message read
 
 The panel opens with `/flowdeck-panel`, the band's `×N` button, or by itself when the first worker of a flow starts.
 
-**Top row**: `▼ Context`, `▼ Usage`, `● Band`, `● Keep warm` and `● Track tasks`, with the running version (`v1.0.0045`) at the far end. Context and Usage fold their sections and remember the choice (`▼` open, `▶︎` folded, the same glyphs as every fold in the panel); Band, Keep warm and Track tasks are dot switches (`●` on or shown, `○` off or hidden). Band shows or hides the band; Track tasks turns task tracking on or off (`○` until it is on).
+**Top row**: `▼ Context`, `▼ Usage`, `● Band`, `● Keep warm` and `● Track tasks`, with the running version (`v1.0.0046`) at the far end. Context and Usage fold their sections and remember the choice (`▼` open, `▶︎` folded, the same glyphs as every fold in the panel); Band, Keep warm and Track tasks are dot switches (`●` on or shown, `○` off or hidden). Band shows or hides the band; Track tasks turns task tracking on or off (`○` until it is on).
 
 | Section | Shows |
 |---|---|

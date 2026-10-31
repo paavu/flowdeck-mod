@@ -2,6 +2,9 @@
 
 Versions are `M.m.xxxx`; every build bumps the 4-digit build number. Details and rulings: `docs/ledger.md`, `docs/design.md`.
 
+## 1.0.0046 (2026-10-31)
+- Band crew control: the worker icon moved out of the title row's drawing to sit right before the crew button, and the button reads `×N` with N = the workers running now (it used to count every run plus queued tasks). The icon walks while a worker runs and stands still at `×0`. The panel's counts and `Tasks X/Y` are unchanged.
+
 ## 1.0.0045 (2026-10-31)
 - Archive and Trash: an opened session's content (tiles, task rows, notes and steps) sits one level in under its row, by `GROUP_INDENT` (2 columns, the fold glyph and a space) on the desktop and in the terminal; the drawings are that much narrower so nothing overflows. Folded rows are unchanged.
 
