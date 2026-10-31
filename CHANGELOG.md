@@ -2,6 +2,9 @@
 
 Versions are `M.m.xxxx`; every build bumps the 4-digit build number. Details and rulings: `docs/ledger.md`, `docs/design.md`.
 
+## 1.0.0040 (2026-10-31)
+- The handoff note button is now `ⓘ` (was `✎`), and an opened note appears directly under the task's title, before the worker line, the progress bar and the steps, on running, queued, Accepted, finished and archived rows, on the desktop and in the terminal.
+
 ## 1.0.0039 (2026-10-31)
 - Fable approval guard (`hooks/fable-guard.ts`): a `tool.call` hook on the Agent tool holds every Fable launch (`subagent_type` ending in `flowdeck-fable`, or `model: fable`) and asks the user through `$.ui.ask`, showing the task and the start of the brief as the reason. Approve allows that one launch; decline, dismissal, a run with nobody to ask, or a failing guard denies it, with a message telling the orchestrator to keep the task on Opus heavy or report to the user. Other Agent calls are untouched. Always on, no setting.
 - SKILL.md (Escalation order) and the flow rule tell the orchestrator to state at the top of the Fable brief which task failed on Opus heavy and why; `scripts/check-rules.sh` checks it.

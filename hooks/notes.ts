@@ -14,8 +14,8 @@ export const NOTE_KEYS: readonly NoteKey[] = ['goal', 'brief', 'result', 'feedba
 export const SENT_KEYS: readonly NoteKey[] = ['goal', 'result', 'feedback']
 export const NOTE_MAX: Record<NoteKey, number> = { goal: 300, brief: 600, result: 300, feedback: 300 }
 export const NOTE_LABEL: Record<NoteKey, string> = { goal: 'Goal', brief: 'Brief', result: 'Result', feedback: 'Feedback' }
-/** The row's note button: one single-width glyph with no emoji form. */
-export const NOTE_ICON = '✎'
+/** The row's note button: one single-width glyph with no emoji form (circled i). */
+export const NOTE_ICON = 'ⓘ'
 
 type Obj = Record<string, unknown>
 const isObj = (v: unknown): v is Obj => !!v && typeof v === 'object' && !Array.isArray(v)

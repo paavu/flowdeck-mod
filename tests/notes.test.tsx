@@ -327,6 +327,43 @@ describe('the note button and panel', () => {
     expect(at('"archive-item-w1"')).toBeGreaterThan(at('"note-w1"'))
   })
 
+  test('the icon is the circled i', () => {
+    expect(NOTE_ICON).toBe('ⓘ')
+  })
+
+  test('an opened note sits under the title, before the worker line, the bar and the steps, on both surfaces', async ($, on) => {
+    const { clock } = engine(on)
+    await start($)
+    await progress($, { title: 'Ship', phase: 'delegate', tasks: [{ title: 'Alpha', tier: 'light', goal: 'Qgoal alpha.' }, { title: 'Beta', tier: 'medium', goal: 'Qgoal beta.' }, { title: 'Gamma', tier: 'heavy', goal: 'Qgoal gamma.' }, { title: 'Delta', tier: 'heavy', goal: 'Qgoal delta.' }] })
+    await spawn($, 'w2', '#2 Beta')
+    clock.now = NOW + 30_000
+    await complete($, 'w2')
+    await spawn($, 'w3', '#3 Gamma')
+    await progress($, { done: [4] })
+    const order = async (tab: Tab, surface: 'terminal' | 'desktop', keys: string[], marks: string[][]) => {
+      await showTab($, tab)
+      for (const k of keys) {
+        const q = await mount($, surface)
+        await q.press({ key: k })
+        await q.unmount()
+      }
+      const p = await mount($, surface)
+      const tree = JSON.stringify(await p.drawn())
+      await p.unmount()
+      for (const [title, note, worker] of marks) {
+        const t = tree.indexOf(title!)
+        const n = tree.indexOf(note!)
+        const w = tree.indexOf(worker!, n)
+        if (t < 0 || n < t || w < n) throw new Error(`${surface} ${tab} ${title} ${t}/${n}/${w}`)
+      }
+    }
+    await order('active', 'terminal', ['note-w3', 'note-task-1'], [['Gamma', 'Qgoal gamma', 'medium ·'], ['Alpha', 'Qgoal alpha', 'light']])
+    await order('finished', 'terminal', ['note-w2', 'note-task-4'], [['Beta', 'Qgoal beta', 'medium'], ['Delta', 'Qgoal delta', 'heavy']])
+    // the open state is shared by both surfaces, so the desktop draws the notes the terminal opened
+    await order('active', 'desktop', [],[['Gamma', 'Qgoal gamma', 'Opus 5.5'], ['Alpha', 'Qgoal alpha', 'light']])
+    await order('finished', 'desktop', [],[['Beta', 'Qgoal beta', 'Opus 5.5'], ['Delta', 'Qgoal delta', 'heavy']])
+  })
+
   test('pressing toggles the panel; the open state survives a redraw and a reload', async ($, on) => {
     engine(on)
     await start($)
@@ -384,6 +421,16 @@ describe('the note button and panel', () => {
     expect(o.text).not.toContain('   Added.')
     await press($, 'archive', keys.find(k => k.endsWith('note-a1'))!)
     expect((await look($, 'archive')).text).toContain('   Goal\n   Add retry.\n   Result\n   Added.')
+    for (const surface of ['terminal', 'desktop'] as const) {
+      await showTab($, 'archive')
+      const p = await mount($, surface)
+      const tree = JSON.stringify(await p.drawn())
+      await p.unmount()
+      // the group is open here: the Wire it row's note sits before its worker line
+      const n = tree.indexOf('Add retry.')
+      const w = tree.indexOf(surface === 'terminal' ? 'medium' : 'Opus 5.5', n)
+      if (n < 0 || w < n || tree.indexOf('Wire it') > n) throw new Error(`${surface} ${tree.indexOf('Wire it')}/${n}/${w}`)
+    }
   })
 })
 

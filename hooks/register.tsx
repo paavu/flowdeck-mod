@@ -2649,6 +2649,7 @@ export const register: Register = (on, options) => {
                   )}
                 </Box>
               </Box>
+              {toNote && isNoteOpen(runNoteKey(a)) && notePanel(`${kp}agent-note-${a.id}`, note)}
               <Svg source={agentSvg(W, a, at, { titleOutside: true, after: taskFor(a)?.after, isAccepted: isAccepted(a) })} alt={alt} width={W} height={agentHeight(true)} />
               {isUnfolded(a, fp) &&
                 items.map((it, i) => (
@@ -2659,7 +2660,6 @@ export const register: Register = (on, options) => {
                 detailLines(a).map((line, i) => (
                   <Svg key={`${kp}agent-detail-${a.id}-${i}`} source={svg(W, ITEM_H, noteSvg(W, line, fitText))} alt={line} width={W} height={ITEM_H} />
                 ))}
-              {toNote && isNoteOpen(runNoteKey(a)) && notePanel(`${kp}agent-note-${a.id}`, note)}
             </Box>
           )
         }
@@ -2691,8 +2691,8 @@ export const register: Register = (on, options) => {
                   )}
                 </Box>
               </Box>
-              <Svg source={d.source} alt={d.alt} width={W} height={d.height} />
               {isNoteOpen(taskNoteKey(pl)) && notePanel(`${key}-note`, note)}
+              <Svg source={d.source} alt={d.alt} width={W} height={d.height} />
             </Box>
           )
         }
@@ -2764,6 +2764,7 @@ export const register: Register = (on, options) => {
               {done ? <Box flexGrow={1} /> : null}
               {done ? <Text dimColor>{done}</Text> : null}
             </Box>
+            {toNote && isNoteOpen(runNoteKey(a)) && noteLines(`${kp}agent-note-${a.id}`, note)}
             <Text dimColor wrap="truncate-end">
               {modelLine}
               {stats ? ` · ${stats}` : ''}
@@ -2796,7 +2797,6 @@ export const register: Register = (on, options) => {
                   {line}
                 </Text>
               ))}
-            {toNote && isNoteOpen(runNoteKey(a)) && noteLines(`${kp}agent-note-${a.id}`, note)}
           </Box>
         )
       }
@@ -2825,13 +2825,13 @@ export const register: Register = (on, options) => {
               {acceptedDone(pl) ? <Box flexGrow={1} /> : null}
               {acceptedDone(pl) ? <Text dimColor>{acceptedDone(pl)}</Text> : null}
             </Box>
+            {toNote && isNoteOpen(taskNoteKey(pl)) && noteLines(`${kp}accepted-note-${pl.n}`, note)}
             <Text wrap="truncate-end">
               {'  '}
               <Text color={colorOf(tier)}>{tier}</Text>
               {' · '}
               <Text color={STATE_COLOR.done}>{`${s.acceptedRow} · ${s.noRun}`}</Text>
             </Text>
-            {toNote && isNoteOpen(taskNoteKey(pl)) && noteLines(`${kp}accepted-note-${pl.n}`, note)}
           </Box>
         )
       }
@@ -2866,6 +2866,7 @@ export const register: Register = (on, options) => {
                 {pl.n}. {pl.title} ◷
               </Text>
             )}
+            {toNote && isNoteOpen(taskNoteKey(pl)) && noteLines(`${kp}plan-note-${pl.n}`, note)}
             <Text wrap="truncate-end">
               <Text dimColor>
                 {head}
@@ -2878,7 +2879,6 @@ export const register: Register = (on, options) => {
                 </Text>
               ) : null}
             </Text>
-            {toNote && isNoteOpen(taskNoteKey(pl)) && noteLines(`${kp}plan-note-${pl.n}`, note)}
           </Box>
         )
       }
