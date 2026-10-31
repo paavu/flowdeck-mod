@@ -265,7 +265,7 @@ type Lang = 'en' | 'ru'
 
 const STRINGS = {
   en: {
-    pane: 'flowdeck',
+    pane: 'FlowDeck',
     cost: 'Cost',
     tokens: 'Tokens',
     time: 'Time',
@@ -318,7 +318,7 @@ const STRINGS = {
     emptyFailed: 'could not empty the trash',
   },
   ru: {
-    pane: 'flowdeck',
+    pane: 'FlowDeck',
     cost: 'Стоимость',
     tokens: 'Токены',
     time: 'Время',

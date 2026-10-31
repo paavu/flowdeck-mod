@@ -32,11 +32,11 @@ describe('flowdeck naming', () => {
     expect(r === null || r?.result === undefined || !String(r.result).startsWith('ok')).toBe(true)
   })
 
-  test('/flowdeck-agents opens a pane titled flowdeck', async ($, on) => {
+  test('/flowdeck-agents opens a pane titled FlowDeck', async ($, on) => {
     const { opened } = engine(on)
     await start($)
     const r = await $.command.run({ command: 'flowdeck-agents', args: '' } as any)
     expect(r.text).toBeDefined()
-    expect(opened.some(o => o.id === 'flowdeck-agents' && o.title === 'flowdeck')).toBe(true)
+    expect(opened.some(o => o.id === 'flowdeck-agents' && o.title === 'FlowDeck')).toBe(true)
   })
 })

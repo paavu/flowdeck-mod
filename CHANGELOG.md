@@ -2,6 +2,9 @@
 
 Versions are `M.m.xxxx`; every build bumps the 4-digit build number. Details and rulings: `docs/ledger.md`, `docs/design.md`.
 
+## 1.0.0057 (2026-10-31)
+- The panel tab's title reads `FlowDeck` (it read `flowdeck`).
+
 ## 1.0.0056 (2026-10-31)
 - Handoff-note brief filter: the tool-specific `Use <named tool>` rule is now a generic one (a sentence starting `Use … tools`), plus `Before your final report…`; no private tool names remain in code, tests or docs. SECURITY.md points to private vulnerability reporting. "Claude mod" wording made consistent in the README intro, plugin and marketplace descriptions, CONTRIBUTING and SECURITY.
 
