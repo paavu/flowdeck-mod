@@ -2,6 +2,9 @@
 
 Versions are `M.m.xxxx`; every build bumps the 4-digit build number. Details and rulings: `docs/ledger.md`, `docs/design.md`.
 
+## 1.0.0043 (2026-10-31)
+- The move-to-Trash button on Archive rows is now a text-style trash can instead of `✕`, and the Restore button on Trash rows is `↩` instead of the word, on the desktop and in the terminal. Behaviour and confirmations are unchanged.
+
 ## 1.0.0042 (2026-10-31)
 - The per-row archive button (`⤓`) is gone from the Finished list, on the desktop and in the terminal. A flow's rows are archived together when the flow closes (at the next session start, or on idle or auto finish); the Archive tab keeps its move-to-Trash and Restore buttons.
 

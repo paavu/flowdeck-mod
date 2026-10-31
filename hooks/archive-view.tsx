@@ -8,6 +8,11 @@ import { formatEntry, groupLine, keyOf } from './archive'
 import { foldGlyph } from './fold'
 import { acceptedOf } from './tasks'
 
+/** Move-to-Trash on an Archive row: U+1F5D1 with U+FE0E, so it stays a text glyph in the row's font and colour. */
+export const TRASH_ICON = '\u{1F5D1}︎'
+/** Restore on a Trash row. */
+export const RESTORE_ICON = '↩'
+
 /** A planned task, numbered in plan order; `ready` once everything it waits for is done; `doneAt` when it was accepted. */
 export type Planned = PlannedTask & { n: number; ready?: boolean; doneAt?: number }
 export type Totals = { cost: number; tokens: number; time: number }
@@ -83,7 +88,7 @@ export type ArchiveView = {
   plan: (pl: TaskPlan, kp: string, at: number) => RenderChildren
   on: {
     entry: (rec: ArchiveRecord, isOpen: boolean) => unknown
-    /** The row's ✕ (Archive) or Restore (Trash): opens its confirmation. */
+    /** The row's trash can (Archive) or ↩ (Trash): opens its confirmation. */
     ask: (rec: ArchiveRecord) => unknown
     confirm: (rec: ArchiveRecord) => unknown
     cancel: () => unknown
@@ -192,8 +197,8 @@ function confirmBlock(v: ArchiveView, rec: ArchiveRecord, key: string): RenderCh
   )
 }
 
-// One session as a row: the fold (chevron first, then its date and item count), the row's action at the far end (✕ in
-// the Archive, Restore in the Trash), the dim summary line, and the session's rows when open.
+// One session as a row: the fold (chevron first, then its date and item count), the row's action at the far end (the trash can
+// in the Archive, ↩ in the Trash), the dim summary line, and the session's rows when open.
 function sessionRow(v: ArchiveView, rec: ArchiveRecord, i: number): RenderChildren {
   const { Box, Text, Button } = v.ui
   const { Svg, W, p } = v
@@ -201,9 +206,9 @@ function sessionRow(v: ArchiveView, rec: ArchiveRecord, i: number): RenderChildr
   const isOpen = isGroupOpen(p, v.list, rec.id, i)
   const isAsking = p.confirm?.list === v.list && !p.confirm.all && p.confirm.id === rec.id
   const action = !v.canMove ? null : v.list === 'archive' ? (
-    <Button key={`archive-del-${key}`} label="✕" plain dimColor onPress={() => v.on.ask(rec)} />
+    <Button key={`archive-del-${key}`} label={TRASH_ICON} plain dimColor onPress={() => v.on.ask(rec)} />
   ) : (
-    <Button key={`trash-restore-${key}`} label={v.words.restore} plain dimColor onPress={() => v.on.ask(rec)} />
+    <Button key={`trash-restore-${key}`} label={RESTORE_ICON} plain dimColor onPress={() => v.on.ask(rec)} />
   )
   return (
     <Box key={`${v.list}-row-${key}`} flexDirection="column" marginTop={i ? 1 : 0}>

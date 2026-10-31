@@ -2,6 +2,7 @@ import { describe, expect, test } from 'claude-code/testing'
 
 import { keyOf } from '../hooks/archive'
 import { trashName } from '../hooks/archive-index'
+import { RESTORE_ICON, TRASH_ICON } from '../hooks/archive-view'
 import { fileOf, indexPath, records, seed, sessions, titles, trashCopies, trashIndexPath } from './archive-files'
 import { fakeFs } from './fake-fs'
 import { showTab } from './tabs'
@@ -97,7 +98,7 @@ describe('the Archive list draws from the index alone', () => {
     // Each row: the chevron first, the date and the item count, its summary below.
     expect(t.buttons.find(b => b.key === `archive-${K(2)}`)?.text).toMatch(/^▶︎ Oct 30, 2026 · \d\d:\d\d \(1\)$/)
     expect(t.texts.filter(x => x === '  ≈$1.25 · 12k tokens · 30:00')).toHaveLength(5)
-    // The chevron leads the row; the ✕ comes after the name, and no chevron follows it.
+    // The chevron leads the row; the trash can comes after the name, and no chevron follows it.
     for (const surface of ['terminal', 'desktop'] as const) {
       const s = await look($, surface)
       const at = (k: string) => s.keys.indexOf(k)
@@ -213,7 +214,7 @@ describe('an opened session shows its totals as the Active and Finished tabs do'
 })
 
 describe('moving a session to the trash', () => {
-  test('✕ asks first: the confirmation shows the session and changes nothing until confirmed; Cancel keeps everything', async ($, on) => {
+  test('the trash can asks first: the confirmation shows the session and changes nothing until confirmed; Cancel keeps everything', async ($, on) => {
     const { files } = engine(on, { files: seeded(3) })
     await start($)
     await settle()
@@ -266,7 +267,7 @@ describe('moving a session to the trash', () => {
       const t = await look($, surface, 'trash')
       expect(t.keys.filter(k => /^trash-k[a-z0-9]+$/.test(k))).toEqual([`trash-${K(2)}`])
       expect(t.buttons.find(b => b.key === `trash-${K(2)}`)?.text).toMatch(/^▼ Oct 30, 2026 · \d\d:\d\d \(1\)$/)
-      expect(t.buttons.find(b => b.key === `trash-restore-${K(2)}`)?.text).toBe('Restore')
+      expect(t.buttons.find(b => b.key === `trash-restore-${K(2)}`)?.text).toBe(RESTORE_ICON)
       if (surface === 'terminal') expect(t.texts).toContain('  ≈$1.25 · 12k tokens · 30:00')
       // Its first group opens with the trash copy's rows.
       expect(t.texts.some(x => /task 2/.test(x))).toBe(true)
@@ -299,7 +300,26 @@ describe('moving a session to the trash', () => {
     expect(records(files, trashIndexPath(DIR))![0].restoredAt).toBe(NOW + 2 * MIN)
   })
 
-  test('without a project folder there is no ✕ and no Restore', async ($, on) => {
+  test('the row icons: a text-style trash can on Archive rows, the return arrow on Trash rows, on both surfaces', async ($, on) => {
+    expect([...TRASH_ICON].map(c => c.codePointAt(0))).toEqual([0x1f5d1, 0xfe0e])
+    expect(TRASH_ICON.endsWith('︎')).toBe(true)
+    expect([...RESTORE_ICON].map(c => c.codePointAt(0))).toEqual([0x21a9])
+    engine(on, { files: seeded(3) })
+    await start($)
+    await settle()
+    for (const surface of ['terminal', 'desktop'] as const) {
+      const a = await look($, surface)
+      expect(a.buttons.find(b => b.key === `archive-del-${K(2)}`)?.text).toBe(TRASH_ICON)
+    }
+    await press($, `archive-del-${K(2)}`)
+    await press($, `archive-trash-${K(2)}`)
+    for (const surface of ['terminal', 'desktop'] as const) {
+      const t = await look($, surface, 'trash')
+      expect(t.buttons.find(b => b.key === `trash-restore-${K(2)}`)?.text).toBe(RESTORE_ICON)
+    }
+  })
+
+  test('without a project folder there is no trash can and no Restore', async ($, on) => {
     engine(on, { store: { history: [entry(1), entry(2)] } })
     await start($, '')
     await settle()

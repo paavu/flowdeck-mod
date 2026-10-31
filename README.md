@@ -72,7 +72,7 @@ To see what the mod hooks and calls before you install it, clone the repository 
 claude plugin update flowdeck@flowdeck-mod
 ```
 
-then `/reload-plugins` in open sessions. Every release raises `version` in `.claude-plugin/plugin.json`, so `update` always sees the new one. The panel's top row shows the version of the code that is running (`v1.0.0042`); after an update without a reload it still names the old one. [CHANGELOG.md](CHANGELOG.md) lists what each version changed.
+then `/reload-plugins` in open sessions. Every release raises `version` in `.claude-plugin/plugin.json`, so `update` always sees the new one. The panel's top row shows the version of the code that is running (`v1.0.0043`); after an update without a reload it still names the old one. [CHANGELOG.md](CHANGELOG.md) lists what each version changed.
 
 From 1.0.0036 or earlier: task tracking became a choice in 1.0.0037. An install that already ran flowdeck keeps its rule (`on`); see [Task tracking](#task-tracking) for how that is decided. `/flowdeck-agents` still opens the panel for this release; its new name is `/flowdeck-panel`.
 
@@ -188,7 +188,7 @@ Keeps the prompt cache warm through a long idle stretch so the next message read
 
 The panel opens with `/flowdeck-panel`, the band's `×N` button, or by itself when the first worker of a flow starts.
 
-**Top row**: `▼ Context`, `▼ Usage`, `● Band`, `● Keep warm` and `● Track tasks`, with the running version (`v1.0.0042`) at the far end. Context and Usage fold their sections and remember the choice (`▼` open, `▶︎` folded, the same glyphs as every fold in the panel); Band, Keep warm and Track tasks are dot switches (`●` on or shown, `○` off or hidden). Band shows or hides the band; Track tasks turns task tracking on or off (`○` until it is on).
+**Top row**: `▼ Context`, `▼ Usage`, `● Band`, `● Keep warm` and `● Track tasks`, with the running version (`v1.0.0043`) at the far end. Context and Usage fold their sections and remember the choice (`▼` open, `▶︎` folded, the same glyphs as every fold in the panel); Band, Keep warm and Track tasks are dot switches (`●` on or shown, `○` off or hidden). Band shows or hides the band; Track tasks turns task tracking on or off (`○` until it is on).
 
 | Section | Shows |
 |---|---|
@@ -261,8 +261,8 @@ There are no Start or Finish buttons.
 </picture>
 
 - **Archive**: one file per saved session (a flow, or a finished plan an older version saved) in `.claude/flowdeck/archive/`, listed by `archive-index.json`. The list draws from the index alone; a session's file is read only when its row is opened. A folded row shows its cost, tokens and time as one dim line; an opened session shows them as the same three tiles the Active and Finished tabs use (the terminal keeps the one line). The archive icon (`⤓`) on a finished row archives it and every older finished row early, while the flow runs.
-- **Move to trash** (`✕` on a session row): asks first, then copies the session to `.claude/flowdeck/.trash/` and hides it from the Archive. Nothing is erased.
-- **Restore**: asks first, then moves the session back to the Archive.
+- **Move to trash** (the trash can on a session row): asks first, then copies the session to `.claude/flowdeck/.trash/` and hides it from the Archive. Nothing is erased.
+- **Restore** (`↩` on a Trash row): asks first, then moves the session back to the Archive.
 - **Empty Trash (n)**: asks `Erase n sessions for good? This cannot be undone.` with `Erase` / `Cancel`, then erases each trashed session's files permanently, with no system trash and no undo. This is the only place flowdeck deletes a file. It erases only files whose names the archive itself gives the trashed sessions, directly inside `.trash/` or `archive/`, never a link, one file at a time; a session that cannot be erased whole stays in the Trash and the tab says how many failed.
 
 ## Task tracking
