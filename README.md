@@ -72,7 +72,7 @@ To see what the mod hooks and calls before you install it, clone the repository 
 claude plugin update flowdeck@flowdeck-mod
 ```
 
-then `/reload-plugins` in open sessions. Every release raises `version` in `.claude-plugin/plugin.json`, so `update` always sees the new one. The panel's top row shows the version of the code that is running (`v1.0.0043`); after an update without a reload it still names the old one. [CHANGELOG.md](CHANGELOG.md) lists what each version changed.
+then `/reload-plugins` in open sessions. Every release raises `version` in `.claude-plugin/plugin.json`, so `update` always sees the new one. The panel's top row shows the version of the code that is running (`v1.0.0044`); after an update without a reload it still names the old one. [CHANGELOG.md](CHANGELOG.md) lists what each version changed.
 
 From 1.0.0036 or earlier: task tracking became a choice in 1.0.0037. An install that already ran flowdeck keeps its rule (`on`); see [Task tracking](#task-tracking) for how that is decided. `/flowdeck-agents` still opens the panel for this release; its new name is `/flowdeck-panel`.
 
@@ -188,7 +188,7 @@ Keeps the prompt cache warm through a long idle stretch so the next message read
 
 The panel opens with `/flowdeck-panel`, the band's `×N` button, or by itself when the first worker of a flow starts.
 
-**Top row**: `▼ Context`, `▼ Usage`, `● Band`, `● Keep warm` and `● Track tasks`, with the running version (`v1.0.0043`) at the far end. Context and Usage fold their sections and remember the choice (`▼` open, `▶︎` folded, the same glyphs as every fold in the panel); Band, Keep warm and Track tasks are dot switches (`●` on or shown, `○` off or hidden). Band shows or hides the band; Track tasks turns task tracking on or off (`○` until it is on).
+**Top row**: `▼ Context`, `▼ Usage`, `● Band`, `● Keep warm` and `● Track tasks`, with the running version (`v1.0.0044`) at the far end. Context and Usage fold their sections and remember the choice (`▼` open, `▶︎` folded, the same glyphs as every fold in the panel); Band, Keep warm and Track tasks are dot switches (`●` on or shown, `○` off or hidden). Band shows or hides the band; Track tasks turns task tracking on or off (`○` until it is on).
 
 | Section | Shows |
 |---|---|
@@ -280,7 +280,8 @@ Task tracking decides whether the mod puts its flow rule (`flowdeck:flow-rule`) 
 | `on` | The flow rule is added to every session. No strip. | `Track all tasks`, `● Track tasks` in the top row, `/flowdeck-rule on` |
 | `off` | Nothing is added. The Active and Finished tabs show `Task tracking is off` with `Track all tasks`. | `Not now`, `○ Track tasks`, `/flowdeck-rule off` |
 
-- **One choice for every project**, kept in Claude Code's mod store (key `rule`). A change counts from the next request, in every open session.
+- **One choice for every project**, kept in Claude Code's mod store (key `rule`). Switching applies when the prompt is next composed (a new session, `/clear` or a compaction); running and queued tasks are not affected. A switch never changes a flow, a task or a worker that already exists.
+- **A flow that starts by itself stays quiet.** With tracking `unset` or `off`, a flow that starts from the session's own task list or from a flowdeck worker appears in Active and Finished and on the band, but the panel does not open by itself; `/flowdeck-panel` opens it. With tracking `on`, and for a flow started by `/flowdeck:flowdeck`, the panel opens once for the flow. Turning tracking on later does not open a flow that already started.
 - **`/flowdeck:flowdeck <task>` always works**: the skill carries every rule in `SKILL.md`, and the mod adds the flow rule for the rest of that session too (held in the session's state, never stored), whatever the choice.
 - **`/flowdeck-rule status`** says the current choice and what it means. The strip never shows on the Archive and Trash tabs.
 - **Existing installs (migration in 1.0.0037)**: when the store holds no `rule` yet, the first session start decides once. If the mod ran before (any of its earlier store keys `history`, `keepWarm`, `contextShown`, `usageShown`, `usageRemaining` or `historyShown` is set, or the project's `.claude/flowdeck/` holds `flow-live.json`, `archive-index.json`, `archive/`, `archive-migrated.json` or a `history*.json`), the choice is saved as `on`, so tracking works as before. Otherwise it is saved as `unset`, so a new user's own later flows never turn it on. A store that cannot be read decides nothing and adds nothing.

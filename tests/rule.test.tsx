@@ -311,6 +311,73 @@ describe('the commands', () => {
   })
 })
 
+describe('a flow that starts without being asked stays quiet unless tracking is on', () => {
+  const plan = ($: any, title = 'T') =>
+    $.tool.call({ tool: 'mcp__flowdeck__progress', title, phase: 'delegate', tasks: [{ title: 'one', tier: 'light' }] } as any)
+
+  for (const choice of ['unset', 'off'] as const) {
+    test(`with tracking ${choice} the flow starts and the panel does not open`, async ($, on) => {
+      const { opened } = engine(on, { store: rule(choice) })
+      await start($)
+      const r = await plan($)
+      expect(String(r.result)).toMatch(/^ok: /)
+      expect(opened).toEqual([])
+    })
+  }
+
+  test('with tracking on the panel opens once per flow', async ($, on) => {
+    const { opened } = engine(on, { store: rule('on') })
+    await start($)
+    await plan($)
+    await plan($)
+    expect(opened).toEqual(['flowdeck-agents'])
+  })
+
+  test('turning tracking on later does not open a flow that already started', async ($, on) => {
+    const { opened, store } = engine(on, { store: rule('off') })
+    await start($)
+    await plan($)
+    store.rule = 'on'
+    await plan($)
+    expect(opened).toEqual([])
+    await plan($, 'Another')
+    expect(opened).toEqual(['flowdeck-agents'])
+  })
+
+  test('/flowdeck:flowdeck is an explicit request: it still opens the panel with tracking off', async ($, on) => {
+    const { opened } = engine(on, { store: rule('off') })
+    await start($)
+    await $.skill.prompt({ skill: 'flowdeck', text: 'Task from the user: x', pluginName: 'flowdeck' } as any)
+    await plan($)
+    expect(opened).toEqual(['flowdeck-agents'])
+  })
+})
+
+describe('when a switch applies', () => {
+  const TIMING = 'running and queued tasks are not affected'
+
+  test('the replies of /flowdeck-rule on, off and status say so', async ($, on) => {
+    engine(on)
+    await start($)
+    for (const args of ['on', 'off', 'status']) {
+      const text = String((await $.command.run({ command: 'flowdeck-rule', args } as any)).text)
+      expect(text).toContain('a new session, /clear or a compaction')
+      expect(text).toContain(TIMING)
+    }
+  })
+
+  test('the strip says so, unset and off', async ($, on) => {
+    const { store } = engine(on)
+    await start($)
+    for (const choice of ['unset', 'off']) {
+      store.rule = choice
+      await start($)
+      const s = await strip($, 'terminal')
+      expect(s?.texts.some(t => t.includes('new session, /clear or a compaction') && t.includes(TIMING))).toBe(true)
+    }
+  })
+})
+
 describe('one progress call', () => {
   test('carries add, done and notes together', async ($, on) => {
     engine(on, { store: rule('on') })

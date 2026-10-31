@@ -2,6 +2,10 @@
 
 Versions are `M.m.xxxx`; every build bumps the 4-digit build number. Details and rulings: `docs/ledger.md`, `docs/design.md`.
 
+## 1.0.0044 (2026-10-31)
+- Quiet auto-start: with task tracking `unset` or `off`, a flow that starts by itself (from the session's task list or a flowdeck worker) no longer opens the panel; it still shows in Active, Finished and on the band, and `/flowdeck-panel` opens the panel. With tracking `on`, and for a flow started by `/flowdeck:flowdeck`, nothing changes.
+- The replies of `/flowdeck-rule on|off|status`, the strip on Active and Finished, and the README now say when a switch applies: when the prompt is next composed (a new session, `/clear` or a compaction); running and queued tasks are not affected.
+
 ## 1.0.0043 (2026-10-31)
 - The move-to-Trash button on Archive rows is now a text-style trash can instead of `✕`, and the Restore button on Trash rows is `↩` instead of the word, on the desktop and in the terminal. Behaviour and confirmations are unchanged.
 

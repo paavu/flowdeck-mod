@@ -234,6 +234,7 @@ const RULE_WORDS = {
   ask: 'Track every task in flowdeck?',
   off: 'Task tracking is off',
   body: `When on, Claude plans each task, shows it here with its workers, time and cost, and saves a handoff note. It adds about ${String(TRACKING_TOKENS).replace(/\B(?=(\d{3})+$)/g, ',')} tokens per session and a few tool calls per task. /flowdeck:flowdeck <task> tracks any set of tasks whenever you want.`,
+  timing: 'Switching applies from a new session, /clear or a compaction; running and queued tasks are not affected.',
   on: 'Track all tasks',
   notNow: 'Not now',
 }
@@ -1162,6 +1163,7 @@ async function autoOpen($: EngineInterface, key: string): Promise<void> {
   const p = await readPanel($)
   if (p.autoOpenedFor === key) return
   await updatePanel($, prev => ({ ...prev, autoOpenedFor: key }))
+  if (!(await isRuleOn($).catch(() => false))) return // a flow started without tracking stays quiet; /flowdeck-panel opens it
   void $.ui.open({ id: PANE, title: tr().pane })
 }
 
@@ -1803,6 +1805,9 @@ async function isRuleOn($: EngineInterface): Promise<boolean> {
   return rule === 'on'
 }
 
+// When a switch applies to the flow rule; the running and queued tasks never change.
+const RULE_TIMING = 'Switching applies when the prompt is next composed (a new session, /clear or a compaction); running and queued tasks are not affected.'
+
 const ruleStatus = (rule: Rule, isSession: boolean): string => {
   const what =
     rule === 'on'
@@ -1811,7 +1816,7 @@ const ruleStatus = (rule: Rule, isSession: boolean): string => {
         ? 'off: flowdeck adds nothing to the system prompt; /flowdeck:flowdeck <task> still tracks tasks when asked.'
         : 'not chosen (unset): flowdeck adds nothing to the system prompt until a choice is made; the panel\'s Active tab asks.'
   const session = isSession && rule !== 'on' ? ' This session tracks tasks: /flowdeck:flowdeck ran in it.' : ''
-  return `Task tracking is ${what}${session}`
+  return `Task tracking is ${what}${session} ${RULE_TIMING}`
 }
 
 // Shown on the Active and Finished tabs until tracking is on: what it does and costs, and the buttons that choose.
@@ -1822,6 +1827,7 @@ function ruleStrip($: EngineInterface, ui: Pick<Elements['desktop'], 'Box' | 'Te
     <Box key="rule-strip" flexDirection="column" marginTop={1}>
       <Text bold>{rule === 'off' ? RULE_WORDS.off : RULE_WORDS.ask}</Text>
       <Text dimColor>{RULE_WORDS.body}</Text>
+      <Text dimColor>{RULE_WORDS.timing}</Text>
       <Box flexDirection="row" gap={2}>
         <Button key="rule-on" label={RULE_WORDS.on} plain onPress={() => setRule($, 'on')} />
         {rule === 'unset' ? <Button key="rule-off" label={RULE_WORDS.notNow} plain onPress={() => setRule($, 'off')} /> : null}
@@ -2034,8 +2040,8 @@ export const register: Register = (on, options) => {
       return {
         text:
           arg === 'on'
-            ? 'Task tracking is on for every project, from the next request. /flowdeck-rule off turns it off.'
-            : 'Task tracking is off: flowdeck adds nothing to the system prompt. /flowdeck:flowdeck <task> still tracks tasks.',
+            ? `Task tracking is on for every project. /flowdeck-rule off turns it off. ${RULE_TIMING}`
+            : `Task tracking is off: flowdeck adds nothing to the system prompt. /flowdeck:flowdeck <task> still tracks tasks. ${RULE_TIMING}`,
       }
     }
     if (arg === '' || arg === 'status') {
