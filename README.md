@@ -11,7 +11,7 @@
 </p>
 
 <p align="center">
-  <img alt="Version 1.0.0064" src="https://img.shields.io/badge/version-1.0.0064-8f8cf4">
+  <img alt="Version 1.0.0065" src="https://img.shields.io/badge/version-1.0.0065-8f8cf4">
   <img alt="MIT license" src="https://img.shields.io/badge/license-MIT-5fbf8f">
   <img alt="Claude Code 2.1.295 or later" src="https://img.shields.io/badge/Claude%20Code-%E2%89%A5%202.1.295-8f8cf4">
   <img alt="Terminal and desktop" src="https://img.shields.io/badge/surfaces-terminal%20%2B%20desktop-5fbf8f">
@@ -107,7 +107,7 @@ To see what the mod hooks and calls before you install it, clone the repository 
 ## Your first two minutes
 
 1. Open the panel with `/flowdeck-panel`. It shows the top row, the `FlowDeck` title and the tabs `Active`, `Finished`, `Archive` and `Trash`, all at `(0)` in a new project.
-2. On the Active tab, choose `Track all tasks` (or run `/flowdeck-rule on`) so Claude reports every task to flowdeck. Until the user chooses, the mod adds nothing to the system prompt (see [Task tracking](#task-tracking)).
+2. Task tracking is on from the start, so Claude reports every task to flowdeck. To opt out, switch `● Track tasks` beside the `FlowDeck` title off, or run `/flowdeck-rule off` (see [Task tracking](#task-tracking)).
 3. Run `/flowdeck:flowdeck <a small task>`. It starts a flow whatever the tracking choice.
 4. Watch the band above the prompt (the running task, `Tasks X/Y`, the progress bar) and the Active tab, where each worker appears with its steps.
 5. Open a task's handoff note with `ⓘ` and read its Goal, Brief, Result and Feedback.
@@ -117,12 +117,12 @@ To see what the mod hooks and calls before you install it, clone the repository 
 
 | Feature | What it shows or does |
 |---|---|
-| [Band](#the-band-above-the-prompt) | One row above the prompt: the running task, `Tasks X/Y`, a progress bar and percent, the cache chip, the running workers and a dismiss button. |
+| [Band](#the-band-above-the-prompt) | One row above the prompt: the running task, `Tasks X/Y`, a progress bar and percent, the cache chip, the running workers and a dismiss button at the right edge. |
 | [Context](#context) | The context window as a stacked bar by category, with the point where auto-compaction runs. |
 | [Usage](#usage) | The five-hour and weekly limits as bars that drain, an even-pace mark, a forecast to the reset and the reset time. |
 | [WARM/COLD cache chip and card](#the-prompt-cache-chip-and-card) | Whether the prompt cache is still warm (minutes left) or cold (idle time and the cost of the next message), and a card with the cost per model. |
 | [Keep warm](#keep-warm) | Renews the prompt cache with one small side request during a long idle stretch; the card says when it renews and how often it did. |
-| [Track all tasks](#task-tracking) | One choice for every project: whether Claude reports every task to flowdeck. The Active tab asks on a fresh install; `/flowdeck:flowdeck` always works. |
+| [Track all tasks](#task-tracking) | One choice for every project: whether Claude reports every task to flowdeck. On by default; a strip shows only while it is off. `/flowdeck:flowdeck` always works. |
 | [Panel top row and tabs](#the-panel) | Switches for Context, Usage, Band and Keep warm, the version, the `FlowDeck` title with the Track tasks switch, and the tabs `Active`, `Finished`, `Archive`, `Trash` with live counts. |
 | [Flows and workers](#flows-and-workers) | A flow is a task list the orchestrator plans and delegates to five worker tiers; each worker row shows its tier, model, effort, `after` waits, state, steps and times. |
 | [Handoff notes](#handoff-notes) | A note per task with Goal, Brief, Result and Feedback, opened with `ⓘ`. |
@@ -143,7 +143,7 @@ Each section below has a screenshot with numbered circles, a "What you see" list
   <img alt="The band of a running flow with nine numbered callouts: the title, the progress bar, the Tasks 2/4 label, the percent, the WARM chip, the cache chevron, the worker icon, the running-workers button and the dismiss button" src="docs/images/band-running-light.png">
 </picture>
 
-One row for the open flow.
+One row for the open flow. On the desktop the cache chip and its chevron sit on one card and the worker icon and `×N` on another, with the `✕` at the right edge; the terminal draws the same parts as plain text.
 
 What you see:
 
@@ -513,23 +513,7 @@ How to use: answer the dialog when it appears; `Approve` runs that one Fable lau
 
 ## Task tracking
 
-A fresh install has not chosen yet; the Active tab asks:
-
-<picture>
-  <source media="(prefers-color-scheme: dark)" srcset="docs/images/panel-tracking-unset-dark.png">
-  <img alt="The Active tab on a fresh install: the question Track every task in flowdeck?, what tracking does and costs, and the buttons Track all tasks and Not now above the empty list" src="docs/images/panel-tracking-unset-light.png" width="520">
-</picture>
-
-What you see:
-
-1. The question. It shows on the Active and Finished tabs until the user chooses; until then the mod adds nothing to the system prompt.
-2. What tracking does and what it costs in tokens, and when a switch applies (a new session, `/clear` or a compaction).
-3. `Track all tasks`: turns tracking on for every project.
-4. `Not now`: turns it off; the strip then says `Task tracking is off`.
-
-How to use: press `Track all tasks` to have every task reported, or `Not now` to leave it off and still start flows with `/flowdeck:flowdeck <task>`.
-
-With tracking off, the strip stays as a reminder with one button:
+Tracking is on from the first session of every install. Only an explicit `off` stops it; an install that stored `unset` in an older release counts as on. While tracking is off, the Active and Finished tabs show a strip with one button:
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="docs/images/panel-tracking-off-dark.png">
@@ -539,26 +523,26 @@ With tracking off, the strip stays as a reminder with one button:
 What you see:
 
 1. `Task tracking is off`: the current choice.
-2. The same explanation as on a fresh install.
+2. What tracking does and what it costs in tokens, and when a switch applies (the next work call for turning on, the next new session, `/clear` or compaction for the system prompt).
 3. `Track all tasks`: turns tracking on. The `● Track tasks` switch beside the `FlowDeck` title above the tabs does the same, and `/flowdeck-rule on` or `off` from the prompt.
 
-How to use: switch tracking from the strip, the switch beside the `FlowDeck` title or `/flowdeck-rule`; the choice is kept for every project.
+How to use: switch tracking from the strip, the switch beside the `FlowDeck` title or `/flowdeck-rule`; the choice is kept for every project. With tracking on there is no strip.
 
-Task tracking decides whether the mod puts its flow rule (`flowdeck:flow-rule`) into the system prompt of every session. The rule tells Claude to report every task through `progress`: the plan once with `title` and `tasks` (`title`, `tier`, `after` for tasks that edit the same files, `goal`), `add` for a new task, `done` with `result` and `feedback` notes when a task is accepted, and `#<n> <title>` at the start of each worker's Agent description; a question or a one-step edit gets no flow. It blocks no edit or tool call.
+Task tracking decides whether the mod puts its flow rule (`flowdeck:flow-rule`) into the system prompt of every session. It is on unless switched off. The rule tells Claude to report every task through `progress`: the plan once with `title` and `tasks` (`title`, `tier`, `after` for tasks that edit the same files, `goal`), `add` for a new task, `done` with `result` and `feedback` notes when a task is accepted, and `#<n> <title>` at the start of each worker's Agent description; a question or a one-step edit gets no flow. It blocks no edit or tool call.
 
 The rule is a request, so the mod also checks it. With tracking on and no flow open, the main session's first work call of a turn (an edit, a write, a shell command, a worker launch; reads, searches and flowdeck's own tools do not count) gets one extra line in its result: plan a task of two or more steps with `progress` before going on, while a question or a one-step edit needs no flow. It fires at most once a turn, stops once a flow is open, never reaches a worker, and never changes or blocks the call.
 
 | Choice | The system prompt | Set by |
 |---|---|---|
-| `unset` | Nothing is added. The Active and Finished tabs show `Track every task in flowdeck?` with `Track all tasks` and `Not now`. | A fresh install |
-| `on` | The flow rule is added to every session. No strip. | `Track all tasks`, `● Track tasks` beside the `FlowDeck` title, `/flowdeck-rule on` |
-| `off` | Nothing is added. The Active and Finished tabs show `Task tracking is off` with `Track all tasks`. | `Not now`, `○ Track tasks`, `/flowdeck-rule off` |
+| `on` | The flow rule is added to every session. No strip. | The default for every install; `Track all tasks`, `● Track tasks` beside the `FlowDeck` title, `/flowdeck-rule on` |
+| `off` | Nothing is added and the plan reminder stops. The Active and Finished tabs show `Task tracking is off` with `Track all tasks`. | `○ Track tasks`, `/flowdeck-rule off` |
+| `unset` | Counts as `on`. Only older releases stored it; no screen draws it. | An install from before 1.0.0065 that never chose |
 
-- **One choice for every project**, kept in Claude Code's mod store (key `rule`). Switching applies when the prompt is next composed (a new session, `/clear` or a compaction); running and queued tasks are not affected. A switch never changes a flow, a task or a worker that already exists.
-- **A flow that starts by itself stays quiet.** With tracking `unset` or `off`, a flow that starts from the session's own task list or from a flowdeck worker appears in Active and Finished and on the band, but the panel does not open by itself; `/flowdeck-panel` opens it. With tracking `on`, and for a flow started by `/flowdeck:flowdeck`, the panel opens once for the flow. Turning tracking on later does not open a flow that already started.
+- **One choice for every project**, kept in Claude Code's mod store (key `rule`). Turning tracking on reaches the running session at once: the plan reminder carries the full flow rule (one line, at most once a main turn, on the first work call when no flow is open) until a prompt compose has put the rule in the system prompt. The system prompt itself changes at the next compose (a new session, `/clear` or a compaction). Turning tracking off applies at the next compose, and the reminder stops at once. Running and queued tasks are not affected. A switch never changes a flow, a task or a worker that already exists.
+- **A flow that starts by itself stays quiet.** With tracking `off`, a flow that starts from the session's own task list or from a flowdeck worker appears in Active and Finished and on the band, but the panel does not open by itself; `/flowdeck-panel` opens it. With tracking `on`, and for a flow started by `/flowdeck:flowdeck`, the panel opens once for the flow. Turning tracking on later does not open a flow that already started.
 - **`/flowdeck:flowdeck <task>` always works**: the skill carries every rule in `SKILL.md`, and the mod adds the flow rule for the rest of that session too (held in the session's state, never stored), whatever the choice.
 - **`/flowdeck-rule status`** says the current choice and what it means. The strip never shows on the Archive and Trash tabs.
-- **Existing installs (migration in 1.0.0037)**: when the store holds no `rule` yet, the first session start decides once. If the mod ran before (any of its earlier store keys `history`, `keepWarm`, `contextShown`, `usageShown`, `usageRemaining` or `historyShown` is set, or the project's `.claude/flowdeck/` holds `flow-live.json`, `archive-index.json`, `archive/`, `archive-migrated.json` or a `history*.json`), the choice is saved as `on`, so tracking works as before. Otherwise it is saved as `unset`, so a new user's own later flows never turn it on. A store that cannot be read decides nothing and adds nothing.
+- **Existing installs**: from 1.0.0065 every install tracks unless its stored choice is `off`. Release 1.0.0037 had saved `on` for an install that already ran the mod and `unset` for a new one; `unset` now counts as `on`, so those installs start tracking at their next session. Opt out with `/flowdeck-rule off` or the `○ Track tasks` switch. A store that cannot be read counts as on.
 
 ### What it costs
 
@@ -566,12 +550,12 @@ Measured on Claude Code 2.1.312. Prose is estimated at about 3.6 characters a to
 
 | Part | When it is read | 1.0.0036 | 1.0.0037 |
 |---|---|---|---|
-| Flow rule (system prompt) | every request while tracking is on (before: always) | 896 characters, about 250 tokens; `/context` System prompt +0.3k | 476 characters, about 130 tokens; +0.1k, and nothing while `unset` or `off` |
+| Flow rule (system prompt) | every request while tracking is on (before: always) | 896 characters, about 250 tokens; `/context` System prompt +0.3k | 476 characters, about 130 tokens; +0.1k, and nothing while `off` |
 | `progress` tool schema | once the main session loads the tool | 4,689 characters, `/context` 2.3k tokens | 3,246 characters, `/context` 1.6k tokens |
 | `step` tool schema | once a worker loads the tool | 1,516 characters, `/context` 758 tokens | 1,274 characters, `/context` 638 tokens |
 | `SKILL.md` | when `/flowdeck:flowdeck` runs | 16,712 characters, about 4,640 tokens | 16,828 characters, about 4,670 tokens |
 
-With tracking on, the main session pays about 1,760 tokens (1.0.0064 adds one sentence to the rule, about 25 more, and the plan reminder above, a short line at most once a turn) (the rule and the `progress` schema; the strip's number is computed from the same texts) and a few `progress` calls per task. With tracking `unset` or `off`, the tools are listed by name only (deferred) and the system prompt is unchanged.
+With tracking on, the main session pays the flow rule (about 740 characters, about 205 tokens in the system prompt), the `progress` schema once the tool is loaded, and a short reminder line at most once a main turn when no flow is open (it carries the whole rule only until a compose has put the rule in the system prompt). The strip's token number is computed from the same texts. A few `progress` calls per task come on top. With tracking `off`, the tools are listed by name only (deferred) and the system prompt is unchanged.
 
 ## Configuration and data
 
@@ -581,7 +565,7 @@ With tracking on, the main session pays about 1,760 tokens (1.0.0064 adds one se
 | Context, Usage folded | panel top row (mod store `contextShown`, `usageShown`) | shown |
 | Reset as time left or exact time | `◷` in Usage (mod store `usageRemaining`) | time left |
 | Keep warm | panel top row (mod store `keepWarm`, per project folder) | on |
-| Task tracking | `Track tasks` beside the `FlowDeck` title, the strip's buttons, `/flowdeck-rule` (mod store `rule`, all projects) | `unset` on a fresh install, `on` for an install that ran before 1.0.0037 |
+| Task tracking | `Track tasks` beside the `FlowDeck` title, the strip's buttons, `/flowdeck-rule` (mod store `rule`, all projects) | `on` |
 | Band shown | panel top row (per session) | shown |
 | Cache prices | `MODELS` in `hooks/cache.ts` | Fable 10 / 0.25, Opus 4 / 0.20, Sonnet 2 / 0.20, Haiku 0.5 / 0.05 USD per million tokens |
 | Keep warm timing | top of `hooks/cache.ts` | renew at minute 50, at least 80,000 tokens, at most 8 renewals |
@@ -641,7 +625,7 @@ claude plugin update flowdeck@flowdeck-mod
 
 then `/reload-plugins` in open sessions. Every release raises `version` in `.claude-plugin/plugin.json`, so `update` always sees the new one. The panel's top row shows the version of the code that is running (`v1.0.0059`); after an update without a reload it still names the old one. [CHANGELOG.md](CHANGELOG.md) lists what each version changed.
 
-From 1.0.0036 or earlier: task tracking became a choice in 1.0.0037. An install that already ran flowdeck keeps its rule (`on`); see [Task tracking](#task-tracking) for how that is decided. `/flowdeck-agents` still opens the panel for this release; its new name is `/flowdeck-panel`.
+From 1.0.0064 or earlier: task tracking is on by default from 1.0.0065, and a stored `unset` counts as on; see [Task tracking](#task-tracking) to opt out. `/flowdeck-agents` still opens the panel for this release; its new name is `/flowdeck-panel`.
 
 From 1.0.0034 or earlier: the Plans tab and the `plan` tool are gone (1.0.0035). An old `plans.json` is ignored and never deleted, and a panel left on the Plans tab opens on Active.
 
@@ -728,7 +712,7 @@ To run your working copy, add the folder as a marketplace (`claude plugin market
 - The cache chip assumes Claude Code's 1-hour prompt cache, and its prices are estimates.
 - Keep warm was tested through the test kit only (with `$.model.fork` answered by the test), not yet measured in a live session. A renewal can come up to 5 seconds after minute 50; while the machine sleeps nothing runs.
 - The token numbers in [What it costs](#what-it-costs) are estimates: no tokenizer is available to the mod, and `/context` estimates too. The session switch from `/flowdeck:flowdeck` was tested through the test kit's `skill.prompt` only, not in a live session.
-- A task list (TodoWrite) or a flowdeck worker still starts a flow in the panel while tracking is `unset` or `off`; that adds nothing to the system prompt.
+- A task list (TodoWrite) or a flowdeck worker still starts a flow in the panel while tracking is `off`; that adds nothing to the system prompt.
 - The `ⓘ` glyph and the desktop layout estimates (chevron width, the cache chevron's room) were checked in tests, not measured in a live desktop window.
 
 ## Credits and license

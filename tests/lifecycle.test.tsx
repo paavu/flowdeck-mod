@@ -524,8 +524,8 @@ describe('with an empty store and no settings, as on a new machine', () => {
     on('prompt.compose', () => ({ sections: [] }))
     await start($)
     const compose = () => $.prompt.compose({ model: 'm', promptModel: 'm', surfaces: ['terminal'], tools: [], outputStyle: null, traits: [] } as any)
-    // A fresh install has made no choice: nothing goes into the system prompt until the user turns tracking on.
-    expect((await compose()).sections.map((s: any) => s.id)).toEqual([])
+    // A fresh install tracks tasks: the rule goes into the system prompt from the start.
+    expect((await compose()).sections.map((s: any) => s.id)).toEqual(['flowdeck:flow-rule'])
     // a task list starts the flow; a worker does one task, the list completes the other
     await todo($, [['Build the thing', 'in_progress'], ['Check the thing', 'pending']])
     await launch($, 'w1', 'Build the thing', 'medium')
@@ -550,6 +550,8 @@ describe('with an empty store and no settings, as on a new machine', () => {
     expect(sessionPaths(files, DIR)).toHaveLength(1)
     expect(await bandSays($)).toBe('')
     for (const surface of SURFACES) expect(await paneText($, surface)).toMatch(/v\d+\.\d+\.\d{4}/)
+    await $.command.run({ command: 'flowdeck-rule', args: 'off' } as any)
+    expect((await compose()).sections.map((s: any) => s.id)).toEqual([])
     await $.command.run({ command: 'flowdeck-rule', args: 'on' } as any)
     expect((await compose()).sections.map((s: any) => s.id)).toEqual(['flowdeck:flow-rule'])
   })

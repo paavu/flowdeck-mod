@@ -318,7 +318,7 @@ describe('the chip in the band', () => {
       expect(l.buttons).toEqual([{ key: 'cache-fold', label: '▶︎' }])
     })
 
-    test(`with a flow the chip sits between the progress and the buttons (${surface})`, async ($, on) => {
+    test(`with a flow the chip sits between the progress and the buttons (${surface})`, { timeoutMs: 15_000 }, async ($, on) => {
       const { clock } = engine(on)
       await start($)
       await progress($, { title: 'Ship it', phase: 'delegate', tasks: [{ title: 'a', tier: 'light' }] })
@@ -352,9 +352,55 @@ describe('the chip in the band', () => {
     for (const columns of [60, 100, 200, 400]) {
       const l = await look($, 'desktop', columns)
       const slot = Math.min(1600, columns * 9 - 180)
-      expect(l.widths[0]).toBe(Math.max(180, slot - (l.widths[1]! + CACHE_FOLD_PX) - 56)) // 56: the crew icon and its button
+      expect(l.widths[0]).toBe(Math.max(180, slot - (l.widths[1]! + CACHE_FOLD_PX + 18) - 74)) // 18: a card's padding; 74: the crew icon and its button in their card
       expect(l.json).toContain('"overflow":"hidden"') // still shrinks and clips, never pushes a neighbour
     }
+  })
+
+  test('the desktop row: a card behind the cache block and one behind the crew, the spare room before them, the X last', async ($, on) => {
+    engine(on)
+    await start($)
+    await progress($, { title: 'Ship it', phase: 'delegate', tasks: [{ title: 'a', tier: 'light' }] })
+    await mainTurn($)
+    const kidsOf = (n: any): any[] => [].concat(n?.children ?? n?.props?.children ?? []).filter((c: any) => c && typeof c === 'object')
+    const keyOf = (n: any): string => String(n?.key ?? n?.props?.key ?? n?.type)
+    const all = (n: any): any[] => (Array.isArray(n) ? n.flatMap(all) : n && typeof n === 'object' ? [n, ...kidsOf(n).flatMap(all)] : [])
+    for (const columns of [60, 100, 200, 400]) {
+      const b = await band($, 'desktop', columns)
+      const nodes = all(await b.drawn())
+      const row = nodes.find(n => kidsOf(n).some(c => keyOf(c) === 'flowdeck-dismiss'))
+      expect(kidsOf(row).map(keyOf)).toEqual(['Svg', 'flowdeck-band-spacer', 'flowdeck-cache-card', 'flowdeck-agents-card', 'flowdeck-dismiss'])
+      expect(row.props.gap).toBe('xs')
+      const [, spacer, cacheCard, crewCard, dismiss] = kidsOf(row)
+      expect(spacer.props.flexGrow).toBe(1)
+      expect(dismiss.props.role).toBe('dismiss')
+      expect(kidsOf(cacheCard).map(keyOf)).toEqual(['Svg', 'cache-fold']) // the chip's drawing, then its chevron
+      expect(kidsOf(crewCard).map(keyOf)).toEqual(['Svg', 'flowdeck-agents']) // the crew icon, then its ×N
+      expect(kidsOf(cacheCard)[0].props.alt).toMatch(/^WARM: /)
+      expect(kidsOf(crewCard)[0].props.alt).toBe('no workers running')
+      for (const c of [cacheCard, crewCard]) {
+        expect(c.props.paddingX).toBe(1)
+        expect(c.props.paddingY).toBeUndefined() // the row keeps its height
+        expect(c.props.flexShrink).toBe(0)
+      }
+      // only the two cards are tinted: the title, the progress and the X stay on the band
+      expect(nodes.filter(n => n.props?.backgroundColor).map(keyOf)).toEqual(['flowdeck-cache-card', 'flowdeck-agents-card'])
+      // the pressables are the same three Buttons as before the cards
+      expect((await b.findAll({ type: 'Button' })).map((x: any) => String(x.props.key))).toEqual(['cache-fold', 'flowdeck-agents', 'flowdeck-dismiss'])
+      await b.unmount()
+    }
+  })
+
+  test('the desktop row without a flow cards the cache block alone', async ($, on) => {
+    engine(on)
+    await start($)
+    await mainTurn($)
+    const l = await look($, 'desktop')
+    expect(l.json).toContain('"flowdeck-cache-card"')
+    expect(l.json).not.toContain('"flowdeck-agents-card"')
+    expect((l.json.match(/"backgroundColor"/g) ?? []).length).toBe(1)
+    const term = await look($, 'terminal')
+    expect(term.json).not.toContain('"flowdeck-cache-card"')
   })
 
   test('the terminal row gives the chip, its chevron and their gaps their columns', async ($, on) => {

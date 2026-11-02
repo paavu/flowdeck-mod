@@ -28,7 +28,7 @@ import { changeLive, endRuns, IDLE_FINISH_MS, isGone, LIVE_BEAT_MS, LIVE_STALE_M
 import type { LiveRecord } from './live'
 import { SMALL_SIZE } from './sizes'
 import { VERSION } from './version'
-import { asRule, estimateTokens, isPriorFile, isStoredRule, PRIOR_STORE_KEYS, RULE_KEY, SCHEMA_CHARS_PER_TOKEN, toggledRule } from './rule'
+import { asRule, estimateTokens, isStoredRule, isTracking, RULE_KEY, SCHEMA_CHARS_PER_TOKEN, toggledRule } from './rule'
 import { live, record, resetKey, resets, toWindows, usageHeadSvg, usageRows, usageSvg } from './usage'
 import { CACHE_HUE, cacheKey, isCardOpen, isRenewDue, isShowable, KEEP_WARM_DEFAULT, measured, remeasured, renewalEnded, seeded, stamped, toggledFold, userSpoke, viewOf } from './cache'
 import type { CacheFacts, CacheMode, KeepWarm } from './cache'
@@ -233,12 +233,10 @@ const toolChars = (spec: { name: string; description: string; inputSchema: unkno
 const TRACKING_TOKENS = Math.round((estimateTokens(FLOW_RULE.length) + estimateTokens(toolChars(PROGRESS_SPEC), SCHEMA_CHARS_PER_TOKEN)) / 10) * 10
 
 const RULE_WORDS = {
-  ask: 'Track every task in flowdeck?',
   off: 'Task tracking is off',
   body: `When on, Claude plans each task, shows it here with its workers, time and cost, and saves a handoff note. It adds about ${String(TRACKING_TOKENS).replace(/\B(?=(\d{3})+$)/g, ',')} tokens per session and a few tool calls per task. /flowdeck:flowdeck <task> tracks any set of tasks whenever you want.`,
-  timing: 'Switching applies from a new session, /clear or a compaction; running and queued tasks are not affected.',
+  timing: 'Turning it on applies from the next work call, and in the system prompt from a new session, /clear or a compaction; running and queued tasks are not affected.',
   on: 'Track all tasks',
-  notNow: 'Not now',
 }
 const ACCENT = '#8f8cf4'
 const DONE = '#5fbf8f'
@@ -514,7 +512,13 @@ const H = 22
 const MAX_BAND_W = 1600 // the widest the desktop band's drawing gets
 const BAR_H = 16
 const SPRITE_W = 26
-const CREW_W = SPRITE_W + 30 // the crew icon plus the "×N" button (×0 to ×99), the same slack as before
+// The desktop row's cards behind the cache block and the agents block: a neutral tint that reads a step off the band in
+// both themes (the kit's Box takes one colour, no theme pair), padded CARD_PAD cells (about 9 px each) at both ends.
+const CARD_TINT = '#80808026'
+const CARD_PAD = 1
+const CARD_PAD_PX = 2 * 9
+const BAND_GAP = 'xs' // between the desktop row's parts: the progress, the spacer, the two cards and the close X
+const CREW_W = SPRITE_W + 30 + CARD_PAD_PX // the crew icon plus the "×N" button (×0 to ×99) in their card
 const CELL = 3
 const FONT = "-apple-system,BlinkMacSystemFont,'SF Pro Text','Segoe UI',sans-serif"
 
@@ -1600,7 +1604,8 @@ const shown = new Map<string, { tool?: string; isAsked: boolean }>()
 const quiet = new Map<string, number>()
 
 // The main session's first work call of a turn, with tracking on and no flow open, gets one line to plan first (nudge.ts
-// PLAN_NUDGE). Never alters the call itself; a failing read adds nothing.
+// PLAN_NUDGE). While the system prompt does not hold the rule yet (tracking turned on after the last compose), the line
+// carries the whole rule, so the running session tracks tasks at once. Never alters the call itself; a failing read adds nothing.
 async function planNudge($: EngineInterface, e: { tool: string; agentId?: string }, next: (e: any) => Promise<any>): Promise<any> {
   if (planNudged || !isWorkCall(e.tool)) return next(e)
   let isDue = false
@@ -1614,7 +1619,7 @@ async function planNudge($: EngineInterface, e: { tool: string; agentId?: string
   }
   if (!isDue) return next(e)
   planNudged = true
-  return withNudgeLine(await next(e), PLAN_NUDGE)
+  return withNudgeLine(await next(e), ruleComposed ? PLAN_NUDGE : `${PLAN_NUDGE} ${FLOW_RULE}`)
 }
 
 const forgetFlights = (agentId: string): void => {
@@ -1712,6 +1717,8 @@ let renewing = false
 let prompted = false
 // The plan nudge went out in this main turn (nudge.ts PLAN_NUDGE): at most one a turn.
 let planNudged = false
+// The last prompt compose put the flow rule in the system prompt; false from session start until one does.
+let ruleComposed = false
 const RENEW_PROMPT = 'This request only renews the prompt cache for an idle session. Reply with the single word: ok'
 
 const isRenewalEcho = async ($: EngineInterface): Promise<boolean> => renewing && (await readKeepWarm($)).turnAt === 0
@@ -1770,29 +1777,13 @@ async function loadKeepWarm($: EngineInterface): Promise<boolean | undefined> {
   return typeof on === 'boolean' ? on : undefined
 }
 
-// Task tracking's choice at session start. A store with no choice yet is migrated once: an install that ran before the
-// choice existed (an earlier flowdeck's store keys, or flow files in this project) keeps its rule (`on`); a fresh one saves
-// `unset`, so later sessions never migrate a fresh user's own flows into `on`. A store that cannot be read migrates nothing.
+// Task tracking's choice at session start. A store with no choice yet saves `on` once; a stored choice (an earlier
+// release's `unset` too) is kept. A store that cannot be read saves nothing.
 async function loadRule($: EngineInterface): Promise<Rule> {
   const stored: unknown = await $.store.get(RULE_KEY)
   if (isStoredRule(stored)) return asRule(stored)
-  const isPrior = await hadFlowdeck($).catch(() => false)
-  const rule: Rule = isPrior ? 'on' : 'unset'
-  await $.store.set(RULE_KEY, rule).catch(() => {})
-  return rule
-}
-
-async function hadFlowdeck($: EngineInterface): Promise<boolean> {
-  for (const key of PRIOR_STORE_KEYS) {
-    const v: unknown = await $.store.get(key).catch(() => undefined)
-    if (v !== undefined && v !== null) return true
-  }
-  const dir = dataDir(project)
-  if (!dir) return false
-  const names = await Promise.resolve()
-    .then(() => $.fs.list(dir))
-    .catch(() => [])
-  return names.some(n => isPriorFile(n.name))
+  await $.store.set(RULE_KEY, 'on').catch(() => {})
+  return 'on'
 }
 
 // One choice for every project: the panel's copy draws the strip and the switch, the store keeps it.
@@ -1801,41 +1792,40 @@ async function setRule($: EngineInterface, rule: Rule): Promise<void> {
   await $.store.set(RULE_KEY, rule).catch(() => {})
 }
 
-// The rule goes into the system prompt while tracking is on or /flowdeck:flowdeck ran in this session. The store is read
-// each time, so a choice made in another session counts from its next request; the panel's copy stands in when it cannot.
+// The rule goes into the system prompt unless tracking is off, or always once /flowdeck:flowdeck ran in this session. The
+// store is read each time, so a choice made in another session counts from its next request; the panel's copy stands in
+// when it cannot be read. Never throws: a failing read counts as on.
 async function isRuleOn($: EngineInterface): Promise<boolean> {
   if ((await read($, ruleSession).catch(() => false)) === true) return true
   const stored: unknown = await $.store.get(RULE_KEY).catch(() => null)
   const rule = isStoredRule(stored) ? asRule(stored) : (await readPanel($).catch(() => asPanel(null))).rule
-  return rule === 'on'
+  return isTracking(rule)
 }
 
-// When a switch applies to the flow rule; the running and queued tasks never change.
-const RULE_TIMING = 'Switching applies when the prompt is next composed (a new session, /clear or a compaction); running and queued tasks are not affected.'
+// When a switch applies: on reaches the running session through the plan nudge (planNudge), the system prompt at its next
+// compose; the running and queued tasks never change.
+const RULE_TIMING =
+  'Turning it on applies from the next work call (a reminder) and in the system prompt from the next compose (a new session, /clear or a compaction); turning it off applies at the next compose, and the reminder stops at once; running and queued tasks are not affected.'
 
 const ruleStatus = (rule: Rule, isSession: boolean): string => {
-  const what =
-    rule === 'on'
-      ? 'on: the flow rule is in every session\'s system prompt, so Claude tracks every task in flowdeck.'
-      : rule === 'off'
-        ? 'off: flowdeck adds nothing to the system prompt; /flowdeck:flowdeck <task> still tracks tasks when asked.'
-        : 'not chosen (unset): flowdeck adds nothing to the system prompt until a choice is made; the panel\'s Active tab asks.'
-  const session = isSession && rule !== 'on' ? ' This session tracks tasks: /flowdeck:flowdeck ran in it.' : ''
+  const what = isTracking(rule)
+    ? 'on: the flow rule is in every session\'s system prompt, so Claude tracks every task in flowdeck.'
+    : 'off: flowdeck adds nothing to the system prompt; /flowdeck:flowdeck <task> still tracks tasks when asked.'
+  const session = isSession && !isTracking(rule) ? ' This session tracks tasks: /flowdeck:flowdeck ran in it.' : ''
   return `Task tracking is ${what}${session} ${RULE_TIMING}`
 }
 
-// Shown on the Active and Finished tabs until tracking is on: what it does and costs, and the buttons that choose.
+// Shown on the Active and Finished tabs only while tracking is off: what it does and costs, and the button that turns it on.
 function ruleStrip($: EngineInterface, ui: Pick<Elements['desktop'], 'Box' | 'Text' | 'Button'>, rule: Rule): RenderChildren {
-  if (rule === 'on') return null
+  if (isTracking(rule)) return null
   const { Box, Text, Button } = ui
   return (
     <Box key="rule-strip" flexDirection="column" marginTop={1}>
-      <Text bold>{rule === 'off' ? RULE_WORDS.off : RULE_WORDS.ask}</Text>
+      <Text bold>{RULE_WORDS.off}</Text>
       <Text dimColor>{RULE_WORDS.body}</Text>
       <Text dimColor>{RULE_WORDS.timing}</Text>
       <Box flexDirection="row" gap={2}>
         <Button key="rule-on" label={RULE_WORDS.on} plain onPress={() => setRule($, 'on')} />
-        {rule === 'unset' ? <Button key="rule-off" label={RULE_WORDS.notNow} plain onPress={() => setRule($, 'off')} /> : null}
       </Box>
     </Box>
   )
@@ -1960,7 +1950,7 @@ function flowTitleRow($: EngineInterface, ui: Pick<Elements['desktop'], 'Box' | 
         </Text>
       </Box>
       <Box flexShrink={0}>
-        <Button key="track-tasks" label={`${p.rule === 'on' ? '●' : '○'} Track tasks`} plain onPress={() => setRule($, toggledRule(p.rule))} />
+        <Button key="track-tasks" label={`${isTracking(p.rule) ? '●' : '○'} Track tasks`} plain onPress={() => setRule($, toggledRule(p.rule))} />
       </Box>
     </Box>
   )
@@ -2008,7 +1998,7 @@ export const register: Register = (on, options) => {
     const started = await next(e)
     lang = await detectLang($, options.language).catch((): Lang => 'en')
     project = typeof e.cwd === 'string' ? e.cwd : ''
-    // Before the archive loads: that may write this project's files, which the migration reads as an earlier install's.
+    ruleComposed = false
     const rule = await loadRule($).catch(() => null)
     if (rule) await updatePanel($, prev => (prev.rule === rule ? prev : { ...prev, rule }))
     const stored = await $.store.get('contextShown').catch(() => undefined)
@@ -2068,11 +2058,12 @@ export const register: Register = (on, options) => {
     return started
   })
 
-  // The flow rule is added to whatever the engine and other mods composed, only while tracking is on (isRuleOn); a failure
+  // The flow rule is added to whatever the engine and other mods composed, unless tracking is off (isRuleOn); a failure
   // below is not masked (that would replace the real prompt with ours alone).
   on('prompt.compose', async ($, e, next) => {
     const result = await next(e)
-    if (!(await isRuleOn($).catch(() => false))) return result
+    ruleComposed = await isRuleOn($).catch(() => true)
+    if (!ruleComposed) return result
     return { sections: [...result.sections, { id: 'flowdeck:flow-rule', text: FLOW_RULE, scope: 'session' as const }] }
   })
 
@@ -3195,6 +3186,14 @@ export const register: Register = (on, options) => {
     // The prompt cache's chip, shown once the session made a request, with or without a flow (cache-view.tsx).
     const cache = await cacheBandPart($, { Box, Text, Button, Svg: e.surface !== 'terminal' && 'Svg' in ui ? ui.Svg : null } as CacheUi, bandWidth, e.props.bodyColumns || 0)
     if (f === null && !cache) return next(e)
+    const isDesktop = e.surface !== 'terminal' && 'Svg' in ui
+    // The desktop row's card behind a block (the cache's chip and chevron, the crew icon and its count): only a backdrop,
+    // what is pressable inside stays as it is.
+    const card = (key: string, children: RenderChildren) => (
+      <Box key={key} flexDirection="row" alignItems="center" gap={BAND_GAP} flexShrink={0} paddingX={CARD_PAD} backgroundColor={CARD_TINT}>
+        {children}
+      </Box>
+    )
 
     // What other mods and Claude Code draw here stays, below this row; when that fails, the row is drawn without it.
     const theirs = await next(e).catch((): RenderChildren => null)
@@ -3203,7 +3202,7 @@ export const register: Register = (on, options) => {
         <Box flexDirection="column">
           {cache ? (
             <Box key="flowdeck-cache" flexDirection="row" alignItems="center" gap={1} flexShrink={1} minWidth={0} overflow="hidden">
-              {cache.row}
+              {isDesktop ? card('flowdeck-cache-card', cache.row) : cache.row}
             </Box>
           ) : null}
           {cache?.card ?? null}
@@ -3233,19 +3232,22 @@ export const register: Register = (on, options) => {
     )
 
     // The terminal's kit has an Svg too, drawn as an empty box: the terminal takes the text row.
-    if (e.surface !== 'terminal' && 'Svg' in ui) {
+    if (isDesktop && 'Svg' in ui) {
       const { Svg } = ui
       // About 9 CSS px per reported column (measured in the desktop app; savvy-progress assumed 8 and stopped
-      // short); the count, the dismiss and their gaps take the rest, so the row runs to the right edge like the other bars.
-      // The cache chip, between the progress and the buttons, takes its own width from the progress.
-      const width = Math.max(180, Math.min(MAX_BAND_W, (e.props.bodyColumns || 100) * 9 - 180) - (cache?.size ?? 0) - CREW_W)
+      // short); the count, the dismiss and their gaps take the rest. The cache card, between the progress and the crew's,
+      // takes its own width from the progress; the spacer before it takes what is left, so the close X ends the row.
+      const width = Math.max(180, Math.min(MAX_BAND_W, (e.props.bodyColumns || 100) * 9 - 180) - (cache ? cache.size + CARD_PAD_PX : 0) - CREW_W)
       return (
         <Box flexDirection="column">
-          <Box flexDirection="row" alignItems="center" gap={1} flexShrink={1} minWidth={0} overflow="hidden">
+          <Box flexDirection="row" alignItems="center" gap={BAND_GAP} flexShrink={1} minWidth={0} overflow="hidden">
             <Svg source={rowSvg(g, width, title)} alt={`${title}: ${label(g, true)}, ${percent}`} width={width} height={H} />
-            {cache?.row ?? null}
-            <Svg source={crewSvg(running > 0)} alt={running ? `${running} ${running === 1 ? 'worker' : 'workers'} running` : 'no workers running'} width={SPRITE_W} height={H} />
-            {crewButton}
+            <Box key="flowdeck-band-spacer" flexGrow={1} flexShrink={1} minWidth={0} />
+            {cache ? card('flowdeck-cache-card', cache.row) : null}
+            {card('flowdeck-agents-card', [
+              <Svg key="flowdeck-crew" source={crewSvg(running > 0)} alt={running ? `${running} ${running === 1 ? 'worker' : 'workers'} running` : 'no workers running'} width={SPRITE_W} height={H} />,
+              crewButton,
+            ])}
             {dismiss}
           </Box>
           {cache?.card ?? null}

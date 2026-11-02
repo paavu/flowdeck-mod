@@ -4,7 +4,7 @@ import { countCall, isWorkCall, PLAN_NUDGE, STEP_NUDGE, STEP_NUDGE_AFTER, withNu
 
 const NOW = Date.UTC(2026, 9, 31, 9, 0)
 
-function engine(on: any, opts: { storeDown?: boolean; rule?: 'on' | 'off' } = {}) {
+function engine(on: any, opts: { storeDown?: boolean; rule?: 'on' | 'off' | 'unset' } = {}) {
   on('turn.start', (_$: any, e: any) => ({ turnId: e.turnId }))
   const store: Record<string, unknown> = opts.rule ? { rule: opts.rule } : {}
   on('env.get', () => ({ value: undefined }))
@@ -26,6 +26,8 @@ function engine(on: any, opts: { storeDown?: boolean; rule?: 'on' | 'off' } = {}
   on('session.usage', () => ({ value: { startedAt: 0, context: { tokens: 0, window: 0, percent: 0 }, rateLimits: [], cost: { usd: 0 } } }))
   on('agent.spawn', (_$: any, e: any) => ({ agentId: e.tool_use_id, model: 'claude-opus-5-5' }))
   on('tool.call', () => ({ result: 'ok' }))
+  on('prompt.compose', () => ({ sections: [] }))
+  return store
 }
 
 const start = ($: any) => $.session.start({ surface: 'terminal', isInteractive: true, cwd: '/work' } as any)
@@ -116,9 +118,12 @@ describe('the step nudge: through tool.call', () => {
   })
 })
 
-const planned = (r: any): boolean => r.context?.includes(PLAN_NUDGE) === true
+const planLine = (r: any): string | undefined => (r.context ?? []).find((l: unknown) => typeof l === 'string' && l.startsWith(PLAN_NUDGE))
+const planned = (r: any): boolean => planLine(r) !== undefined
 let turnNo = 0
 const turn = ($: any) => $.turn.start({ turnId: `t${++turnNo}` } as any)
+const compose = ($: any) => $.prompt.compose({ model: 'm', promptModel: 'm', surfaces: ['terminal'], tools: [], outputStyle: null, traits: [] } as any)
+const ruleText = async ($: any): Promise<string> => (await compose($)).sections.find((s: any) => s.id === 'flowdeck:flow-rule')?.text
 
 describe('the plan nudge', () => {
   test('isWorkCall: edits, shells and workers are work; looking, asking and flowdeck calls are not', () => {
@@ -137,9 +142,57 @@ describe('the plan nudge', () => {
     expect(planned(await bare($, null, 'Bash'))).toBe(true)
   })
 
-  test('not with tracking off or unset, for a worker, or once a flow is linked', async ($, on) => {
+  test('not with tracking off', async ($, on) => {
     engine(on, { rule: 'off' })
     await start($)
+    await compose($)
+    await turn($)
+    expect(planned(await bare($, null, 'Edit'))).toBe(false)
+  })
+
+  for (const rule of ['unset', undefined] as const) {
+    test(`with tracking ${rule ?? 'never stored'} it nudges like on`, async ($, on) => {
+      engine(on, { rule })
+      await start($)
+      await turn($)
+      expect(planned(await bare($, null, 'Edit'))).toBe(true)
+    })
+  }
+
+  test('before a compose holds the rule the line carries the whole rule; after one, the nudge alone; once a turn', async ($, on) => {
+    engine(on, { rule: 'on' })
+    await start($)
+    await turn($)
+    const first = await bare($, null, 'Edit')
+    expect(planned(await bare($, null, 'Edit'))).toBe(false)
+    const rule = await ruleText($)
+    expect(rule).toMatch(/^# flowdeck\n/)
+    expect(planLine(first)).toBe(`${PLAN_NUDGE} ${rule}`)
+    await turn($)
+    const second = await bare($, null, 'Bash')
+    expect(planLine(second)).toBe(PLAN_NUDGE)
+    expect(second.context.filter((l: string) => l.startsWith(PLAN_NUDGE))).toHaveLength(1)
+    expect(planned(await bare($, null, 'Bash'))).toBe(false)
+  })
+
+  test('turned on in a session that composed it off: the next work call carries the whole rule', async ($, on) => {
+    const store = engine(on, { rule: 'off' })
+    await start($)
+    expect(await ruleText($)).toBeUndefined()
+    await turn($)
+    expect(planned(await bare($, null, 'Edit'))).toBe(false)
+    await $.command.run({ command: 'flowdeck-rule', args: 'on' } as any)
+    expect(store.rule).toBe('on')
+    const r = await bare($, null, 'Edit')
+    expect(planLine(r)?.startsWith(`${PLAN_NUDGE} # flowdeck\n`)).toBe(true)
+    expect(String(planLine(r)).length).toBeGreaterThan(PLAN_NUDGE.length + 500)
+  })
+
+  test('turned off, the reminder stops at once', async ($, on) => {
+    const store = engine(on, { rule: 'on' })
+    await start($)
+    await compose($)
+    store.rule = 'off'
     await turn($)
     expect(planned(await bare($, null, 'Edit'))).toBe(false)
   })
@@ -160,10 +213,12 @@ describe('the plan nudge', () => {
     expect(planned(await bare($, null, 'Edit'))).toBe(false)
   })
 
-  test('a store that fails adds nothing and never throws the call', async ($, on) => {
+  test('a store that fails counts as on and never throws the call', async ($, on) => {
     engine(on, { storeDown: true, rule: 'on' })
     await start($)
     await turn($)
-    expect((await bare($, null, 'Edit')).result).toBe('ok')
+    const r = await bare($, null, 'Edit')
+    expect(r.result).toBe('ok')
+    expect(planned(r)).toBe(true)
   })
 })

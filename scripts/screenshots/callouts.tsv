@@ -8,7 +8,7 @@
 band-running	1	-	-	0	80	4	top	0	0
 band-running	2	-	-	0	330	19	bottom	0	0
 band-running	3	-	-	0	223	3	top	0	0
-band-running	4	-	-	0	587	3	top	0	0
+band-running	4	-	-	0	550	3	top	0	0
 band-running	5	-	-	1	58	3	top	0	0
 band-running	6	cache-fold	-	-	-	-	top	0	0
 band-running	7	-	-	2	13	3	top	0	0
@@ -16,8 +16,8 @@ band-running	8	flowdeck-agents	-	-	-	-	top	0	0
 band-running	9	flowdeck-dismiss	-	-	-	-	top	0	0
 band-done	1	-	-	0	40	4	top	0	0
 band-done	2	-	-	0	300	19	bottom	0	0
-band-done	3	-	-	0	540	3	top	0	0
-band-done	4	-	-	0	587	3	top	0	0
+band-done	3	-	-	0	503	3	top	0	0
+band-done	4	-	-	0	548	3	top	0	0
 band-done	5	flowdeck-agents	-	-	-	-	top	0	0
 cache-warm	1	-	-	0	35	10	top	0	0
 cache-warm	2	-	-	0	155	10	top	0	0
@@ -104,10 +104,6 @@ panel-trash	4	-	↩	-	-	-	top	0	0
 panel-trash-confirm	1	-	Erase 2 sessions	-	-	-	left	0	0
 panel-trash-confirm	2	trash-empty-yes	-	-	-	-	left	0	0
 panel-trash-confirm	3	trash-empty-cancel	-	-	-	-	right	0	0
-panel-tracking-unset	1	-	Track every task	-	-	-	left	0	0
-panel-tracking-unset	2	-	When on, Claude	-	-	-	left	0	0
-panel-tracking-unset	3	rule-on	-	-	-	-	left	0	0
-panel-tracking-unset	4	rule-off	-	-	-	-	right	0	0
 panel-tracking-off	1	-	Task tracking is off	-	-	-	left	0	0
 panel-tracking-off	2	-	When on, Claude	-	-	-	left	0	0
 panel-tracking-off	3	rule-on	-	-	-	-	left	0	0

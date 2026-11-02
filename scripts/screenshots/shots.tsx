@@ -278,13 +278,3 @@ test('task tracking off', async ($, on) => {
   await press($, () => pane($), 'usage')
   await shot('panel-tracking-off', await pane($))
 })
-
-// A fresh install: nothing chosen yet.
-test('task tracking not chosen', async ($, on) => {
-  const { clock } = engine(on, {}, 'unset')
-  await at(clock, 0)
-  await start($)
-  await press($, () => pane($), 'context')
-  await press($, () => pane($), 'usage')
-  await shot('panel-tracking-unset', await pane($))
-})

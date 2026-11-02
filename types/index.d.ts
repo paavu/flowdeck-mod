@@ -203,7 +203,7 @@ export type Panel = {
   rule: Rule
 }
 
-/** Task tracking: `on` puts the flow rule in every session's system prompt; `unset` until the user chooses. */
+/** Task tracking: only `off` keeps the flow rule out of the system prompt; `unset` (an earlier release's default) counts as on. */
 export type Rule = 'unset' | 'on' | 'off'
 
 export type PanelTab = 'active' | 'finished' | 'archive' | 'trash'

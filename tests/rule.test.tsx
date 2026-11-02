@@ -1,13 +1,13 @@
 import { describe, expect, test } from 'claude-code/testing'
 
 import { asPanel } from '../hooks/shapes'
-import { asRule, estimateTokens, isPriorFile, SCHEMA_CHARS_PER_TOKEN, toggledRule } from '../hooks/rule'
+import { asRule, estimateTokens, isTracking, SCHEMA_CHARS_PER_TOKEN, toggledRule } from '../hooks/rule'
 import { fakeFs } from './fake-fs'
 import { showTab } from './tabs'
 
-// Task tracking (1.0.0037): the flow rule goes into the system prompt only while the stored choice is `on`, or in a
-// session that ran /flowdeck:flowdeck. A fresh install asks on the Active and Finished tabs; an install from before the
-// choice existed keeps its rule.
+// Task tracking: the flow rule goes into the system prompt unless the stored choice is `off`, and always in a session
+// that ran /flowdeck:flowdeck. A fresh install saves `on`; an earlier release's `unset` counts as on. Only `off` shows
+// the strip on the Active and Finished tabs.
 
 const DIR = '/work/app/.claude/flowdeck'
 
@@ -80,23 +80,21 @@ async function press($: any, key: string) {
 }
 
 describe('the stored choice', () => {
-  test('reads tolerantly: anything but on or off is unset; the switch turns on from unset and off', () => {
+  test('reads tolerantly: anything but on or off is unset; only off stops tracking; the switch turns off from on and unset', () => {
     expect([asRule('on'), asRule('off'), asRule('unset'), asRule(undefined), asRule(true), asRule('ON')]).toEqual(['on', 'off', 'unset', 'unset', 'unset', 'unset'])
-    expect([toggledRule('on'), toggledRule('off'), toggledRule('unset')]).toEqual(['off', 'on', 'on'])
-    expect(['flow-live.json', 'archive-index.json', 'archive', 'history.json', 'history-2.json', 'archive-migrated.json'].every(isPriorFile)).toBe(true)
-    expect(['.gitignore', 'plans.json', '.trash'].some(isPriorFile)).toBe(false)
+    expect([isTracking('on'), isTracking('unset'), isTracking('off')]).toEqual([true, true, false])
+    expect([toggledRule('on'), toggledRule('off'), toggledRule('unset')]).toEqual(['off', 'on', 'off'])
     expect([estimateTokens(360), estimateTokens(360, SCHEMA_CHARS_PER_TOKEN)]).toEqual([100, 180])
   })
 
-  test('a fresh install is unset and saves unset, so a later flow never turns it on', async ($, on) => {
+  test('a fresh install saves on and injects the rule; a later session keeps it', async ($, on) => {
     const { store, fs } = engine(on)
     await start($)
-    expect(store.rule).toBe('unset')
-    expect(await ruleText($)).toBeNull()
-    // the user's own flow writes this project's files; the next session still reads unset
+    expect(store.rule).toBe('on')
+    expect(await ruleText($)).not.toBeNull()
     fs.files[`${DIR}/flow-live.json`] = '{}'
     await start($)
-    expect(store.rule).toBe('unset')
+    expect(store.rule).toBe('on')
   })
 
   for (const [what, opts] of [
@@ -120,35 +118,37 @@ describe('the stored choice', () => {
     const off = engine(on, { store: rule('off'), files })
     await start($)
     expect(off.store.rule).toBe('off')
+    expect(await ruleText($)).toBeNull()
     off.store.rule = 'unset'
     await start($)
     expect(off.store.rule).toBe('unset')
+    expect(await ruleText($)).not.toBeNull()
     off.store.rule = 42
     await start($)
     expect(off.store.rule).toBe('on')
   })
 
-  test('a store that cannot be read migrates nothing and injects nothing', async ($, on) => {
+  test('a store that cannot be read migrates nothing and still injects the rule', async ($, on) => {
     const { store } = engine(on, { files: { [`${DIR}/flow-live.json`]: '{}' }, storeDown: true })
     await start($)
     expect(store.rule).toBeUndefined()
-    expect(await ruleText($)).toBeNull()
+    expect(await ruleText($)).not.toBeNull()
   })
 
-  test('an old held panel without the choice reads as unset and draws', async ($, on) => {
+  test('an old held panel without the choice reads as unset, draws as on and shows no strip', async ($, on) => {
     const old = { isContextShown: true, isUsageShown: false, isBandHidden: false, isKeepWarm: true, tab: 'finished' }
     expect(asPanel(old).rule).toBe('unset')
     expect(asPanel({ ...old, rule: 'sideways' }).rule).toBe('unset')
     expect(asPanel({ ...old, rule: 'on' }).rule).toBe('on')
     engine(on, { store: rule('off') })
     on('state.get', { plugin: 'flowdeck', key: 'panel' }, () => ({ value: old }))
-    const s = await strip($, 'terminal')
-    expect(s?.texts[0]).toBe('Track every task in flowdeck?')
+    expect(await strip($, 'terminal')).toBeNull()
+    expect(await topLabel($, 'terminal')).toBe('● Track tasks')
   })
 })
 
 describe('the flow rule in the system prompt', () => {
-  test('only while tracking is on', async ($, on) => {
+  test('unless tracking is off: on and unset inject it', async ($, on) => {
     const { store } = engine(on, { store: rule('on') })
     await start($)
     const r = await compose($)
@@ -157,7 +157,7 @@ describe('the flow rule in the system prompt', () => {
     store.rule = 'off'
     expect(await ruleText($)).toBeNull()
     store.rule = 'unset'
-    expect(await ruleText($)).toBeNull()
+    expect(await ruleText($)).not.toBeNull()
   })
 
   test('/flowdeck:flowdeck turns it on for its own session, whatever the choice; another skill does not', async ($, on) => {
@@ -198,16 +198,13 @@ describe('the flow rule in the system prompt', () => {
 
 describe('the strip on the Active and Finished tabs', () => {
   for (const surface of ['desktop', 'terminal'] as const) {
-    test(`unset asks, with Track all tasks and Not now (${surface})`, async ($, on) => {
-      engine(on)
+    test(`a fresh install, on and unset draw none (${surface})`, async ($, on) => {
+      const { store } = engine(on)
       await start($)
-      const s = await strip($, surface)
-      expect(s?.texts[0]).toBe('Track every task in flowdeck?')
-      expect(s?.texts[1]).toMatch(/^When on, Claude plans each task, shows it here with its workers, time and cost, and saves a handoff note\. It adds about \d{1,3}(,\d{3})* tokens per session and a few tool calls per task\. \/flowdeck:flowdeck <task> tracks any set of tasks whenever you want\.$/)
-      expect(s?.buttons).toEqual([
-        ['rule-on', 'Track all tasks'],
-        ['rule-off', 'Not now'],
-      ])
+      expect(await strip($, surface)).toBeNull()
+      store.rule = 'unset'
+      await start($)
+      expect(await strip($, surface)).toBeNull()
     })
 
     test(`off says so and keeps one button; on draws none (${surface})`, async ($, on) => {
@@ -215,6 +212,7 @@ describe('the strip on the Active and Finished tabs', () => {
       await start($)
       const s = await strip($, surface)
       expect(s?.texts[0]).toBe('Task tracking is off')
+      expect(s?.texts[1]).toMatch(/^When on, Claude plans each task, shows it here with its workers, time and cost, and saves a handoff note\. It adds about \d{1,3}(,\d{3})* tokens per session and a few tool calls per task\. \/flowdeck:flowdeck <task> tracks any set of tasks whenever you want\.$/)
       expect(s?.buttons).toEqual([['rule-on', 'Track all tasks']])
       store.rule = 'on'
       await start($)
@@ -223,7 +221,7 @@ describe('the strip on the Active and Finished tabs', () => {
   }
 
   test('shown on Finished too, never on Archive or Trash', async ($, on) => {
-    engine(on)
+    engine(on, { store: rule('off') })
     await start($)
     await showTab($, 'finished')
     expect(await strip($, 'terminal')).not.toBeNull()
@@ -248,11 +246,9 @@ describe('the strip on the Active and Finished tabs', () => {
     expect(n).toBeLessThan(2500)
   })
 
-  test('Track all tasks stores on and the strip goes; Not now stores off and the strip says so', async ($, on) => {
-    const { store } = engine(on)
+  test('Track all tasks stores on and the strip goes', async ($, on) => {
+    const { store } = engine(on, { store: rule('off') })
     await start($)
-    await press($, 'rule-off')
-    expect(store.rule).toBe('off')
     expect((await strip($, 'terminal'))?.texts[0]).toBe('Task tracking is off')
     expect(await ruleText($)).toBeNull()
     await press($, 'rule-on')
@@ -264,12 +260,21 @@ describe('the strip on the Active and Finished tabs', () => {
 
 describe('the Track tasks switch', () => {
   for (const surface of ['desktop', 'terminal'] as const) {
-    test(`○ until on, ● when on; a press toggles and stores it (${surface})`, async ($, on) => {
+    test(`● from a fresh install, ○ only when off; a press toggles and stores it (${surface})`, async ($, on) => {
       const { store } = engine(on)
       await start($)
+      expect(await topLabel($, surface)).toBe('● Track tasks')
+      await press($, 'track-tasks')
+      expect(store.rule).toBe('off')
       expect(await topLabel($, surface)).toBe('○ Track tasks')
       await press($, 'track-tasks')
       expect(store.rule).toBe('on')
+      expect(await topLabel($, surface)).toBe('● Track tasks')
+    })
+
+    test(`unset draws ● and a press turns it off (${surface})`, async ($, on) => {
+      const { store } = engine(on, { store: rule('unset') })
+      await start($)
       expect(await topLabel($, surface)).toBe('● Track tasks')
       await press($, 'track-tasks')
       expect(store.rule).toBe('off')
@@ -290,8 +295,12 @@ describe('the commands', () => {
     const { store } = engine(on)
     await start($)
     const run = async (args: string) => String((await $.command.run({ command: 'flowdeck-rule', args } as any)).text)
-    expect(await run('status')).toMatch(/^Task tracking is not chosen \(unset\)/)
-    expect(await run('')).toMatch(/unset/)
+    expect(await run('status')).toMatch(/^Task tracking is on: /)
+    expect(await run('')).toMatch(/^Task tracking is on: /)
+    const onStatus = await run('status')
+    store.rule = 'unset'
+    expect(await run('status')).toBe(onStatus)
+    expect(await run(' OFF ')).toMatch(/^Task tracking is off/)
     expect(await run('on')).toMatch(/^Task tracking is on/)
     expect(store.rule).toBe('on')
     expect(await run('status')).toMatch(/^Task tracking is on: /)
@@ -316,23 +325,23 @@ describe('a flow that starts without being asked stays quiet unless tracking is 
   const plan = ($: any, title = 'T') =>
     $.tool.call({ tool: 'mcp__flowdeck__progress', title, phase: 'delegate', tasks: [{ title: 'one', tier: 'light' }] } as any)
 
-  for (const choice of ['unset', 'off'] as const) {
-    test(`with tracking ${choice} the flow starts and the panel does not open`, async ($, on) => {
+  test('with tracking off the flow starts and the panel does not open', async ($, on) => {
+    const { opened } = engine(on, { store: rule('off') })
+    await start($)
+    const r = await plan($)
+    expect(String(r.result)).toMatch(/^ok: /)
+    expect(opened).toEqual([])
+  })
+
+  for (const choice of ['on', 'unset'] as const) {
+    test(`with tracking ${choice} the panel opens once per flow`, async ($, on) => {
       const { opened } = engine(on, { store: rule(choice) })
       await start($)
-      const r = await plan($)
-      expect(String(r.result)).toMatch(/^ok: /)
-      expect(opened).toEqual([])
+      await plan($)
+      await plan($)
+      expect(opened).toEqual(['flowdeck-agents'])
     })
   }
-
-  test('with tracking on the panel opens once per flow', async ($, on) => {
-    const { opened } = engine(on, { store: rule('on') })
-    await start($)
-    await plan($)
-    await plan($)
-    expect(opened).toEqual(['flowdeck-agents'])
-  })
 
   test('turning tracking on later does not open a flow that already started', async ($, on) => {
     const { opened, store } = engine(on, { store: rule('off') })
@@ -362,20 +371,18 @@ describe('when a switch applies', () => {
     await start($)
     for (const args of ['on', 'off', 'status']) {
       const text = String((await $.command.run({ command: 'flowdeck-rule', args } as any)).text)
+      expect(text).toContain('Turning it on applies from the next work call (a reminder)')
       expect(text).toContain('a new session, /clear or a compaction')
+      expect(text).toContain('turning it off applies at the next compose, and the reminder stops at once')
       expect(text).toContain(TIMING)
     }
   })
 
-  test('the strip says so, unset and off', async ($, on) => {
-    const { store } = engine(on)
+  test('the strip says so while off', async ($, on) => {
+    engine(on, { store: rule('off') })
     await start($)
-    for (const choice of ['unset', 'off']) {
-      store.rule = choice
-      await start($)
-      const s = await strip($, 'terminal')
-      expect(s?.texts.some(t => t.includes('new session, /clear or a compaction') && t.includes(TIMING))).toBe(true)
-    }
+    const s = await strip($, 'terminal')
+    expect(s?.texts.some(t => t.includes('next work call') && t.includes('new session, /clear or a compaction') && t.includes(TIMING))).toBe(true)
   })
 })
 

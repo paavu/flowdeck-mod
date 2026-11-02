@@ -2,6 +2,11 @@
 
 Versions are `M.m.xxxx`; every build bumps the 4-digit build number. Details and rulings: `docs/ledger.md`, `docs/design.md`.
 
+## 1.0.0065 (2026-11-02)
+- Task tracking is on by default for every install. Opt out with `/flowdeck-rule off` or the `● Track tasks` switch. The first-run question (`Track every task in flowdeck?` with `Not now`) is gone, and an install that stored `unset` in an older release now tracks. The strip shows only while tracking is off.
+- Turning tracking on reaches the running session at once: the plan reminder carries the full flow rule until a prompt compose has put it in the system prompt. Turning it off applies at the next compose, and the reminder stops at once.
+- The band's cache block (chip, minutes left, chevron) and agents block (worker icon and `×N`) sit on cards, the gaps are tighter and the close `✕` is at the right edge (desktop; the terminal band is unchanged).
+
 ## 1.0.0064 (2026-11-02)
 - Task tracking is now checked, not only requested. With tracking on and no flow open, the main session's first work call of a turn (edit, write, shell, worker launch) gets one line in its result telling Claude to plan a multi-step task with `progress` first (`PLAN_NUDGE` in `hooks/nudge.ts`). It fires at most once a turn, stops once a flow is open, never reaches a worker and never blocks a call.
 - The flow rule gains one sentence: plan with `progress` before a multi-step task's first edit, build or Agent call; a trial counts. Seen in a real session: a Kotlin bump and build ran inline although tracking was on, because the rule's "one-step edit" exception was the only guidance.

@@ -1,6 +1,6 @@
 // Task tracking: whether flowdeck's flow rule goes into every session's system prompt. One choice for every project,
-// kept in the engine store under `rule`; `unset` until the user picks one (the panel's strip asks). `/flowdeck:flowdeck`
-// turns the rule on for its own session whatever the choice.
+// kept in the engine store under `rule`; on from install, and only an explicit `off` stops it (`unset`, saved by earlier
+// releases, counts as on). `/flowdeck:flowdeck` turns the rule on for its own session whatever the choice.
 import type { Rule } from '../types'
 
 export const RULE_KEY = 'rule'
@@ -8,18 +8,14 @@ export const RULE_KEY = 'rule'
 /** A stored value read tolerantly: anything but `on` or `off` is `unset`. */
 export const asRule = (v: unknown): Rule => (v === 'on' || v === 'off' ? v : 'unset')
 
-/** Whether the store holds a choice already made (or `unset` saved by a fresh install), so no migration runs. */
+/** Whether the store holds a choice already made (or `unset` saved by an earlier release), so no migration runs. */
 export const isStoredRule = (v: unknown): boolean => v === 'on' || v === 'off' || v === 'unset'
 
-/** The top row's switch: on turns off, unset and off turn on. */
-export const toggledRule = (r: Rule): Rule => (r === 'on' ? 'off' : 'on')
+/** Whether a choice tracks tasks: everything but an explicit `off`. */
+export const isTracking = (r: Rule): boolean => r !== 'off'
 
-/** Engine-store keys only an earlier flowdeck wrote: any of them set means the mod ran before the choice existed. */
-export const PRIOR_STORE_KEYS = ['history', 'keepWarm', 'contextShown', 'usageShown', 'usageRemaining', 'historyShown'] as const
-
-/** Names in `<project>/.claude/flowdeck/` that only a recorded flow leaves (the folder's `.gitignore` is not one). */
-export const isPriorFile = (name: string): boolean =>
-  name === 'flow-live.json' || name === 'archive-index.json' || name === 'archive' || name === 'archive-migrated.json' || /^history.*\.json$/.test(name)
+/** The top row's switch: off turns on, on and unset turn off. */
+export const toggledRule = (r: Rule): Rule => (isTracking(r) ? 'off' : 'on')
 
 /** Characters a token of a tool's JSON schema, as Claude Code's `/context` counts it (measured on 2.1.312: 2.0). */
 export const SCHEMA_CHARS_PER_TOKEN = 2

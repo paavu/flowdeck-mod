@@ -46,7 +46,6 @@ const SHOTS = {
   'panel-archive': { width: 520, pick: { key: 'flowdeck-group' } },
   'panel-trash': { width: 520, pick: { key: 'flowdeck-group' } },
   'panel-trash-confirm': { width: 520, pick: { key: 'flowdeck-group' } },
-  'panel-tracking-unset': { width: 520, pick: { key: 'flowdeck-group' } },
   'panel-tracking-off': { width: 520, pick: { key: 'flowdeck-group' } },
 }
 // The mod's own drawings kept as files under docs/images/src/: the band's and the cache card's Svg sources.
@@ -138,9 +137,14 @@ function themed(source, theme) {
   }
 }
 
-const px = n => `${n * CELL}px`
+// A Space: cells, or a named step (the desktop's own sizes are not known here; these are close).
+const STEP = { xs: 4, sm: 8, md: 12, lg: 16, xl: 24 }
+const px = n => (typeof n === 'string' ? `${STEP[n] ?? 0}px` : `${n * CELL}px`)
 function boxStyle(p) {
   const s = ['display:flex', `flex-direction:${p.flexDirection === 'column' ? 'column' : 'row'}`]
+  if (p.backgroundColor) s.push(`background:${p.backgroundColor}`)
+  if (p.paddingX) s.push(`padding-left:${px(p.paddingX)};padding-right:${px(p.paddingX)}`)
+  if (p.paddingY) s.push(`padding-top:${px(p.paddingY)};padding-bottom:${px(p.paddingY)}`)
   if (p.gap) s.push(`gap:${px(p.gap)}`)
   if (p.columnGap) s.push(`column-gap:${px(p.columnGap)}`)
   if (p.marginTop) s.push(`margin-top:${px(p.marginTop)}`)
