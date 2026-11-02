@@ -4,7 +4,7 @@ import type { Elements, EngineInterface, Register, RenderChildren } from 'claude
 import type { AgentRun, ArchiveDetail, ArchiveEntry, ArchiveLists, ArchiveRecord, Flow, Panel, PanelTab, Phase, PlannedTask, Reading, Rule, Samples, TaskPlan, UsageWindow } from '../types'
 import { derive, finishItems, hasItemOps, ITEM_H, itemAlt, itemLine, itemsOf, itemSvg, noteSvg, stepItems, timedItems } from './agent-items'
 import type { StepInput } from './agent-items'
-import { countCall, withNudgeLine } from './nudge'
+import { countCall, isWorkCall, PLAN_NUDGE, withNudgeLine } from './nudge'
 import { agentState, HOUSEKEEPING, isComplete, isIncomplete, isLive, markOf, progressOf, splitHead, stateText, stepCount } from './agent-state'
 import { contextRows, contextSvg, toReading } from './context'
 import { isWorthKeeping, keyOf, snapshot } from './archive'
@@ -117,7 +117,7 @@ const TICK_MS = 5000
 const PHASES: readonly Phase[] = ['plan', 'design', 'delegate', 'review', 'close']
 // The flow rule, in the system prompt only while task tracking is on (rule.ts) or in a session that ran /flowdeck:flowdeck.
 const FLOW_RULE = `# flowdeck
-Track each task with ${TOOL} (ToolSearch \`select:${TOOL}\` if deferred; workers use only ${STEP_TOOL}). Plan once: title, tasks [{title, tier, after, goal}] from 1; chain tasks editing the same files with \`after\`. New task: \`add\` with its goal. Accepted: \`done: [n]\` with notes [{task, result, feedback}]. Worker Agent description: \`#<n> <title>\`. Pick the Agent \`model\` per task and send it as the task's \`model\`. Fable only after the user approves, once Opus heavy failed; state why atop its brief. No flow for a question or a one-step edit; never leave another task unreported.`
+Track each task with ${TOOL} (ToolSearch \`select:${TOOL}\` if deferred; workers use only ${STEP_TOOL}). Plan once: title, tasks [{title, tier, after, goal}] from 1; chain tasks editing the same files with \`after\`. New task: \`add\` with its goal. Accepted: \`done: [n]\` with notes [{task, result, feedback}]. Worker Agent description: \`#<n> <title>\`. Pick the Agent \`model\` per task and send it as the task's \`model\`. Fable only after the user approves, once Opus heavy failed; state why atop its brief. Plan with ${TOOL} before a multi-step task's first edit, build or Agent call (a trial counts). No flow for a question or a one-step edit; never leave another task unreported.`
 const GOAL_TEXT = "The user's request for this task in a sentence; plain text, at most 300 characters."
 // The pane keeps its id from before the command's rename, so a pane the desktop app placed still opens.
 const PANE = 'flowdeck-agents'
@@ -1599,6 +1599,24 @@ const shown = new Map<string, { tool?: string; isAsked: boolean }>()
 // Tool calls a worker made since its last step call (nudge.ts).
 const quiet = new Map<string, number>()
 
+// The main session's first work call of a turn, with tracking on and no flow open, gets one line to plan first (nudge.ts
+// PLAN_NUDGE). Never alters the call itself; a failing read adds nothing.
+async function planNudge($: EngineInterface, e: { tool: string; agentId?: string }, next: (e: any) => Promise<any>): Promise<any> {
+  if (planNudged || !isWorkCall(e.tool)) return next(e)
+  let isDue = false
+  try {
+    if (await isRuleOn($)) {
+      const f = await readFlow($)
+      isDue = !(f && f.isLinked && !f.isFinished)
+    }
+  } catch {
+    isDue = false
+  }
+  if (!isDue) return next(e)
+  planNudged = true
+  return withNudgeLine(await next(e), PLAN_NUDGE)
+}
+
 const forgetFlights = (agentId: string): void => {
   for (const [id, f] of flights) if (f.agentId === agentId) flights.delete(id)
   shown.delete(agentId)
@@ -1692,6 +1710,8 @@ async function tickCache($: EngineInterface): Promise<void> {
 // no prompt started is the renewal's own request, should the engine raise one, and is not taken for the user's.
 let renewing = false
 let prompted = false
+// The plan nudge went out in this main turn (nudge.ts PLAN_NUDGE): at most one a turn.
+let planNudged = false
 const RENEW_PROMPT = 'This request only renews the prompt cache for an idle session. Reply with the single word: ok'
 
 const isRenewalEcho = async ($: EngineInterface): Promise<boolean> => renewing && (await readKeepWarm($)).turnAt === 0
@@ -2137,7 +2157,8 @@ export const register: Register = (on, options) => {
   // A subagent's own call names its tool word; flowdeck's bookkeeping calls do not. Never alters the call.
   on('tool.call', async ($, e, next) => {
     const agentId = e.agentId
-    if (!agentId || HOUSEKEEPING.has(e.tool)) return next(e)
+    if (!agentId) return planNudge($, e, next)
+    if (HOUSEKEEPING.has(e.tool)) return next(e)
     const useId = e.tool_use_id ?? `${agentId}#${++flightCount}`
     try {
       flights.set(useId, { agentId, tool: e.tool, isAsked: false })
@@ -2307,6 +2328,7 @@ export const register: Register = (on, options) => {
     const result = await next(e)
     if (!e.agentId && (!renewing || prompted)) {
       prompted = false
+      planNudged = false
       const at = await $.clock.now().catch(() => 0)
       if (at) await updateKeepWarm($, k => ({ ...k, turnAt: at })).catch(() => {})
     }

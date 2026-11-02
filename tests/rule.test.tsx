@@ -183,6 +183,7 @@ describe('the flow rule in the system prompt', () => {
       '`add` with its goal',
       '`done: [n]` with notes [{task, result, feedback}]', // result and feedback on accept
       '`#<n> <title>`',
+      'Plan with',
       'No flow for a question or a one-step edit',
       'never leave another task unreported',
       'Pick the Agent `model` per task and send it as the task\'s `model`', // model choice
@@ -191,7 +192,7 @@ describe('the flow rule in the system prompt', () => {
       expect(text).toContain(word)
     }
     // Trimmed in 1.0.0037 from 896 characters; 1.0.0038 adds the model sentence, 1.0.0039 the Fable brief clause.
-    expect(text.length).toBeLessThan(680)
+    expect(text.length).toBeLessThan(760)
   })
 })
 

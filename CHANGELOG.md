@@ -2,6 +2,10 @@
 
 Versions are `M.m.xxxx`; every build bumps the 4-digit build number. Details and rulings: `docs/ledger.md`, `docs/design.md`.
 
+## 1.0.0064 (2026-11-02)
+- Task tracking is now checked, not only requested. With tracking on and no flow open, the main session's first work call of a turn (edit, write, shell, worker launch) gets one line in its result telling Claude to plan a multi-step task with `progress` first (`PLAN_NUDGE` in `hooks/nudge.ts`). It fires at most once a turn, stops once a flow is open, never reaches a worker and never blocks a call.
+- The flow rule gains one sentence: plan with `progress` before a multi-step task's first edit, build or Agent call; a trial counts. Seen in a real session: a Kotlin bump and build ran inline although tracking was on, because the rule's "one-step edit" exception was the only guidance.
+
 ## 1.0.0063 (2026-10-31)
 - Keep warm renews up to 8 times between two of your messages (was 2), so an idle session stays warm for about 7 h 40 min instead of 2 h 40 min. Eight renewals of a 770k-token Opus context cost about $1.20, against about $6.16 to write the cache again; renewals still count against the plan's usage limits. After the eighth the card says `kept warm ×8 · limit reached`. The cold-cache screenshot is redrawn to match.
 

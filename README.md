@@ -11,7 +11,7 @@
 </p>
 
 <p align="center">
-  <img alt="Version 1.0.0063" src="https://img.shields.io/badge/version-1.0.0063-8f8cf4">
+  <img alt="Version 1.0.0064" src="https://img.shields.io/badge/version-1.0.0064-8f8cf4">
   <img alt="MIT license" src="https://img.shields.io/badge/license-MIT-5fbf8f">
   <img alt="Claude Code 2.1.295 or later" src="https://img.shields.io/badge/Claude%20Code-%E2%89%A5%202.1.295-8f8cf4">
   <img alt="Terminal and desktop" src="https://img.shields.io/badge/surfaces-terminal%20%2B%20desktop-5fbf8f">
@@ -546,6 +546,8 @@ How to use: switch tracking from the strip, the switch beside the `FlowDeck` tit
 
 Task tracking decides whether the mod puts its flow rule (`flowdeck:flow-rule`) into the system prompt of every session. The rule tells Claude to report every task through `progress`: the plan once with `title` and `tasks` (`title`, `tier`, `after` for tasks that edit the same files, `goal`), `add` for a new task, `done` with `result` and `feedback` notes when a task is accepted, and `#<n> <title>` at the start of each worker's Agent description; a question or a one-step edit gets no flow. It blocks no edit or tool call.
 
+The rule is a request, so the mod also checks it. With tracking on and no flow open, the main session's first work call of a turn (an edit, a write, a shell command, a worker launch; reads, searches and flowdeck's own tools do not count) gets one extra line in its result: plan a task of two or more steps with `progress` before going on, while a question or a one-step edit needs no flow. It fires at most once a turn, stops once a flow is open, never reaches a worker, and never changes or blocks the call.
+
 | Choice | The system prompt | Set by |
 |---|---|---|
 | `unset` | Nothing is added. The Active and Finished tabs show `Track every task in flowdeck?` with `Track all tasks` and `Not now`. | A fresh install |
@@ -569,7 +571,7 @@ Measured on Claude Code 2.1.312. Prose is estimated at about 3.6 characters a to
 | `step` tool schema | once a worker loads the tool | 1,516 characters, `/context` 758 tokens | 1,274 characters, `/context` 638 tokens |
 | `SKILL.md` | when `/flowdeck:flowdeck` runs | 16,712 characters, about 4,640 tokens | 16,828 characters, about 4,670 tokens |
 
-With tracking on, the main session pays about 1,760 tokens (the rule and the `progress` schema; the strip's number is computed from the same texts) and a few `progress` calls per task. With tracking `unset` or `off`, the tools are listed by name only (deferred) and the system prompt is unchanged.
+With tracking on, the main session pays about 1,760 tokens (1.0.0064 adds one sentence to the rule, about 25 more, and the plan reminder above, a short line at most once a turn) (the rule and the `progress` schema; the strip's number is computed from the same texts) and a few `progress` calls per task. With tracking `unset` or `off`, the tools are listed by name only (deferred) and the system prompt is unchanged.
 
 ## Configuration and data
 
