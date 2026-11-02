@@ -28,7 +28,7 @@ import { changeLive, endRuns, IDLE_FINISH_MS, isGone, LIVE_BEAT_MS, LIVE_STALE_M
 import type { LiveRecord } from './live'
 import { SMALL_SIZE } from './sizes'
 import { VERSION } from './version'
-import { asProjectMap, PROJECT_OF_KEY, projectByKey, withRemembered } from './project'
+import { projectByKey, transcriptGuesses } from './project'
 import { asRule, estimateTokens, isStoredRule, isTracking, RULE_KEY, SCHEMA_CHARS_PER_TOKEN, toggledRule } from './rule'
 import { live, record, resetKey, resets, toWindows, usageHeadSvg, usageRows, usageSvg } from './usage'
 import { CACHE_HUE, cacheKey, isCardOpen, isRenewDue, isShowable, KEEP_WARM_DEFAULT, measured, remeasured, renewalEnded, seeded, stamped, toggledFold, userSpoke, viewOf } from './cache'
@@ -378,8 +378,6 @@ const tr = () => STRINGS[lang]
 let project = ''
 // The session the flow's record is saved under; empty when the engine names none.
 let sessionId = ''
-// The session id whose folder is in the store's `projectOf` already (rememberProject).
-let rememberedFor = ''
 // The session's transcript file, when classic.SessionStart named it (kept in the flow's record; its folder names the project).
 let transcript = ''
 // The session that ended here (session.end): its record is not written again until a new session is adopted.
@@ -397,32 +395,19 @@ const currentSessionId = async ($: EngineInterface): Promise<string> => {
   return typeof id === 'string' ? id : ''
 }
 
-// The folder session `sid` saves under (project.ts): the one the transcript's key names (no fs call), else its
-// remembered one while that still holds `.claude/flowdeck`, else `cwd`. `isNew`: worth remembering now (named by the
-// transcript, or nothing remembered for `sid` yet). Never throws.
-async function resolveProject($: EngineInterface, cwd: string, sid: string): Promise<{ at: string; isNew: boolean }> {
+// The folder session `sid` saves under (project.ts): the project root, the one the transcript's key names (no fs call),
+// else the one whose project folder holds the session's transcript file; else `cwd`. Nothing is remembered, so a moved
+// working folder never makes a `.claude` of its own. Never throws.
+async function resolveProject($: EngineInterface, cwd: string, sid: string): Promise<string> {
   const named = projectByKey(cwd, transcript)
-  if (named) return { at: named, isNew: true }
-  const map = asProjectMap(await Promise.resolve().then(() => $.store.get(PROJECT_OF_KEY)).catch(() => undefined))
-  const kept = sid ? map[sid] : undefined
-  if (kept && (await Promise.resolve().then(() => $.fs.exists(dataDir(kept))).catch(() => false)) === true) return { at: kept, isNew: false }
-  return { at: cwd, isNew: !kept }
-}
-
-// The session's folder remembered at the start that resolves it, else at the first save of its record (its
-// flow-live.json record or an archive entry), so a later start in a moved working folder finds it. A failing store is
-// tried again at the next save. Never throws.
-async function rememberProject($: EngineInterface): Promise<void> {
-  if (!project || !sessionId || rememberedFor === sessionId) return
-  const sid = sessionId
-  const at = project
-  rememberedFor = sid
-  try {
-    const map = asProjectMap(await $.store.get(PROJECT_OF_KEY))
-    if (map[sid] !== at) await $.store.set(PROJECT_OF_KEY, withRemembered(map, sid, at))
-  } catch {
-    if (rememberedFor === sid) rememberedFor = ''
+  if (named) return named
+  const configDir =
+    (await Promise.resolve().then(() => $.env.get('CLAUDE_CONFIG_DIR')).catch(() => '')) ||
+    `${(await Promise.resolve().then(() => $.env.get('HOME')).catch(() => '')) || ''}/.claude`
+  for (const g of transcriptGuesses(cwd, sid, configDir)) {
+    if ((await Promise.resolve().then(() => $.fs.exists(g.file)).catch(() => false)) === true) return g.at
   }
+  return cwd
 }
 
 // The Archive and Trash lists from the project's indexes (healed, the old archive imported once, this project's store
@@ -436,13 +421,11 @@ async function loadLists($: EngineInterface): Promise<void> {
 }
 
 // A startup's transcript arriving after session.start resolved without it: a project it names that is not the one
-// taken moves the session there (remembered, its lists and flow-live.json loaded). Nothing before session.start ran.
+// taken moves the session there (its lists and flow-live.json loaded). Nothing before session.start ran.
 async function followTranscript($: EngineInterface, cwd: string): Promise<void> {
   const at = projectByKey(cwd, transcript)
   if (!project || !at || at === project) return
   project = at
-  rememberedFor = ''
-  await rememberProject($)
   await loadLists($)
   await adoptLive($, sessionId)
 }
@@ -1307,7 +1290,6 @@ async function saveArchive($: EngineInterface, entry: ArchiveEntry): Promise<boo
   if (project) {
     const saved = await saveSession(io($), project, entry, now).catch(() => null)
     if (saved?.isSaved && saved.lists) {
-      await rememberProject($)
       await showLists($, saved.lists, entry)
       return true
     }
@@ -1492,7 +1474,6 @@ async function persistLive($: EngineInterface, ended = false): Promise<void> {
     const rec: LiveRecord = { sessionId, ...(transcript ? { transcript } : {}), flow: f, agents: list, meta, lastActivityAt: activityAt, beatAt: now, ...(ended ? { endedAt: now } : {}) }
     const done = await changeLive(io($), project, s => ({ ...s, [sessionId]: rec }))
     if (done.state === 'bad') noteFault($, 'live', done.why)
-    if (done.state === 'ok') await rememberProject($)
     // The next try waits for the next change or heartbeat; after a failed one, for LIVE_STALE_MS.
     const next = done.state === 'ok' ? now : now + LIVE_STALE_MS - LIVE_BEAT_MS
     await update($, liveState, () => ({ owner: sessionId, activityAt, key, writtenAt: next }))
@@ -2067,11 +2048,8 @@ export const register: Register = (on, options) => {
     lang = await detectLang($, options.language).catch((): Lang => 'en')
     const sid = (started as { sessionId?: unknown }).sessionId
     sessionId = (await currentSessionId($)) || (typeof sid === 'string' ? sid : '')
-    rememberedFor = ''
     const cwd = typeof e.cwd === 'string' ? e.cwd : ''
-    const resolved = await resolveProject($, cwd, sessionId).catch(() => ({ at: cwd, isNew: false }))
-    project = resolved.at
-    if (resolved.isNew) await rememberProject($)
+    project = await resolveProject($, cwd, sessionId).catch(() => cwd)
     ruleComposed = false
     const rule = await loadRule($).catch(() => null)
     if (rule) await updatePanel($, prev => (prev.rule === rule ? prev : { ...prev, rule }))

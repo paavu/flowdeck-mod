@@ -1,11 +1,8 @@
 // The folder a session saves under: Claude Code's own project folder, the one its transcript folder is named after
-// (`<config>/projects/<key>/<session>.jsonl`), found among the working folder and its parents by name alone; else the
-// folder remembered for the session id (engine-store key `projectOf`); else the working folder. register.tsx makes the
-// store and fs calls (`$` never crosses an import); everything here is pure.
+// (`<config>/projects/<key>/<session>.jsonl`), found among the working folder and its parents by name alone, or by the
+// transcript file's presence; else the working folder. Nothing is remembered. register.tsx makes the fs calls (`$` never
+// crosses an import); everything here is pure.
 
-export const PROJECT_OF_KEY = 'projectOf'
-/** Session ids remembered at most; past it the oldest (by insertion) is dropped. */
-export const PROJECT_OF_MAX = 100
 /** Claude Code's longest folder key before it cuts the rest and adds a hash. */
 export const KEY_MAX = 200
 
@@ -59,14 +56,7 @@ export const projectByKey = (cwd: string, transcript: unknown): string | null =>
   return ancestors(cwd).find(dir => [dir, dir.normalize('NFC')].some(d => projectKey(trimEnd(d) || d) === key)) ?? null
 }
 
-// The stored map read tolerantly: anything but an object of non-empty strings counts as empty, entry by entry.
-export const asProjectMap = (v: unknown): Record<string, string> => {
-  if (!v || typeof v !== 'object' || Array.isArray(v)) return {}
-  return Object.fromEntries(Object.entries(v).filter((kv): kv is [string, string] => typeof kv[1] === 'string' && kv[1] !== ''))
-}
-
-// The map with `sid` remembered last; the oldest past PROJECT_OF_MAX dropped.
-export const withRemembered = (map: Record<string, string>, sid: string, project: string): Record<string, string> => {
-  const rest = Object.entries(map).filter(([k]) => k !== sid)
-  return Object.fromEntries([...rest, [sid, project]].slice(-PROJECT_OF_MAX))
-}
+// Where session `sid`'s transcript would be for each folder from `cwd` up, nearest first: the paths to look for when no
+// transcript was named (a reload). `configDir` is Claude Code's config folder.
+export const transcriptGuesses = (cwd: string, sid: string, configDir: string): Array<{ at: string; file: string }> =>
+  !cwd || !sid || !configDir ? [] : ancestors(cwd).map(at => ({ at, file: `${trimEnd(configDir)}/projects/${projectKey(trimEnd(at) || at)}/${sid}.jsonl` }))

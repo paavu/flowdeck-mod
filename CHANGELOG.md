@@ -2,6 +2,10 @@
 
 Versions are `M.m.xxxx`; every build bumps the 4-digit build number. Details and rulings: `docs/ledger.md`, `docs/design.md`.
 
+## 1.0.0067 (2026-11-02)
+- FlowDeck keeps its data only in the project root's `.claude/flowdeck`. After a reload the mod finds the root from the session's transcript file, so a working folder that moved into a child folder no longer gets a `.claude/flowdeck` of its own, and the Archive no longer shows only part of the records.
+- The folder remembered per session (store key `projectOf`) is gone; nothing about folders is stored any more.
+
 ## 1.0.0066 (2026-11-02)
 - The band's progress bar fills the row up to the cache card, so the percent label ends about 3 px before it and the large empty gap is gone (desktop; the terminal band is unchanged).
 - The cache card and the agents card are sized from their content with equal padding at both ends, with a one-cell (9 px) gap between them.

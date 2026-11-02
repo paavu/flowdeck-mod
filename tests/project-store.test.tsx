@@ -32,6 +32,7 @@ type Opts = {
   sessionId?: string
   /** folders that exist without files of their own in the fake fs */
   dirs?: string[]
+  env?: Record<string, string>
 }
 
 function engine(on: any, opts: Opts = {}) {
@@ -41,7 +42,7 @@ function engine(on: any, opts: Opts = {}) {
   const fs = fakeFs(on, { files: opts.files, tooBig: opts.tooBig, fail, dirs: opts.dirs })
   const { files, writes } = fs
   const clock = { now: NOW }
-  on('env.get', () => ({ value: undefined }))
+  on('env.get', (_$: any, e: any) => ({ value: opts.env?.[e.name ?? e.key ?? e.variable] }))
   on('classic.SessionStart', () => ({}))
   on('settings.read', () => ({ value: {} }))
   on('clock.every', () => ({ value: undefined }))
@@ -360,10 +361,9 @@ describe('the project folder a session saves under', () => {
   for (const order of ['before', 'after'] as const) {
     test(`a working folder below the project resolves to it by the transcript's key (transcript ${order} session.start)`, async ($, on) => {
       const files = seeded([entry(1), entry(2)])
-      const { store } = engine(on, { files })
+      engine(on, { files })
       await startWith($, `${APP}/flowdeck-mod`, transcriptOf(APP_KEY), order)
       expect(await archiveButtons($)).toEqual(both)
-      expect(store.projectOf).toEqual({ s: APP })
       await flow($)
       expect(titles(savedUnder(files, APP))).toContain('Ship it')
       expect(savedUnder(files, APP).find(e => e.title === 'Ship it').project).toBe(APP)
@@ -373,7 +373,7 @@ describe('the project folder a session saves under', () => {
 
   test('a nested git repository with its own .claude/flowdeck does not take the session: the transcript names the parent', async ($, on) => {
     const child = `${APP}/flowdeck-mod`
-    const { files } = engine(on, { dirs: [`${child}/.git`, `${child}/.claude/flowdeck`], store: { projectOf: { s: child } } })
+    const { files } = engine(on, { dirs: [`${child}/.git`, `${child}/.claude/flowdeck`] })
     await startWith($, `${child}/hooks`, transcriptOf(APP_KEY), 'before')
     await flow($)
     expect(titles(savedUnder(files, APP))).toEqual(['Ship it'])
@@ -381,35 +381,23 @@ describe('the project folder a session saves under', () => {
   })
 
   test('the working folder that is the project resolves to itself', async ($, on) => {
-    const { files, store } = engine(on)
+    const { files } = engine(on)
     await startWith($, APP, transcriptOf(APP_KEY), 'before')
     await flow($)
     expect(titles(savedUnder(files, APP))).toEqual(['Ship it'])
-    expect(store.projectOf).toEqual({ s: APP })
   })
 
-  test('a working folder outside the project tree falls to the remembered folder', async ($, on) => {
-    const files = seeded([entry(1), entry(2)])
-    engine(on, { files, dirs: [DIR], store: { projectOf: { s: APP } } })
-    await startWith($, '/tmp', transcriptOf(APP_KEY), 'before')
-    expect(await archiveButtons($)).toEqual(both)
-    await flow($)
-    expect(titles(savedUnder(files, APP))).toContain('Ship it')
-    expect(savedUnder(files, '/tmp')).toEqual([])
-  })
-
-  test('a working folder outside the project tree with nothing remembered is itself', async ($, on) => {
-    const { files, store } = engine(on, { files: seeded([entry(1), entry(2)]) })
+  test('a working folder outside the project tree is itself', async ($, on) => {
+    const { files } = engine(on, { files: seeded([entry(1), entry(2)]) })
     await startWith($, '/tmp', transcriptOf(APP_KEY), 'after')
     expect(await archiveButtons($)).toEqual([])
     await flow($)
     expect(titles(savedUnder(files, '/tmp'))).toEqual(['Ship it'])
-    expect(store.projectOf).toEqual({ s: '/tmp' })
   })
 
-  test('with no transcript a remembered session whose working folder moved still shows and saves to its folder', async ($, on) => {
-    const files = seeded([entry(1), entry(2)])
-    engine(on, { files, dirs: [DIR], store: { projectOf: { s: APP } } })
+  test('with no transcript named a working folder below the project resolves to the project whose transcript file exists, and no child gets a .claude', async ($, on) => {
+    const files = { ...seeded([entry(1), entry(2)]), '/Users/u/.claude/projects/-work-app/s.jsonl': '{}' }
+    engine(on, { files, dirs: [DIR], env: { HOME: '/Users/u' } })
     await start($, `${APP}/flowdeck-mod`)
     expect(await archiveButtons($)).toEqual(both)
     await flow($)
@@ -417,58 +405,13 @@ describe('the project folder a session saves under', () => {
     expect(Object.keys(files).filter(p => p.startsWith(`${APP}/flowdeck-mod/`))).toEqual([])
   })
 
-  test('with no transcript and nothing remembered the working folder itself; its .claude markers are never looked for', async ($, on) => {
+  test('with no transcript and no transcript file the working folder itself; its .claude markers are never looked for', async ($, on) => {
     const { files, fs } = engine(on, { files: seeded([entry(1), entry(2)]), dirs: [DIR, `${APP}/.git`] })
     await start($, `${APP}/src`)
     expect(await archiveButtons($)).toEqual([])
     await flow($)
     expect(titles(savedUnder(files, `${APP}/src`))).toEqual(['Ship it'])
-    expect(fs.calls.filter(c => !c.path.startsWith(`${APP}/src/.claude/flowdeck`))).toEqual([])
-  })
-
-  test('the first start remembers the folder; the map keeps the newest 100 and drops the oldest', async ($, on) => {
-    const old = Object.fromEntries(Array.from({ length: 100 }, (_, i) => [`old${i}`, `/p${i}`]))
-    const { store } = engine(on, { store: { projectOf: old } })
-    await startWith($, `${APP}/src`, transcriptOf(APP_KEY), 'before')
-    const map = store.projectOf as Record<string, string>
-    expect(Object.keys(map)).toHaveLength(100)
-    expect(map.old0).toBeUndefined()
-    expect(map.old1).toBe('/p1')
-    expect(Object.keys(map).at(-1)).toBe('s')
-    expect(map.s).toBe(APP)
-  })
-
-  test('the transcript replaces a remembered folder it disagrees with', async ($, on) => {
-    const { store } = engine(on, { dirs: ['/elsewhere/.claude/flowdeck'], store: { projectOf: { s: '/elsewhere' } } })
-    await startWith($, `${APP}/src`, transcriptOf(APP_KEY), 'after')
-    expect(store.projectOf).toEqual({ s: APP })
-  })
-
-  test('a start without the transcript never replaces a remembered folder, even one whose .claude/flowdeck is gone', async ($, on) => {
-    const { store } = engine(on, { store: { projectOf: { s: '/gone' } } })
-    await start($, '/work')
-    expect(store.projectOf).toEqual({ s: '/gone' })
-  })
-
-  test('a malformed remembered map counts as empty and is replaced at the start', async ($, on) => {
-    const { store } = engine(on, { store: { projectOf: ['not', 'a', 'map'] } })
-    await startWith($, `${APP}/src`, transcriptOf(APP_KEY), 'before')
-    expect(store.projectOf).toEqual({ s: APP })
-  })
-
-  test('a /clear keeps the folder and remembers the new session id under it at its first save', async ($, on) => {
-    const { store } = engine(on, { dirs: [DIR], store: { projectOf: { s: APP } } })
-    await start($, '/work')
-    await $.classic.SessionStart({ source: 'clear', session_id: 's2', transcript_path: transcriptOf('-work') } as any)
-    await flow($)
-    expect(store.projectOf).toEqual({ s: APP, s2: APP })
-  })
-
-  test('a remembered folder that no longer holds .claude/flowdeck is not taken', async ($, on) => {
-    const files = seeded([entry(1), entry(2)])
-    engine(on, { files, dirs: [DIR], store: { projectOf: { s: '/gone' } } })
-    await start($, APP)
-    expect(await archiveButtons($)).toEqual(both)
+    expect(fs.calls.filter(c => !c.path.endsWith('.jsonl') && !c.path.startsWith(`${APP}/src/.claude/flowdeck`))).toEqual([])
   })
 
   test('a failing store still takes the transcript’s project and never throws', async ($, on) => {
@@ -478,27 +421,11 @@ describe('the project folder a session saves under', () => {
     expect(await archiveButtons($)).toEqual(both)
   })
 
-  test('a failing existence check gives the working folder, whatever is remembered', async ($, on) => {
-    const { files, store } = engine(on, { dirs: [DIR], store: { projectOf: { s: APP } }, fail: { exists: true } })
-    await start($, '/work')
-    expect(String((await flow($)).result)).toContain('ok')
-    // with `exists` down a missing file cannot be told apart, so the save goes to the shared store, named for the working folder
-    expect((store.history as any[]).map(e => [e.title, e.project])).toEqual([['Ship it', '/work']])
-    expect(savedUnder(files, APP)).toEqual([])
-  })
-
   test('resolving by the transcript makes no fs call: everything the start and a save touch is inside the project’s .claude/flowdeck', async ($, on) => {
-    const { fs } = engine(on, { files: seeded([entry(1)]), dirs: [DIR], store: { projectOf: { s: '/elsewhere' } } })
+    const { fs } = engine(on, { files: seeded([entry(1)]), dirs: [DIR] })
     await startWith($, `${APP}/a/b/c`, transcriptOf(APP_KEY), 'before')
     expect(fs.calls.length).toBeGreaterThan(0)
     await flow($)
-    expect(fs.calls.filter(c => c.path !== DIR && !c.path.startsWith(`${DIR}/`))).toEqual([])
-  })
-
-  test('resolving by the remembered folder makes one existence check on its .claude/flowdeck, never a list or a read', async ($, on) => {
-    const { fs } = engine(on, { files: seeded([entry(1)]), dirs: [DIR], store: { projectOf: { s: APP } } })
-    await start($, '/tmp')
-    expect(fs.calls[0]).toEqual({ op: 'exists', path: DIR })
     expect(fs.calls.filter(c => c.path !== DIR && !c.path.startsWith(`${DIR}/`))).toEqual([])
   })
 
