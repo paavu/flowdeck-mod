@@ -1,0 +1,11 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="37" height="22" viewBox="0 0 37 22">
+<style>
+.run .pa,.run .pb{opacity:0}
+.run .pa{animation:fa .8s steps(1) infinite}.run .pb{animation:fb .8s steps(1) infinite}.run .pr{animation:fr .8s steps(1) infinite}
+.run .bd{animation:bob .8s steps(1) infinite}
+@keyframes fa{0%{opacity:1}25%{opacity:0}}@keyframes fb{0%{opacity:0}50%{opacity:1}75%{opacity:0}}
+@keyframes fr{0%{opacity:0}25%{opacity:1}50%{opacity:0}75%{opacity:1}}
+@keyframes bob{0%,50%{transform:translateY(-1px)}25%,75%{transform:none}}
+@media (prefers-reduced-motion: reduce){.run .bd,.run .pa,.run .pb,.run .pr{animation:none!important}.run .pa,.run .pb{opacity:0}.run .pr{opacity:1}}
+</style><g transform="translate(11,0) scale(1.85)" opacity="1" shape-rendering="crispEdges"><g><g class="bd"><path d="M2 1h8v1h-8zM1 2h10v1h-10zM1 3h2v1h-2zM5 3h2v1h-2zM9 3h2v1h-2zM1 4h2v1h-2zM5 4h2v1h-2zM9 4h2v1h-2zM1 5h10v1h-10zM1 6h3v1h-3zM8 6h3v1h-3zM1 7h10v1h-10zM1 8h10v1h-10z" fill="#8f8cf4"/><path d="M3 3h2v1h-2zM7 3h2v1h-2zM3 4h1v1h-1zM7 4h1v1h-1z" fill="#ffffff"/><path d="M4 4h1v1h-1zM8 4h1v1h-1zM4 6h4v1h-4z" fill="#26242f"/><path d="M2 9h8v1h-8z" fill="#5fbf8f"/><path d="M0 6h1v1h-1zM11 6h1v1h-1zM0 7h1v1h-1zM11 7h1v1h-1zM3 10h2v1h-2zM7 10h2v1h-2zM3 11h2v1h-2zM7 11h2v1h-2z" fill="#8f8cf4"/></g></g></g>
+</svg>

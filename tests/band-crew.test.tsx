@@ -80,8 +80,22 @@ describe('the band crew control', () => {
     for (const columns of [60, 100, 200, 400]) {
       const r = await crewOf($, 'desktop', columns)
       const widths = r.svgs.map((s: any) => Number(s.props.width))
-      expect(widths[0]! + widths[1]!).toBeLessThanOrEqual(Math.min(1600, columns * 9 - 180))
+      // with the ×0 Button (16 px of label, 11 at each side, one 9 px cell over the icon) and the X (8, 11 at each side),
+      // within the row: 9 px a column less 14
+      expect(widths[1]).toBe(32) // the icon's 5 px inset, its 22.2 px, 5 px of tail
+      expect(widths[0]! + widths[1]! - 9 + (16 + 22) + (8 + 22)).toBeLessThanOrEqual(columns * 9 - 14)
     }
+  })
+
+  test('the agents card is as wide as its count: a second digit takes 8 px from the bar', async ($, on) => {
+    engine(on)
+    await start($)
+    await plan($)
+    const bar = async () => Number((await crewOf($, 'desktop')).svgs[0].props.width)
+    const one = await bar()
+    for (let i = 1; i <= 10; i++) await spawn($, `w${i}`)
+    expect((await crewOf($, 'desktop')).label).toBe('×10')
+    expect(await bar()).toBe(one - 8)
   })
 
   test('the terminal keeps the ▣ before the button', async ($, on) => {

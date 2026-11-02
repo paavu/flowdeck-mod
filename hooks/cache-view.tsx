@@ -12,8 +12,23 @@ import { textWidth } from './plan-view'
 
 const FONT = "-apple-system,BlinkMacSystemFont,'SF Pro Text','Segoe UI',sans-serif"
 const ROW_H = 22 // the band row's height
-/** The room the fold chevron and its gaps take beside the chip on the desktop row (a plain one-glyph Button is about 20 px). */
-export const CACHE_FOLD_PX = 30
+/** CSS px the desktop app draws at each side of a plain Button's label (measured in the app: 11); the kit has no prop for it. */
+export const BUTTON_PAD_PX = 11
+/** CSS px a band card leaves before its first drawing, as wide as the room its last part, a plain Button, keeps after its label. */
+export const CARD_INSET_PX = BUTTON_PAD_PX
+/** CSS px of a reported column on the desktop, and so of one cell of the kit's margins (measured in the app: about 9). */
+export const COLUMN_PX = 9
+/** CSS px between neighbours on the band's cards: chip to summary, summary to chevron, chevron to crew icon, icon to count. */
+export const ITEM_GAP_PX = 7
+/**
+ * A Button after a drawing on a card sits one cell over the drawing's end (marginLeft -1), since its own room
+ * (BUTTON_PAD_PX) is wider than ITEM_GAP_PX: the drawing keeps TAIL_PX after its last mark so the label lands ITEM_GAP_PX on.
+ */
+export const TAIL_PX = ITEM_GAP_PX + COLUMN_PX - BUTTON_PAD_PX
+/** CSS px of the fold chevron's glyph on the desktop (measured in the app: 9). */
+export const FOLD_GLYPH_PX = 9
+/** CSS px the fold chevron's Button adds to the cache card: the glyph and the Button's own room, less the cell it sits over the chip. */
+export const CACHE_FOLD_PX = FOLD_GLYPH_PX + 2 * BUTTON_PAD_PX - COLUMN_PX
 /** The card's widest; from WIDE_MIN_W on it draws two columns when their texts fit side by side, else it stacks. */
 export const CARD_MAX_W = 760
 export const WIDE_MIN_W = 520
@@ -40,11 +55,23 @@ function chipShape(x: number, y: number, word: string, mode: CacheMode, size: nu
 
 const SUMMARY_SIZE = 12.5
 
-/** The desktop row's drawing: the chip and its summary in one Svg (sibling texts would wrap onto new lines). */
-export function chipSvg(v: CacheView, wrap: (w: number, h: number, body: string) => string): { source: string; width: number; alt: string } {
-  const chip = chipShape(0, (ROW_H - 16) / 2, CACHE_WORD[v.mode], v.mode, 10)
+// The summary's advances at SUMMARY_SIZE, weight 600, measured in the desktop's engine (Chromium, SF Pro on macOS): the
+// drawing ends TAIL_PX after the text, so the chevron's gap follows the real width (plan-view's estimate ran 10 px wide).
+const SUMMARY_ADVANCE: Record<string, number> = {
+  '0': 8.3, '1': 6.17, '2': 7.84, '3': 8.16, '4': 8.38, '5': 8.08, '6': 8.33, '7': 7.38, '8': 8.41, '9': 8.33,
+  m: 11.36, h: 7.69, d: 7.95, l: 3.48, e: 7.36, f: 4.88, t: 4.92, '<': 8.19, $: 8.19, '.': 4.11, ' ': 3.28,
+}
+/** The summary text's width in CSS px on the desktop row; a character outside the table takes plan-view's estimate. */
+export const summaryWidth = (s: string): number => [...s].reduce((w, ch) => w + (SUMMARY_ADVANCE[ch] ?? textWidth(ch, SUMMARY_SIZE, true)), 0)
+
+/**
+ * The desktop row's drawing: the chip and its summary in one Svg (sibling texts would wrap onto new lines), `inset` px in;
+ * `end` is where the summary's last text ends.
+ */
+export function chipSvg(v: CacheView, wrap: (w: number, h: number, body: string) => string, inset = 0): { source: string; width: number; alt: string; end: number } {
+  const chip = chipShape(inset, (ROW_H - 16) / 2, CACHE_WORD[v.mode], v.mode, 10)
   const text = summaryText(v)
-  const x = chip.w + 7
+  const x = inset + chip.w + ITEM_GAP_PX
   const hue = CACHE_HUE[v.mode]
   const y = ROW_H / 2 + 4.5
   const [idle = '', cost] = v.mode === 'cold' ? text.split(' · ') : [text, undefined]
@@ -53,12 +80,13 @@ export function chipSvg(v: CacheView, wrap: (w: number, h: number, body: string)
     `<text x="${px.toFixed(1)}" y="${y}" font-family="${FONT}" font-size="${SUMMARY_SIZE}" font-variant-numeric="tabular-nums" ${attrs}>${esc(s)}</text>`
   const dotX = x + textWidth(idle, SUMMARY_SIZE, true) + 2
   const costX = dotX + 10
-  const width = Math.ceil((cost ? costX + textWidth(cost, SUMMARY_SIZE, true) : x + textWidth(idle, SUMMARY_SIZE, true)) + 4)
+  const end = cost ? costX + summaryWidth(cost) : x + summaryWidth(idle)
+  const width = Math.ceil(end + TAIL_PX)
   const body =
     chip.svg +
     at(x, idle, `fill="${hue}" font-weight="600"`) +
     (cost ? at(dotX, '·', 'class="m"') + at(costX, cost, 'class="t" font-weight="600"') : '')
-  return { source: wrap(width, ROW_H, body), width, alt: `${CACHE_WORD[v.mode]}: ${text}` }
+  return { source: wrap(width, ROW_H, body), width, alt: `${CACHE_WORD[v.mode]}: ${text}`, end }
 }
 
 const priced = (v: CacheView) => MODELS.map(m => ({ m, cost: usd(nextCost(m, v.mode, v.tokens)), isMine: v.model?.id === m.id }))
@@ -269,7 +297,8 @@ export type CacheDrawing = {
 /**
  * The cache's part of the band. `Svg` null draws the terminal's text. `bandW` is the band's width in px (the desktop card
  * is at most that wide); `wrap` is the panel's svg wrapper (its light and dark classes); `columns` the terminal's width
- * (0 when unknown: the terminal card's footer then takes its own line).
+ * (0 when unknown: the terminal card's footer then takes its own line). `isJoined`: another card follows on the desktop
+ * row, so the chevron's Button also reaches one cell past the card's end and the card ends 2 px after the glyph.
  */
 export function cacheDrawing(
   ui: CacheUi,
@@ -279,17 +308,23 @@ export function cacheDrawing(
   bandW: number,
   wrap: (w: number, h: number, body: string) => string,
   columns = 0,
+  isJoined = false,
 ): CacheDrawing {
   const { Box, Text, Button, Svg } = ui
   // The kit has no pressable wrapper: a Button carries only a text label (Svg or coloured Texts inside it are lost) and
   // neither Svg nor Box takes a press. So the chip keeps its look and the one-glyph chevron beside it folds the card.
   const fold = <Button key="cache-fold" label={foldGlyph(open)} plain dimColor onPress={() => void onToggle()} />
   if (Svg) {
-    const chip = chipSvg(v, wrap)
+    const chip = chipSvg(v, wrap, CARD_INSET_PX) // the desktop row always draws it on its card
     const card = open ? cardSvg(v, bandW, wrap) : null
     return {
-      row: [<Svg key="cache-chip" source={chip.source} alt={chip.alt} width={chip.width} height={ROW_H} />, fold],
-      size: chip.width + CACHE_FOLD_PX,
+      row: [
+        <Svg key="cache-chip" source={chip.source} alt={chip.alt} width={chip.width} height={ROW_H} />,
+        <Box key="cache-fold-slot" flexShrink={0} marginLeft={-1} marginRight={isJoined ? -1 : 0}>
+          {fold}
+        </Box>,
+      ],
+      size: chip.width + CACHE_FOLD_PX - (isJoined ? COLUMN_PX : 0),
       card: card ? (
         <Box key="cache-card" flexDirection="row" flexShrink={1} minWidth={0} overflow="hidden">
           <Svg source={card.source} alt={card.alt} width={card.width} height={card.height} />

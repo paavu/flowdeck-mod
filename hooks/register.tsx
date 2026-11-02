@@ -28,11 +28,12 @@ import { changeLive, endRuns, IDLE_FINISH_MS, isGone, LIVE_BEAT_MS, LIVE_STALE_M
 import type { LiveRecord } from './live'
 import { SMALL_SIZE } from './sizes'
 import { VERSION } from './version'
+import { asProjectMap, PROJECT_OF_KEY, projectByKey, withRemembered } from './project'
 import { asRule, estimateTokens, isStoredRule, isTracking, RULE_KEY, SCHEMA_CHARS_PER_TOKEN, toggledRule } from './rule'
 import { live, record, resetKey, resets, toWindows, usageHeadSvg, usageRows, usageSvg } from './usage'
 import { CACHE_HUE, cacheKey, isCardOpen, isRenewDue, isShowable, KEEP_WARM_DEFAULT, measured, remeasured, renewalEnded, seeded, stamped, toggledFold, userSpoke, viewOf } from './cache'
 import type { CacheFacts, CacheMode, KeepWarm } from './cache'
-import { cacheDrawing } from './cache-view'
+import { BUTTON_PAD_PX, cacheDrawing, COLUMN_PX, ITEM_GAP_PX, TAIL_PX } from './cache-view'
 import type { CacheDrawing, CacheUi } from './cache-view'
 
 const flow = atom({ plugin: 'flowdeck', key: 'flow' } as const, null)
@@ -373,11 +374,13 @@ const STRINGS = {
 // Module scope is fine here: session.start sets it again on every (re)load.
 let lang: Lang = 'en'
 const tr = () => STRINGS[lang]
-// The session's working folder, the project an archive entry names; set the same way.
+// The folder the session saves under (project.ts), the project an archive entry names; set the same way. A /clear keeps it.
 let project = ''
 // The session the flow's record is saved under; empty when the engine names none.
 let sessionId = ''
-// The session's transcript file, when classic.SessionStart named it (kept in the flow's record).
+// The session id whose folder is in the store's `projectOf` already (rememberProject).
+let rememberedFor = ''
+// The session's transcript file, when classic.SessionStart named it (kept in the flow's record; its folder names the project).
 let transcript = ''
 // The session that ended here (session.end): its record is not written again until a new session is adopted.
 let endedSession = ''
@@ -392,6 +395,56 @@ const currentSessionId = async ($: EngineInterface): Promise<string> => {
     .then(() => $.session.id())
     .catch(() => '')
   return typeof id === 'string' ? id : ''
+}
+
+// The folder session `sid` saves under (project.ts): the one the transcript's key names (no fs call), else its
+// remembered one while that still holds `.claude/flowdeck`, else `cwd`. `isNew`: worth remembering now (named by the
+// transcript, or nothing remembered for `sid` yet). Never throws.
+async function resolveProject($: EngineInterface, cwd: string, sid: string): Promise<{ at: string; isNew: boolean }> {
+  const named = projectByKey(cwd, transcript)
+  if (named) return { at: named, isNew: true }
+  const map = asProjectMap(await Promise.resolve().then(() => $.store.get(PROJECT_OF_KEY)).catch(() => undefined))
+  const kept = sid ? map[sid] : undefined
+  if (kept && (await Promise.resolve().then(() => $.fs.exists(dataDir(kept))).catch(() => false)) === true) return { at: kept, isNew: false }
+  return { at: cwd, isNew: !kept }
+}
+
+// The session's folder remembered at the start that resolves it, else at the first save of its record (its
+// flow-live.json record or an archive entry), so a later start in a moved working folder finds it. A failing store is
+// tried again at the next save. Never throws.
+async function rememberProject($: EngineInterface): Promise<void> {
+  if (!project || !sessionId || rememberedFor === sessionId) return
+  const sid = sessionId
+  const at = project
+  rememberedFor = sid
+  try {
+    const map = asProjectMap(await $.store.get(PROJECT_OF_KEY))
+    if (map[sid] !== at) await $.store.set(PROJECT_OF_KEY, withRemembered(map, sid, at))
+  } catch {
+    if (rememberedFor === sid) rememberedFor = ''
+  }
+}
+
+// The Archive and Trash lists from the project's indexes (healed, the old archive imported once, this project's store
+// entries put into files), then the first group's file.
+async function loadLists($: EngineInterface): Promise<void> {
+  const loadedAt = await clockOr($, 0)
+  const loaded = await loadArchive(io($), project, loadedAt).catch((): ArchiveLists => ({ records: [], trash: [], warnings: [] }))
+  await update($, archiveDetails, () => [])
+  await updatePanel($, prev => ({ ...prev, confirm: null }))
+  await showLists($, loaded)
+}
+
+// A startup's transcript arriving after session.start resolved without it: a project it names that is not the one
+// taken moves the session there (remembered, its lists and flow-live.json loaded). Nothing before session.start ran.
+async function followTranscript($: EngineInterface, cwd: string): Promise<void> {
+  const at = projectByKey(cwd, transcript)
+  if (!project || !at || at === project) return
+  project = at
+  rememberedFor = ''
+  await rememberProject($)
+  await loadLists($)
+  await adoptLive($, sessionId)
 }
 
 const isRussian = (v: unknown): boolean => typeof v === 'string' && /^(ru|russian|рус)/i.test(v.trim())
@@ -509,16 +562,29 @@ const noise = (x: number, y: number): number => {
 // so title, bar, percent and the worker icon live in one drawing; only the count and
 // the dismiss are Buttons beside it.
 const H = 22
-const MAX_BAND_W = 1600 // the widest the desktop band's drawing gets
+const MAX_BAND_W = 1600 // CSS px: the widest the desktop band's progress drawing gets (its dither stays under the Svg's size limit)
 const BAR_H = 16
-const SPRITE_W = 26
-// The desktop row's cards behind the cache block and the agents block: a neutral tint that reads a step off the band in
-// both themes (the kit's Box takes one colour, no theme pair), padded CARD_PAD cells (about 9 px each) at both ends.
+const CREW_SCALE = 1.85
+const SPRITE_INK_PX = 12 * CREW_SCALE // the 12-cell sprite as drawn on the band
+// The desktop row, in CSS px measured in the app: about 9 px a reported column (COLUMN_PX), and 14 of the columns' width
+// the row does not get. Its parts sit side by side with no gap of the kit's (gap 0 cells; `xs` is 8 px there): the
+// progress, the cache card, the agents card (one cell, CARD_GAP_PX, after the cache card) and the close X; the progress
+// drawing ends in BAND_GAP_PX of its own. An empty Svg takes no room in the app, so the card gap is a Box margin.
+const ROW_INSET_PX = 14
+const BAND_GAP_PX = 3
+const CARD_GAP_CELLS = 1
+const CARD_GAP_PX = CARD_GAP_CELLS * COLUMN_PX
+// The cards behind the cache block and the agents block: a neutral tint that reads a step off the band in both themes
+// (the kit's Box takes one colour, no theme pair). No padding of the kit's (whole cells): a card's first drawing starts
+// CARD_INSET_PX in and the Button that ends it keeps the same room after its label (BUTTON_PAD_PX). Inside, every gap is
+// ITEM_GAP_PX: a Button after a drawing sits one cell over it (TAIL_PX), the chevron's Button reaches one cell into the
+// agents card, whose icon starts CREW_INSET_PX in.
 const CARD_TINT = '#80808026'
-const CARD_PAD = 1
-const CARD_PAD_PX = 2 * 9
-const BAND_GAP = 'xs' // between the desktop row's parts: the progress, the spacer, the two cards and the close X
-const CREW_W = SPRITE_W + 30 + CARD_PAD_PX // the crew icon plus the "×N" button (×0 to ×99) in their card
+const CREW_INSET_PX = ITEM_GAP_PX - (BUTTON_PAD_PX - COLUMN_PX)
+const CREW_SVG_W = Math.round(CREW_INSET_PX + SPRITE_INK_PX + TAIL_PX)
+const COUNT_CHAR_PX = 8 // the "×N" label's advance a character in the desktop app (×0 measured 16 px)
+const crewCardW = (running: number): number => CREW_SVG_W - COLUMN_PX + 2 * BUTTON_PAD_PX + COUNT_CHAR_PX * `×${running}`.length
+const DISMISS_PX = 8 + 2 * BUTTON_PAD_PX // the close X: its glyph and the Button's own room
 const CELL = 3
 const FONT = "-apple-system,BlinkMacSystemFont,'SF Pro Text','Segoe UI',sans-serif"
 
@@ -551,7 +617,7 @@ const rowSvg = (f: Flow, W: number, name: string): string => {
   // The title takes what it needs, up to 40% of the row; the bar takes the rest.
   const title = fitText(name, 13, Math.max(60, W * 0.4))
   const BAR_X = Math.round(16 + textWidth(title, 13) + 12)
-  const BAR_W = Math.max(60, W - BAR_X - 46)
+  const BAR_W = Math.max(60, W - BAR_X - 40 - BAND_GAP_PX)
   const color = f.isFinished ? DONE : ACCENT
   const y0 = (H - BAR_H) / 2
   const fillW = Math.round(BAR_W * ratio(f))
@@ -609,14 +675,14 @@ const rowSvg = (f: Flow, W: number, name: string): string => {
 <rect x="${pillX}" width="${pillW}" height="${BAR_H}" rx="${BAR_H / 2}" fill="${color}"/>
 <text x="${pillX + pillW / 2}" y="${BAR_H / 2 + 4}" text-anchor="middle" font-family="${FONT}" font-size="11" font-weight="600" fill="#ffffff">${xml(text)}</text>
 </g>
-<text class="m" x="${W - 6}" y="${H / 2 + 4.5}" text-anchor="end" font-family="${FONT}" font-size="12.5" font-variant-numeric="tabular-nums">${percent}</text>
+<text class="m" x="${W - BAND_GAP_PX}" y="${H / 2 + 4.5}" text-anchor="end" font-family="${FONT}" font-size="12.5" font-variant-numeric="tabular-nums">${percent}</text>
 </svg>`
 }
 
 // The worker icon beside the crew button: walks while a worker runs, stands still otherwise.
 const crewSvg = (isWorking: boolean): string =>
-  `<svg xmlns="http://www.w3.org/2000/svg" width="${SPRITE_W}" height="${H}" viewBox="0 0 ${SPRITE_W} ${H}">
-${SPRITE_CSS}${sprite(1, 0, 'other', false, isWorking, 1.85)}
+  `<svg xmlns="http://www.w3.org/2000/svg" width="${CREW_SVG_W}" height="${H}" viewBox="0 0 ${CREW_SVG_W} ${H}">
+${SPRITE_CSS}${sprite(CREW_INSET_PX, 0, 'other', false, isWorking, CREW_SCALE)}
 </svg>`
 
 const barText = (f: Flow, width: number): string => {
@@ -1241,6 +1307,7 @@ async function saveArchive($: EngineInterface, entry: ArchiveEntry): Promise<boo
   if (project) {
     const saved = await saveSession(io($), project, entry, now).catch(() => null)
     if (saved?.isSaved && saved.lists) {
+      await rememberProject($)
       await showLists($, saved.lists, entry)
       return true
     }
@@ -1425,6 +1492,7 @@ async function persistLive($: EngineInterface, ended = false): Promise<void> {
     const rec: LiveRecord = { sessionId, ...(transcript ? { transcript } : {}), flow: f, agents: list, meta, lastActivityAt: activityAt, beatAt: now, ...(ended ? { endedAt: now } : {}) }
     const done = await changeLive(io($), project, s => ({ ...s, [sessionId]: rec }))
     if (done.state === 'bad') noteFault($, 'live', done.why)
+    if (done.state === 'ok') await rememberProject($)
     // The next try waits for the next change or heartbeat; after a failed one, for LIVE_STALE_MS.
     const next = done.state === 'ok' ? now : now + LIVE_STALE_MS - LIVE_BEAT_MS
     await update($, liveState, () => ({ owner: sessionId, activityAt, key, writtenAt: next }))
@@ -1748,7 +1816,7 @@ async function renewNow($: EngineInterface, k: KeepWarm, at: number): Promise<vo
 
 // The band's cache part, null with nothing to show yet. A part that cannot be drawn is said (noteFault) and left out,
 // so the flow row still draws.
-async function cacheBandPart($: EngineInterface, ui: CacheUi, bandW: number, columns: number): Promise<CacheDrawing | null> {
+async function cacheBandPart($: EngineInterface, ui: CacheUi, bandW: number, columns: number, isJoined: boolean): Promise<CacheDrawing | null> {
   try {
     await read($, cacheTick) // read so the minute tick redraws the band
     const c = await readCache($)
@@ -1758,7 +1826,7 @@ async function cacheBandPart($: EngineInterface, ui: CacheUi, bandW: number, col
       const mode = (await cacheView($, await readCache($), await $.clock.now()))?.mode
       if (mode) await update($, cacheFold, f => toggledFold(asCacheFold(f), mode))
     }
-    return cacheDrawing(ui, v, isCardOpen(asCacheFold(await read($, cacheFold)), v.mode), toggle, bandW, svg, columns)
+    return cacheDrawing(ui, v, isCardOpen(asCacheFold(await read($, cacheFold)), v.mode), toggle, bandW, svg, columns, isJoined)
   } catch (err) {
     noteFault($, 'band', `cache: ${err instanceof Error ? err.message : String(err)}`)
     return null
@@ -1997,7 +2065,13 @@ export const register: Register = (on, options) => {
   on('session.start', async ($, e, next) => {
     const started = await next(e)
     lang = await detectLang($, options.language).catch((): Lang => 'en')
-    project = typeof e.cwd === 'string' ? e.cwd : ''
+    const sid = (started as { sessionId?: unknown }).sessionId
+    sessionId = (await currentSessionId($)) || (typeof sid === 'string' ? sid : '')
+    rememberedFor = ''
+    const cwd = typeof e.cwd === 'string' ? e.cwd : ''
+    const resolved = await resolveProject($, cwd, sessionId).catch(() => ({ at: cwd, isNew: false }))
+    project = resolved.at
+    if (resolved.isNew) await rememberProject($)
     ruleComposed = false
     const rule = await loadRule($).catch(() => null)
     if (rule) await updatePanel($, prev => (prev.rule === rule ? prev : { ...prev, rule }))
@@ -2011,15 +2085,7 @@ export const register: Register = (on, options) => {
     if (typeof storedArchiveShown === 'boolean') await updatePanel($, prev => ({ ...prev, isArchiveShown: storedArchiveShown }))
     const storedKeepWarm = await loadKeepWarm($).catch(() => undefined)
     if (typeof storedKeepWarm === 'boolean') await updatePanel($, prev => ({ ...prev, isKeepWarm: storedKeepWarm }))
-    // The Archive and Trash lists from their indexes (healed, the old archive imported once, this project's store entries
-    // put into files), then the first group's file.
-    const loadedAt = await clockOr($, 0)
-    const loaded = await loadArchive(io($), project, loadedAt).catch((): ArchiveLists => ({ records: [], trash: [], warnings: [] }))
-    await update($, archiveDetails, () => [])
-    await updatePanel($, prev => ({ ...prev, confirm: null }))
-    await showLists($, loaded)
-    const sid = (started as { sessionId?: unknown }).sessionId
-    sessionId = (await currentSessionId($)) || (typeof sid === 'string' ? sid : '')
+    await loadLists($)
     void refreshContext($).catch(() => {})
     // A (re)load starts with no band or flow-live.json error: one that still happens is said again.
     faults.band.clear()
@@ -2447,6 +2513,10 @@ export const register: Register = (on, options) => {
     // A new session in this process (/clear, /resume, a fork) gets no session.start: its flow is sorted out here. A
     // /compact keeps the session; a startup is session.start's.
     if (typeof e.transcript_path === 'string' && e.transcript_path) transcript = e.transcript_path
+    if (e.source === 'startup') {
+      const cwd: unknown = typeof e.cwd === 'string' && e.cwd ? e.cwd : await Promise.resolve().then(() => $.session.cwd()).catch(() => '')
+      await followTranscript($, typeof cwd === 'string' ? cwd : '').catch(() => {})
+    }
     if (e.source === 'clear' || e.source === 'resume' || e.source === 'fork') {
       const cur = typeof e.session_id === 'string' && e.session_id ? e.session_id : await currentSessionId($)
       await adoptLive($, cur)
@@ -3184,13 +3254,13 @@ export const register: Register = (on, options) => {
     const { Box, Text, Button } = ui
     const bandWidth = Math.max(180, Math.min(MAX_BAND_W, (e.props.bodyColumns || 100) * 9 - 180))
     // The prompt cache's chip, shown once the session made a request, with or without a flow (cache-view.tsx).
-    const cache = await cacheBandPart($, { Box, Text, Button, Svg: e.surface !== 'terminal' && 'Svg' in ui ? ui.Svg : null } as CacheUi, bandWidth, e.props.bodyColumns || 0)
+    const cache = await cacheBandPart($, { Box, Text, Button, Svg: e.surface !== 'terminal' && 'Svg' in ui ? ui.Svg : null } as CacheUi, bandWidth, e.props.bodyColumns || 0, f !== null)
     if (f === null && !cache) return next(e)
     const isDesktop = e.surface !== 'terminal' && 'Svg' in ui
     // The desktop row's card behind a block (the cache's chip and chevron, the crew icon and its count): only a backdrop,
     // what is pressable inside stays as it is.
-    const card = (key: string, children: RenderChildren) => (
-      <Box key={key} flexDirection="row" alignItems="center" gap={BAND_GAP} flexShrink={0} paddingX={CARD_PAD} backgroundColor={CARD_TINT}>
+    const card = (key: string, children: RenderChildren, marginLeft = 0) => (
+      <Box key={key} flexDirection="row" alignItems="center" gap={0} flexShrink={0} backgroundColor={CARD_TINT} {...(marginLeft ? { marginLeft } : {})}>
         {children}
       </Box>
     )
@@ -3234,20 +3304,22 @@ export const register: Register = (on, options) => {
     // The terminal's kit has an Svg too, drawn as an empty box: the terminal takes the text row.
     if (isDesktop && 'Svg' in ui) {
       const { Svg } = ui
-      // About 9 CSS px per reported column (measured in the desktop app; savvy-progress assumed 8 and stopped
-      // short); the count, the dismiss and their gaps take the rest. The cache card, between the progress and the crew's,
-      // takes its own width from the progress; the spacer before it takes what is left, so the close X ends the row.
-      const width = Math.max(180, Math.min(MAX_BAND_W, (e.props.bodyColumns || 100) * 9 - 180) - (cache ? cache.size + CARD_PAD_PX : 0) - CREW_W)
+      // The progress drawing takes the row's width less the blocks after it, each sized from what it holds; the spacer
+      // after it takes only what the px estimate missed (and the room past MAX_BAND_W), so the close X still ends the row.
+      const rowW = (e.props.bodyColumns || 100) * COLUMN_PX - ROW_INSET_PX
+      const width = Math.max(180, Math.min(MAX_BAND_W, rowW - (cache?.size ?? 0) - (cache ? CARD_GAP_PX : 0) - crewCardW(running) - DISMISS_PX))
       return (
         <Box flexDirection="column">
-          <Box flexDirection="row" alignItems="center" gap={BAND_GAP} flexShrink={1} minWidth={0} overflow="hidden">
+          <Box flexDirection="row" alignItems="center" gap={0} flexShrink={1} minWidth={0} overflow="hidden">
             <Svg source={rowSvg(g, width, title)} alt={`${title}: ${label(g, true)}, ${percent}`} width={width} height={H} />
             <Box key="flowdeck-band-spacer" flexGrow={1} flexShrink={1} minWidth={0} />
             {cache ? card('flowdeck-cache-card', cache.row) : null}
             {card('flowdeck-agents-card', [
-              <Svg key="flowdeck-crew" source={crewSvg(running > 0)} alt={running ? `${running} ${running === 1 ? 'worker' : 'workers'} running` : 'no workers running'} width={SPRITE_W} height={H} />,
-              crewButton,
-            ])}
+              <Svg key="flowdeck-crew" source={crewSvg(running > 0)} alt={running ? `${running} ${running === 1 ? 'worker' : 'workers'} running` : 'no workers running'} width={CREW_SVG_W} height={H} />,
+              <Box key="flowdeck-agents-slot" flexShrink={0} marginLeft={-1}>
+                {crewButton}
+              </Box>,
+            ], cache ? CARD_GAP_CELLS : 0)}
             {dismiss}
           </Box>
           {cache?.card ?? null}

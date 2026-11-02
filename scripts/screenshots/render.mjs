@@ -14,10 +14,14 @@ if (!outFile || !imagesDir || !scratch) throw new Error('usage: node render.mjs 
 // pick: a part of the drawing, parts: several drawings stacked, each { from, pick, label } }.
 // A pick is { svg: n } (the n-th Svg), { children: [i, ...] } (those children of the root) or
 // { key, keep?, drop? } (the node with that key, with only the children keyed in `keep`, or all but those in `drop`).
+// The band's page is its row at 110 columns as the mod sizes it (9 px a column less 14), and its plain Buttons keep the
+// 11 px at each side the desktop app draws (buttonPad; measured in the app) and its cells are 9 px (cell), so the row fills
+// as it does there.
+const BAND = { width: 110 * 9 - 14, buttonPad: 11, cell: 9 }
 const SHOTS = {
-  'band-overview': { from: 'band-running', width: 900 },
-  'band-running': { width: 900 },
-  'band-done': { width: 900 },
+  'band-overview': { from: 'band-running', ...BAND },
+  'band-running': { ...BAND },
+  'band-done': { ...BAND },
   'cache-warm': { width: 760, pick: { svg: 3 } },
   'cache-cold': { width: 760, pick: { svg: 3 } },
   'cache-keep-warm': {
@@ -139,7 +143,8 @@ function themed(source, theme) {
 
 // A Space: cells, or a named step (the desktop's own sizes are not known here; these are close).
 const STEP = { xs: 4, sm: 8, md: 12, lg: 16, xl: 24 }
-const px = n => (typeof n === 'string' ? `${STEP[n] ?? 0}px` : `${n * CELL}px`)
+let cell = CELL // the page's own, set by page()
+const px = n => (typeof n === 'string' ? `${STEP[n] ?? 0}px` : `${n * cell}px`)
 function boxStyle(p) {
   const s = ['display:flex', `flex-direction:${p.flexDirection === 'column' ? 'column' : 'row'}`]
   if (p.backgroundColor) s.push(`background:${p.backgroundColor}`)
@@ -148,6 +153,8 @@ function boxStyle(p) {
   if (p.gap) s.push(`gap:${px(p.gap)}`)
   if (p.columnGap) s.push(`column-gap:${px(p.columnGap)}`)
   if (p.marginTop) s.push(`margin-top:${px(p.marginTop)}`)
+  if (p.marginLeft) s.push(`margin-left:${px(p.marginLeft)}`)
+  if (p.marginRight) s.push(`margin-right:${px(p.marginRight)}`)
   if (p.paddingLeft) s.push(`padding-left:${px(p.paddingLeft)}`)
   if (p.flexGrow !== undefined) s.push(`flex-grow:${p.flexGrow}`)
   if (p.flexShrink !== undefined) s.push(`flex-shrink:${p.flexShrink}`)
@@ -282,6 +289,7 @@ function page(name, spec, theme) {
       : `:root{${vars(THEME[theme])}}`
   const marks = CALLOUTS[name] ?? []
   const pad = marks.length ? PAD_MARKED : PAD
+  cell = spec.cell ?? CELL
   return `<!doctype html><html><head><meta charset="utf-8"><title>flowdeck sample</title><style>
 ${rootVars}
 html,body{margin:0;background:var(--bg);color:var(--ink)}
@@ -289,7 +297,7 @@ body{font:13px/18px -apple-system,BlinkMacSystemFont,"Segoe UI",system-ui,sans-s
 .frame{position:relative;width:${spec.width}px;padding:${pad}px;box-sizing:content-box}
 .text{display:inline-block}
 .btn{display:inline-block;white-space:nowrap;padding:1px 8px;border:1px solid var(--line);border-radius:6px;background:var(--button);flex-shrink:0}
-.btn.plain{padding:0 2px;border-color:transparent;background:none}
+.btn.plain{padding:0 ${spec.buttonPad ?? 2}px;border-color:transparent;background:none}
 .part+.part{margin-top:${marks.length ? 34 : 14}px}
 .leaders{position:absolute;left:0;top:0;pointer-events:none;z-index:1}
 .leaders line{stroke:${MARK};stroke-width:1.5}

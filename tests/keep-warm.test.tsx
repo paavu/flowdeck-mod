@@ -2,7 +2,7 @@ import { describe, expect, mock, test } from 'claude-code/testing'
 
 import { isRenewDue, KEEP_WARM_DEFAULT, KEEP_WARM_MAX_RENEWALS, KEEP_WARM_MIN_TOKENS, keepStatus, keepText, RENEW_AT_MS, TTL_MS, viewOf } from '../hooks/cache'
 import { CACHE_HUE } from '../hooks/cache'
-import { CACHE_FOLD_PX } from '../hooks/cache-view'
+import { BUTTON_PAD_PX, CACHE_FOLD_PX, COLUMN_PX } from '../hooks/cache-view'
 import { FOLD_OPEN, FOLD_SHUT, foldGlyph } from '../hooks/fold'
 import { asKeepWarm, asPanel, PANEL_DEFAULT } from '../hooks/shapes'
 import { hhmm } from '../hooks/time'
@@ -491,7 +491,9 @@ describe('the card and the band', () => {
     await $.tool.call({ tool: 'mcp__flowdeck__progress', title: 'Ship it', phase: 'delegate', tasks: [{ title: 'a', tier: 'light' }] } as any)
     for (const columns of [60, 100, 200, 400]) {
       const l = await look($, 'desktop', columns)
-      expect(l.widths[0]).toBe(Math.max(180, Math.min(1600, columns * 9 - 180) - (l.widths[1]! + CACHE_FOLD_PX + 18) - 74)) // 18: a card's padding; 74: the crew icon and its button in their card
+      // the row (9 px a column less 14) less the cache card (its chevron's Button a cell into the gap), the one-cell gap, the agents
+      // card (the 32 px icon drawing, the ×0 Button a cell over it) and the X
+      expect(l.widths[0]).toBe(Math.min(1600, columns * 9 - 14 - (l.widths[1]! + CACHE_FOLD_PX - COLUMN_PX) - COLUMN_PX - (32 - COLUMN_PX + 2 * BUTTON_PAD_PX + 16) - (8 + 2 * BUTTON_PAD_PX)))
       expect(l.widths[1]).toBe(before.widths[0])
     }
     const bar = (await look($, 'terminal', 120)).texts.find(t => /^[█░]+$/.test(t)) ?? ''

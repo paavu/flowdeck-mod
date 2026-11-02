@@ -2,6 +2,12 @@
 
 Versions are `M.m.xxxx`; every build bumps the 4-digit build number. Details and rulings: `docs/ledger.md`, `docs/design.md`.
 
+## 1.0.0066 (2026-11-02)
+- The band's progress bar fills the row up to the cache card, so the percent label ends about 3 px before it and the large empty gap is gone (desktop; the terminal band is unchanged).
+- The cache card and the agents card are sized from their content with equal padding at both ends, with a one-cell (9 px) gap between them.
+- Inside the cards, the minutes left and the chevron, the chevron and the worker icon (plus the cards' 9 px gap), and the icon and the `×N` count are now as far apart as the WARM/COLD chip and its text (7 px). The chevron and the count sit one cell over the drawing before them, since the desktop's own Button padding (about 11 px) is wider than the gap, and the minutes text is measured with the desktop's font widths.
+- The data folder is Claude Code's project folder, so a session working in a child folder, or one resumed after a restart from another folder, keeps using the project's archive. The folder is remembered per session.
+
 ## 1.0.0065 (2026-11-02)
 - Task tracking is on by default for every install. Opt out with `/flowdeck-rule off` or the `● Track tasks` switch. The first-run question (`Track every task in flowdeck?` with `Not now`) is gone, and an install that stored `unset` in an older release now tracks. The strip shows only while tracking is off.
 - Turning tracking on reaches the running session at once: the plan reminder carries the full flow rule until a prompt compose has put it in the system prompt. Turning it off applies at the next compose, and the reminder stops at once.

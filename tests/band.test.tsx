@@ -45,7 +45,10 @@ describe('the band above the prompt', () => {
       const b = await band($, 'desktop', columns)
       const json = JSON.stringify(await b.drawn())
       const w = Number(/"width":(\d+),"height":\d+/.exec(json)?.[1] ?? /width="?(\d+)/.exec(json)?.[1])
-      const slot = Math.max(180, Math.min(1600, columns * 9 - 180) - 74) // the crew icon and ×N take 56, their card's padding 18; measured: the host's column is about 9 CSS px wide; the flow row also holds ×N, Finish and ✕
+      // measured in the desktop app: about 9 CSS px a column, 14 of them not the row's; after the progress, the agents card
+      // (the 32 px icon drawing, the ×0 Button: 16 px of label and 11 at each side, one 9 px cell over the drawing) and the
+      // X (8 and 11 at each side)
+      const slot = Math.min(1600, columns * 9 - 14 - (32 - 9 + 22 + 16) - (8 + 22))
       expect(w).toBeLessThanOrEqual(slot)
       expect(w).toBeGreaterThanOrEqual(slot - 1) // it fills the width that is there, like the other bars
             expect(json).not.toContain('"paddingRight"') // the row runs to the right edge like the other bars

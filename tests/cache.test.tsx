@@ -2,7 +2,7 @@ import { describe, expect, mock, test } from 'claude-code/testing'
 
 import { CACHE_WORD, coldCost, familyOf, isCardOpen, MODELS, nextCost, summaryText, toggledFold, tokText, TTL_MS, ttlText, usd, viewOf, warmCost } from '../hooks/cache'
 import type { CacheView } from '../hooks/cache'
-import { CACHE_FOLD_PX, CARD_MAX_W, cardLines, cardSvg, WIDE_MIN_W } from '../hooks/cache-view'
+import { BUTTON_PAD_PX, CACHE_FOLD_PX, CARD_INSET_PX, CARD_MAX_W, cardLines, cardSvg, COLUMN_PX, FOLD_GLYPH_PX, ITEM_GAP_PX, summaryWidth, WIDE_MIN_W } from '../hooks/cache-view'
 import { textWidth } from '../hooks/plan-view'
 import { asCacheFacts, asCacheFold, asCacheTick } from '../hooks/shapes'
 import { hhmm, idleText, minutesLeft } from '../hooks/time'
@@ -55,6 +55,16 @@ const held = (on: any, key: string, value: unknown) =>
     const r = await next(e)
     return r?.value?.version > 0 ? r : { value: { value, version: r?.value?.version ?? 0 } }
   })
+
+// The desktop row in CSS px (hooks/register.tsx): 9 a column less 14; the agents card holds the 32 px crew drawing (a 5 px
+// inset, the 22.2 px icon, 5 px of tail) and the ×0 Button (16 px of label and the Button's own room) a cell over it; the
+// close X is 30; the cards are one cell (9 px) apart, the chevron's Button reaching into that gap; the percent ends 3 px before them.
+const rowPx = (columns: number) => columns * 9 - 14
+const CREW_SVG_PX = 32
+const CREW_CARD_PX = CREW_SVG_PX - COLUMN_PX + 2 * BUTTON_PAD_PX + 16
+const DISMISS_PX = 8 + 2 * BUTTON_PAD_PX
+const PERCENT_GAP_PX = 3
+const CARD_GAP_PX = COLUMN_PX
 
 const start = ($: any) => $.session.start({ surface: 'terminal', isInteractive: true, cwd: '' } as any)
 const request = async ($: any, agentId?: string, model = 'claude-opus-5-5') => {
@@ -291,7 +301,7 @@ describe('the chip in the band', () => {
       if (surface === 'desktop') {
         // the chip drawing as in 1.0.0028: the word on a rounded rect of its hue, the summary beside it
         expect(l.alts).toEqual(['WARM: 42m left'])
-        expect(l.svgs[0]).toMatch(/<rect x="0" y="3" width="\d+" height="16" rx="4" fill="#cc6363"\/>/)
+        expect(l.svgs[0]).toMatch(new RegExp(`<rect x="${CARD_INSET_PX}" y="3" width="\\d+" height="16" rx="4" fill="#cc6363"/>`)) // its card's inset in
         expect(l.svgs[0]).toContain('>WARM<')
         expect(l.svgs[0]).toContain('42m left')
       } else {
@@ -344,20 +354,27 @@ describe('the chip in the band', () => {
     })
   }
 
-  test('the desktop row still fits: the progress drawing gives the chip and its chevron their room', async ($, on) => {
+  test('the desktop row is filled by the progress: every block takes its content, the bar the rest', async ($, on) => {
     engine(on)
     await start($)
     await progress($, { title: 'Ship it', phase: 'delegate', tasks: [{ title: 'a', tier: 'light' }] })
     await mainTurn($)
     for (const columns of [60, 100, 200, 400]) {
       const l = await look($, 'desktop', columns)
-      const slot = Math.min(1600, columns * 9 - 180)
-      expect(l.widths[0]).toBe(Math.max(180, slot - (l.widths[1]! + CACHE_FOLD_PX + 18) - 74)) // 18: a card's padding; 74: the crew icon and its button in their card
+      const [bar, chip, crew] = l.widths
+      expect(l.widths.length).toBe(3) // the progress, the chip, the crew icon
+      expect(crew).toBe(CREW_SVG_PX)
+      const cacheCard = chip! + CACHE_FOLD_PX - COLUMN_PX // the chip's drawing and the chevron's Button, a cell over each card's edge
+      const blocks = cacheCard + CARD_GAP_PX + CREW_CARD_PX + DISMISS_PX
+      expect(bar).toBe(Math.min(1600, rowPx(columns) - blocks)) // the bar takes the rest, up to its widest
+      const spare = rowPx(columns) - bar! - blocks
+      expect(spare).toBe(columns <= 200 ? 0 : rowPx(columns) - blocks - 1600) // no overlap; spare room only past the bar's widest
+      expect(l.svgs[0]).toContain(`<text class="m" x="${bar! - PERCENT_GAP_PX}"`) // the percent ends 3 px before the cache card
       expect(l.json).toContain('"overflow":"hidden"') // still shrinks and clips, never pushes a neighbour
     }
   })
 
-  test('the desktop row: a card behind the cache block and one behind the crew, the spare room before them, the X last', async ($, on) => {
+  test('the desktop row: a card behind the cache block and one behind the crew, hugging what they hold, the X last', async ($, on) => {
     engine(on)
     await start($)
     await progress($, { title: 'Ship it', phase: 'delegate', tasks: [{ title: 'a', tier: 'light' }] })
@@ -370,17 +387,27 @@ describe('the chip in the band', () => {
       const nodes = all(await b.drawn())
       const row = nodes.find(n => kidsOf(n).some(c => keyOf(c) === 'flowdeck-dismiss'))
       expect(kidsOf(row).map(keyOf)).toEqual(['Svg', 'flowdeck-band-spacer', 'flowdeck-cache-card', 'flowdeck-agents-card', 'flowdeck-dismiss'])
-      expect(row.props.gap).toBe('xs')
+      expect(row.props.gap).toBe(0) // no gap of the kit's (8 px on the desktop): the px gaps are drawn
       const [, spacer, cacheCard, crewCard, dismiss] = kidsOf(row)
       expect(spacer.props.flexGrow).toBe(1)
       expect(dismiss.props.role).toBe('dismiss')
-      expect(kidsOf(cacheCard).map(keyOf)).toEqual(['Svg', 'cache-fold']) // the chip's drawing, then its chevron
-      expect(kidsOf(crewCard).map(keyOf)).toEqual(['Svg', 'flowdeck-agents']) // the crew icon, then its ×N
+      expect(kidsOf(cacheCard).map(keyOf)).toEqual(['Svg', 'cache-fold-slot']) // the chip's drawing, then its chevron
+      expect(kidsOf(crewCard).map(keyOf)).toEqual(['Svg', 'flowdeck-agents-slot']) // the crew icon, then its ×N
+      expect(kidsOf(kidsOf(cacheCard)[1]).map(keyOf)).toEqual(['cache-fold'])
+      expect(kidsOf(kidsOf(crewCard)[1]).map(keyOf)).toEqual(['flowdeck-agents'])
+      // each Button sits a cell over the drawing before it; the chevron's also reaches a cell into the agents card
+      expect(kidsOf(cacheCard)[1].props).toMatchObject({ marginLeft: -1, marginRight: -1, flexShrink: 0 })
+      expect(kidsOf(crewCard)[1].props).toMatchObject({ marginLeft: -1, flexShrink: 0 })
+      expect(crewCard.props.marginLeft).toBe(1) // one cell between the two cards
       expect(kidsOf(cacheCard)[0].props.alt).toMatch(/^WARM: /)
       expect(kidsOf(crewCard)[0].props.alt).toBe('no workers running')
+      // the cache card starts its drawing CARD_INSET_PX in and ends with a Button whose own room matches it
+      expect(String(kidsOf(cacheCard)[0].props.source)).toContain(`<rect x="${CARD_INSET_PX}" y="3"`)
+      expect(String(kidsOf(crewCard)[0].props.source)).toContain('translate(5,0)')
+      expect(CARD_INSET_PX).toBe(BUTTON_PAD_PX)
       for (const c of [cacheCard, crewCard]) {
-        expect(c.props.paddingX).toBe(1)
-        expect(c.props.paddingY).toBeUndefined() // the row keeps its height
+        expect(Object.keys(c.props).filter(k => /^(padding|margin|width|minWidth)/.test(k))).toEqual(c === crewCard ? ['marginLeft'] : []) // it hugs what it holds
+        expect(c.props.gap).toBe(0)
         expect(c.props.flexShrink).toBe(0)
       }
       // only the two cards are tinted: the title, the progress and the X stay on the band
@@ -390,6 +417,78 @@ describe('the chip in the band', () => {
       await b.unmount()
     }
   })
+
+  // The row's right end in CSS px, laid out as the desktop does: an Svg its width, a plain Button its label and
+  // BUTTON_PAD_PX at each side, a Box's margins COLUMN_PX a cell. The marks: the chip, its summary, the chevron's glyph,
+  // the crew icon and the ×N label.
+  const marks = (row: any, kidsOf: (n: any) => any[], keyOf: (n: any) => string) => {
+    const at: Record<string, [number, number]> = {}
+    const presses: [string, number, number][] = []
+    const label = (key: string, text: string) => (key === 'cache-fold' ? FOLD_GLYPH_PX : key === 'flowdeck-dismiss' ? 8 : 8 * text.length)
+    const lay = (n: any, x: number): number => {
+      const p = n.props ?? {}
+      if (n.type === 'Svg') {
+        const src = String(p.source)
+        const chip = /<rect x="([\d.]+)" y="3" width="([\d.]+)"/.exec(src)
+        if (chip) {
+          at.chip = [x + Number(chip[1]), x + Number(chip[1]) + Number(chip[2])]
+          const texts = [...src.matchAll(/<text x="([\d.]+)"[^>]*>([^<]*)<\/text>/g)].slice(1) // past the chip's own word
+          const last = texts[texts.length - 1]!
+          at.text = [x + Number(texts[0]![1]), x + Number(last[1]) + summaryWidth(last[2]!)]
+        }
+        const crew = /translate\(([\d.]+),0\) scale\(([\d.]+)\)/.exec(src)
+        if (crew) at.icon = [x + Number(crew[1]), x + Number(crew[1]) + 12 * Number(crew[2])]
+        return x + Number(p.width)
+      }
+      if (n.type === 'Button') {
+        const key = keyOf(n)
+        const w = label(key, String(p.label))
+        at[key] = [x + BUTTON_PAD_PX, x + BUTTON_PAD_PX + w]
+        presses.push([key, x, x + w + 2 * BUTTON_PAD_PX])
+        return x + w + 2 * BUTTON_PAD_PX
+      }
+      let end = x + (p.marginLeft ?? 0) * COLUMN_PX
+      for (const c of kidsOf(n)) end = lay(c, end)
+      return end + (p.marginRight ?? 0) * COLUMN_PX
+    }
+    const kids = kidsOf(row)
+    let x = 0
+    for (const c of kids.slice(kids.findIndex(c => keyOf(c) === 'flowdeck-cache-card'))) x = lay(c, x)
+    return { at, presses, end: x }
+  }
+
+  for (const mode of ['warm', 'cold'] as const) {
+    test(`the desktop row's gaps (${mode}): summary to chevron and icon to count equal the chip to its summary; chevron to icon adds the cards' cell`, async ($, on) => {
+      const { clock } = engine(on)
+      await start($)
+      await progress($, { title: 'Ship it', phase: 'delegate', tasks: [{ title: 'a', tier: 'light' }] })
+      await mainTurn($)
+      if (mode === 'cold') await clock.set(NOW + 2 * TTL_MS + 45 * MIN)
+      const kidsOf = (n: any): any[] => [].concat(n?.children ?? n?.props?.children ?? []).filter((c: any) => c && typeof c === 'object')
+      const keyOf = (n: any): string => String(n?.key ?? n?.props?.key ?? n?.type)
+      const all = (n: any): any[] => (Array.isArray(n) ? n.flatMap(all) : n && typeof n === 'object' ? [n, ...kidsOf(n).flatMap(all)] : [])
+      for (const columns of [60, 100, 200, 400]) {
+        const b = await band($, 'desktop', columns)
+        const row = all(await b.drawn()).find(n => kidsOf(n).some(c => keyOf(c) === 'flowdeck-dismiss'))
+        const { at, presses } = marks(row, kidsOf, keyOf)
+        const chipGap = at.text![0] - at.chip![1]
+        expect(chipGap).toBe(ITEM_GAP_PX)
+        const gaps = [at['cache-fold']![0] - at.text![1], at.icon![0] - at['cache-fold']![1], at['flowdeck-agents']![0] - at.icon![1]]
+        // the chevron to the icon is the one gap that crosses the cards: the same room plus the cards' own cell
+        expect(Math.abs(gaps[0]! - chipGap)).toBeLessThanOrEqual(1)
+        expect(Math.abs(gaps[1]! - CARD_GAP_PX - chipGap)).toBeLessThanOrEqual(1)
+        expect(Math.abs(gaps[2]! - chipGap)).toBeLessThanOrEqual(1)
+        // no overlap: the marks in order, the three press targets apart
+        const order = [at.chip!, at.text!, at['cache-fold']!, at.icon!, at['flowdeck-agents']!, at['flowdeck-dismiss']!]
+        order.slice(1).forEach((m, i) => expect(m[0]).toBeGreaterThan(order[i]![1]))
+        expect(presses.map(p => p[0])).toEqual(['cache-fold', 'flowdeck-agents', 'flowdeck-dismiss'])
+        presses.slice(1).forEach((p, i) => expect(p[1]).toBeGreaterThanOrEqual(presses[i]![2]))
+        // the cards are one cell (9 px) apart: the crew card's margin
+        expect(CARD_GAP_PX).toBe(9)
+        await b.unmount()
+      }
+    })
+  }
 
   test('the desktop row without a flow cards the cache block alone', async ($, on) => {
     engine(on)

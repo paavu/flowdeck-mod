@@ -11,7 +11,7 @@
 </p>
 
 <p align="center">
-  <img alt="Version 1.0.0065" src="https://img.shields.io/badge/version-1.0.0065-8f8cf4">
+  <img alt="Version 1.0.0066" src="https://img.shields.io/badge/version-1.0.0066-8f8cf4">
   <img alt="MIT license" src="https://img.shields.io/badge/license-MIT-5fbf8f">
   <img alt="Claude Code 2.1.295 or later" src="https://img.shields.io/badge/Claude%20Code-%E2%89%A5%202.1.295-8f8cf4">
   <img alt="Terminal and desktop" src="https://img.shields.io/badge/surfaces-terminal%20%2B%20desktop-5fbf8f">
@@ -567,13 +567,14 @@ With tracking on, the main session pays the flow rule (about 740 characters, abo
 | Keep warm | panel top row (mod store `keepWarm`, per project folder) | on |
 | Task tracking | `Track tasks` beside the `FlowDeck` title, the strip's buttons, `/flowdeck-rule` (mod store `rule`, all projects) | `on` |
 | Band shown | panel top row (per session) | shown |
+| Project folder of a session | mod store `projectOf`, an object `{ sessionId: folder }` of at most 100 sessions (the oldest are dropped); used only while that folder's `.claude/flowdeck` exists | the folder found at session start |
 | Cache prices | `MODELS` in `hooks/cache.ts` | Fable 10 / 0.25, Opus 4 / 0.20, Sonnet 2 / 0.20, Haiku 0.5 / 0.05 USD per million tokens |
 | Keep warm timing | top of `hooks/cache.ts` | renew at minute 50, at least 80,000 tokens, at most 8 renewals |
 | Idle finish | `IDLE_FINISH_MS` in `hooks/live.ts` | 30 minutes |
 
 All times are 24-hour `HH:MM`.
 
-**Where data lives.** Per project, in `<project>/.claude/flowdeck/` (the session's working folder). The mod writes a `.gitignore` containing `*` into that folder before its first file, so nothing there is committed.
+**Where data lives.** Per project, in `<project>/.claude/flowdeck/`. `<project>` is Claude Code's project folder, the folder its per-project store is named after (the session's transcript is at `~/.claude/projects/<key>/<session>.jsonl`, where `<key>` is the folder path with every character outside `A-Za-z0-9` replaced by `-`, cut to 200 characters plus a hash when longer). It is not the shell's current folder: a session working in a child folder, for example a nested repo, or after Claude's shell `cd`, still reads and writes the parent project's data. The mod finds the folder by comparing the transcript's folder name with the session's working folder and its parents (string comparison only, no file reads). If nothing matches it uses the folder remembered for the session id (store key `projectOf`), then the working folder. It saves the folder as soon as the session starts; `/clear`, resume, fork and compaction keep it. The mod writes a `.gitignore` containing `*` into that folder before its first file, so nothing there is committed.
 
 | File | Holds |
 |---|---|
@@ -606,14 +607,14 @@ flowdeck makes **no network calls of its own**: there is no `fetch`, no HTTP and
 |---|---|
 | Model requests | Keep warm's renewal, `$.model.fork` (`hooks/register.tsx`, `renewCache`): one request to the model provider the session already uses, over the session's own transcript. Off with the `Keep warm` switch. |
 | Processes | `$.process.run`, only from `Empty Trash` (`eraseSessionFile` in `hooks/archive-store.ts`): `unlink <file>` on macOS and Linux, `powershell.exe -NoProfile -NonInteractive -Command Remove-Item -LiteralPath …` on Windows (the path passed in the environment). No shell, one file per call, 15-second timeout. |
-| Files written | Only under `<project>/.claude/flowdeck/` (`$.fs.write`): the files listed above and the folder's `.gitignore`. |
-| Files read | The same folder (`$.fs.read`, `$.fs.list`, `$.fs.stat`, `$.fs.exists`). |
-| Session data | Context breakdown and rate limits (`$.session.usage`), the session's model and id, agent launches with their description and prompt (the first ~600 characters of a worker's prompt become its brief), the name of each tool a worker calls (the live `Running · <tool>` word), TodoWrite, TaskCreate and Agent calls, permission requests (to show `Needs approval`), whether a prompt was typed by the user (keep warm's count), turn usage (tokens and cost), and the transcript path from `SessionStart` (kept to recognise the session after a restart). |
-| Settings and env | `language` from Claude Code's settings, `LC_ALL`, `LC_MESSAGES`, `LANG`; only to pick the panel language. |
+| Files written | Only under `<project>/.claude/flowdeck/` (`$.fs.write`), where `<project>` is Claude Code's project folder (see [Configuration and data](#configuration-and-data)): the files listed above and the folder's `.gitignore`. |
+| Files read | The same folder (`$.fs.read`, `$.fs.list`, `$.fs.stat`, `$.fs.exists`). Finding the project folder reads no files: it compares the transcript path with the working folder and its parents by name. The one extra check is `$.fs.exists` on `<remembered folder>/.claude/flowdeck` when a folder is remembered for the session. |
+| Session data | Context breakdown and rate limits (`$.session.usage`), the session's model and id, agent launches with their description and prompt (the first ~600 characters of a worker's prompt become its brief), the name of each tool a worker calls (the live `Running · <tool>` word), TodoWrite, TaskCreate and Agent calls, permission requests (to show `Needs approval`), whether a prompt was typed by the user (keep warm's count), turn usage (tokens and cost), and the transcript path from `SessionStart` (kept to recognise the session after a restart, and its folder name used to find the project folder). |
+| Settings and env | `language` from Claude Code's settings, `LC_ALL`, `LC_MESSAGES`, `LANG`; only to pick the panel language. The mod store holds the setting keys listed above, including `projectOf` (one read at session start, a write when the folder changes). |
 | User prompts | The Fable approval guard (see [Model routing](#model-routing)) asks one question through `$.ui.ask` before a Fable launch, with the task description and the first 300 characters of the brief. Nothing is stored or sent. It is always on and cannot be disabled. |
 | System prompt | Adds the flow rule only while task tracking is on, or in a session that ran `/flowdeck:flowdeck` (see [Task tracking](#task-tracking)). |
 
-What it saves (task titles, goals, briefs, results and feedback, costs and times) is what the user and the orchestrator wrote during the session. It stays in the project folder, git-ignored.
+What it saves (task titles, goals, briefs, results and feedback, costs and times) is what the user and the orchestrator wrote during the session. It stays in the project folder (Claude Code's, see above), git-ignored.
 
 ## Updating and uninstalling
 
@@ -636,7 +637,7 @@ claude plugin uninstall flowdeck@flowdeck-mod
 claude plugin marketplace remove flowdeck-mod
 ```
 
-Saved flows stay in each project's `.claude/flowdeck/` folder (git-ignored), with any `plans.json` an older version left there. Move that folder to your system's trash if you want them gone.
+Saved flows stay in each project's `.claude/flowdeck/` folder (git-ignored; the project is Claude Code's project folder), with any `plans.json` an older version left there. Move that folder to your system's trash if you want them gone.
 
 ## Troubleshooting
 
@@ -649,6 +650,7 @@ Saved flows stay in each project's `.claude/flowdeck/` folder (git-ignored), wit
 | A panel button does nothing | The desktop app may have pressed an old handle while the panel redrew; press again. Right after `/reload-plugins` the app refuses presses on buttons drawn before the reload until it redraws the panel. |
 | `could not be drawn` in a part of the panel | That part threw; the rest still draws. `/reload-plugins`, and report it with the line's text. |
 | `… is drawn as text: its drawing is too large for the panel` | On the desktop the tab's drawings would make the panel larger than the desktop app takes (it would keep the old panel and refuse its presses, and a reopened panel would stay blank), so the tab draws its text rows instead. Folding Archive sessions you are not reading makes it smaller. |
+| Archive, Finished or Active show 0 | The data is per project folder, in `<project>/.claude/flowdeck/`. A session started in another folder reads that folder's data, so the same project can look empty from there. Look in `<project>/.claude/flowdeck/` (`archive/`, `flow-live.json`) of the project the sessions were saved in. Nothing is deleted. |
 | Check the install | `claude plugin validate <folder>` on a clone must end with `✔ Validation passed`. |
 
 ## Development
@@ -709,6 +711,7 @@ To run your working copy, add the folder as a marketplace (`claude plugin market
 - Two sessions saving at once can each write the index without the other's session for a moment; the next load lists it again.
 - A session that ends without its end being written (a crash) looks alive for 3 minutes, so the next session closes its flow up to 3 minutes later.
 - On the desktop, a button pressed right as the panel redraws can land on an old handle and be ignored; while workers run, the panel redraws every 5 seconds, so elapsed times move in 5-second steps.
+- A project reloaded before the transcript path is known and before anything was saved falls back to the working folder, which can differ from Claude Code's project folder until the next session start finds it.
 - The cache chip assumes Claude Code's 1-hour prompt cache, and its prices are estimates.
 - Keep warm was tested through the test kit only (with `$.model.fork` answered by the test), not yet measured in a live session. A renewal can come up to 5 seconds after minute 50; while the machine sleeps nothing runs.
 - The token numbers in [What it costs](#what-it-costs) are estimates: no tokenizer is available to the mod, and `/context` estimates too. The session switch from `/flowdeck:flowdeck` was tested through the test kit's `skill.prompt` only, not in a live session.

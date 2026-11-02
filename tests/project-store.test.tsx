@@ -1,6 +1,7 @@
 import { describe, expect, test } from 'claude-code/testing'
 
 import { keyOf } from '../hooks/archive'
+import { keyOfTranscript, projectByKey, projectKey } from '../hooks/project'
 import { fileOf, indexPath, markerPath, records, seed, sessionPaths, sessions, titles } from './archive-files'
 import { fakeFs } from './fake-fs'
 import type { Fail } from './fake-fs'
@@ -29,16 +30,19 @@ type Opts = {
   tooBig?: string[]
   fail?: Fail & { store?: boolean; clock?: boolean }
   sessionId?: string
+  /** folders that exist without files of their own in the fake fs */
+  dirs?: string[]
 }
 
 function engine(on: any, opts: Opts = {}) {
   const store = opts.store ?? {}
   const fail = opts.fail ?? {}
   // fail.fs and fail.write are the fake fs's own switches
-  const fs = fakeFs(on, { files: opts.files, tooBig: opts.tooBig, fail })
+  const fs = fakeFs(on, { files: opts.files, tooBig: opts.tooBig, fail, dirs: opts.dirs })
   const { files, writes } = fs
   const clock = { now: NOW }
   on('env.get', () => ({ value: undefined }))
+  on('classic.SessionStart', () => ({}))
   on('settings.read', () => ({ value: {} }))
   on('clock.every', () => ({ value: undefined }))
   on('clock.now', () => {
@@ -334,6 +338,224 @@ describe('an old plans.json in the project folder', () => {
     const p = await pane($)
     expect(JSON.stringify(await p.drawn())).not.toContain('Old plan')
     await p.unmount()
+  })
+})
+
+describe('the project folder a session saves under', () => {
+  const APP = '/work/app'
+  const both = [`archive-${keyOf('e1')}`, `archive-${keyOf('e2')}`]
+  const savedUnder = (files: Record<string, string>, root: string) => sessions(files, `${root}/.claude/flowdeck`)
+  // The transcript Claude Code keeps for session `s` of the project folder named `key`.
+  const transcriptOf = (key: string) => `/Users/u/.claude/projects/${key}/s.jsonl`
+  const APP_KEY = '-work-app'
+  // Claude Code names the transcript at startup: before session.start reaches the mod, or after it.
+  const startup = ($: any, cwd: string, transcript_path: unknown) => $.classic.SessionStart({ source: 'startup', session_id: 's', cwd, transcript_path } as any)
+  const startWith = async ($: any, cwd: string, transcript: unknown, order: 'before' | 'after') => {
+    if (order === 'before') await startup($, cwd, transcript)
+    await start($, cwd)
+    if (order === 'after') await startup($, cwd, transcript)
+    await settle()
+  }
+
+  for (const order of ['before', 'after'] as const) {
+    test(`a working folder below the project resolves to it by the transcript's key (transcript ${order} session.start)`, async ($, on) => {
+      const files = seeded([entry(1), entry(2)])
+      const { store } = engine(on, { files })
+      await startWith($, `${APP}/flowdeck-mod`, transcriptOf(APP_KEY), order)
+      expect(await archiveButtons($)).toEqual(both)
+      expect(store.projectOf).toEqual({ s: APP })
+      await flow($)
+      expect(titles(savedUnder(files, APP))).toContain('Ship it')
+      expect(savedUnder(files, APP).find(e => e.title === 'Ship it').project).toBe(APP)
+      expect(Object.keys(files).filter(p => p.startsWith(`${APP}/flowdeck-mod/`))).toEqual([])
+    })
+  }
+
+  test('a nested git repository with its own .claude/flowdeck does not take the session: the transcript names the parent', async ($, on) => {
+    const child = `${APP}/flowdeck-mod`
+    const { files } = engine(on, { dirs: [`${child}/.git`, `${child}/.claude/flowdeck`], store: { projectOf: { s: child } } })
+    await startWith($, `${child}/hooks`, transcriptOf(APP_KEY), 'before')
+    await flow($)
+    expect(titles(savedUnder(files, APP))).toEqual(['Ship it'])
+    expect(savedUnder(files, child)).toEqual([])
+  })
+
+  test('the working folder that is the project resolves to itself', async ($, on) => {
+    const { files, store } = engine(on)
+    await startWith($, APP, transcriptOf(APP_KEY), 'before')
+    await flow($)
+    expect(titles(savedUnder(files, APP))).toEqual(['Ship it'])
+    expect(store.projectOf).toEqual({ s: APP })
+  })
+
+  test('a working folder outside the project tree falls to the remembered folder', async ($, on) => {
+    const files = seeded([entry(1), entry(2)])
+    engine(on, { files, dirs: [DIR], store: { projectOf: { s: APP } } })
+    await startWith($, '/tmp', transcriptOf(APP_KEY), 'before')
+    expect(await archiveButtons($)).toEqual(both)
+    await flow($)
+    expect(titles(savedUnder(files, APP))).toContain('Ship it')
+    expect(savedUnder(files, '/tmp')).toEqual([])
+  })
+
+  test('a working folder outside the project tree with nothing remembered is itself', async ($, on) => {
+    const { files, store } = engine(on, { files: seeded([entry(1), entry(2)]) })
+    await startWith($, '/tmp', transcriptOf(APP_KEY), 'after')
+    expect(await archiveButtons($)).toEqual([])
+    await flow($)
+    expect(titles(savedUnder(files, '/tmp'))).toEqual(['Ship it'])
+    expect(store.projectOf).toEqual({ s: '/tmp' })
+  })
+
+  test('with no transcript a remembered session whose working folder moved still shows and saves to its folder', async ($, on) => {
+    const files = seeded([entry(1), entry(2)])
+    engine(on, { files, dirs: [DIR], store: { projectOf: { s: APP } } })
+    await start($, `${APP}/flowdeck-mod`)
+    expect(await archiveButtons($)).toEqual(both)
+    await flow($)
+    expect(titles(savedUnder(files, APP))).toContain('Ship it')
+    expect(Object.keys(files).filter(p => p.startsWith(`${APP}/flowdeck-mod/`))).toEqual([])
+  })
+
+  test('with no transcript and nothing remembered the working folder itself; its .claude markers are never looked for', async ($, on) => {
+    const { files, fs } = engine(on, { files: seeded([entry(1), entry(2)]), dirs: [DIR, `${APP}/.git`] })
+    await start($, `${APP}/src`)
+    expect(await archiveButtons($)).toEqual([])
+    await flow($)
+    expect(titles(savedUnder(files, `${APP}/src`))).toEqual(['Ship it'])
+    expect(fs.calls.filter(c => !c.path.startsWith(`${APP}/src/.claude/flowdeck`))).toEqual([])
+  })
+
+  test('the first start remembers the folder; the map keeps the newest 100 and drops the oldest', async ($, on) => {
+    const old = Object.fromEntries(Array.from({ length: 100 }, (_, i) => [`old${i}`, `/p${i}`]))
+    const { store } = engine(on, { store: { projectOf: old } })
+    await startWith($, `${APP}/src`, transcriptOf(APP_KEY), 'before')
+    const map = store.projectOf as Record<string, string>
+    expect(Object.keys(map)).toHaveLength(100)
+    expect(map.old0).toBeUndefined()
+    expect(map.old1).toBe('/p1')
+    expect(Object.keys(map).at(-1)).toBe('s')
+    expect(map.s).toBe(APP)
+  })
+
+  test('the transcript replaces a remembered folder it disagrees with', async ($, on) => {
+    const { store } = engine(on, { dirs: ['/elsewhere/.claude/flowdeck'], store: { projectOf: { s: '/elsewhere' } } })
+    await startWith($, `${APP}/src`, transcriptOf(APP_KEY), 'after')
+    expect(store.projectOf).toEqual({ s: APP })
+  })
+
+  test('a start without the transcript never replaces a remembered folder, even one whose .claude/flowdeck is gone', async ($, on) => {
+    const { store } = engine(on, { store: { projectOf: { s: '/gone' } } })
+    await start($, '/work')
+    expect(store.projectOf).toEqual({ s: '/gone' })
+  })
+
+  test('a malformed remembered map counts as empty and is replaced at the start', async ($, on) => {
+    const { store } = engine(on, { store: { projectOf: ['not', 'a', 'map'] } })
+    await startWith($, `${APP}/src`, transcriptOf(APP_KEY), 'before')
+    expect(store.projectOf).toEqual({ s: APP })
+  })
+
+  test('a /clear keeps the folder and remembers the new session id under it at its first save', async ($, on) => {
+    const { store } = engine(on, { dirs: [DIR], store: { projectOf: { s: APP } } })
+    await start($, '/work')
+    await $.classic.SessionStart({ source: 'clear', session_id: 's2', transcript_path: transcriptOf('-work') } as any)
+    await flow($)
+    expect(store.projectOf).toEqual({ s: APP, s2: APP })
+  })
+
+  test('a remembered folder that no longer holds .claude/flowdeck is not taken', async ($, on) => {
+    const files = seeded([entry(1), entry(2)])
+    engine(on, { files, dirs: [DIR], store: { projectOf: { s: '/gone' } } })
+    await start($, APP)
+    expect(await archiveButtons($)).toEqual(both)
+  })
+
+  test('a failing store still takes the transcript’s project and never throws', async ($, on) => {
+    const files = seeded([entry(1), entry(2)])
+    engine(on, { files, dirs: [DIR], fail: { store: true } })
+    await startWith($, `${APP}/src`, transcriptOf(APP_KEY), 'after')
+    expect(await archiveButtons($)).toEqual(both)
+  })
+
+  test('a failing existence check gives the working folder, whatever is remembered', async ($, on) => {
+    const { files, store } = engine(on, { dirs: [DIR], store: { projectOf: { s: APP } }, fail: { exists: true } })
+    await start($, '/work')
+    expect(String((await flow($)).result)).toContain('ok')
+    // with `exists` down a missing file cannot be told apart, so the save goes to the shared store, named for the working folder
+    expect((store.history as any[]).map(e => [e.title, e.project])).toEqual([['Ship it', '/work']])
+    expect(savedUnder(files, APP)).toEqual([])
+  })
+
+  test('resolving by the transcript makes no fs call: everything the start and a save touch is inside the project’s .claude/flowdeck', async ($, on) => {
+    const { fs } = engine(on, { files: seeded([entry(1)]), dirs: [DIR], store: { projectOf: { s: '/elsewhere' } } })
+    await startWith($, `${APP}/a/b/c`, transcriptOf(APP_KEY), 'before')
+    expect(fs.calls.length).toBeGreaterThan(0)
+    await flow($)
+    expect(fs.calls.filter(c => c.path !== DIR && !c.path.startsWith(`${DIR}/`))).toEqual([])
+  })
+
+  test('resolving by the remembered folder makes one existence check on its .claude/flowdeck, never a list or a read', async ($, on) => {
+    const { fs } = engine(on, { files: seeded([entry(1)]), dirs: [DIR], store: { projectOf: { s: APP } } })
+    await start($, '/tmp')
+    expect(fs.calls[0]).toEqual({ op: 'exists', path: DIR })
+    expect(fs.calls.filter(c => c.path !== DIR && !c.path.startsWith(`${DIR}/`))).toEqual([])
+  })
+
+  test('a malformed or missing transcript path never throws and falls to the working folder', async ($, on) => {
+    const { files } = engine(on)
+    for (const bad of [undefined, null, 42, '', '/', 'no-folder.jsonl', '//', '/x/', { path: '/a/b.jsonl' }]) {
+      await startWith($, `${APP}/src`, bad, 'before')
+      await startWith($, `${APP}/src`, bad, 'after')
+    }
+    expect(String((await flow($)).result)).toContain('ok')
+    expect(titles(savedUnder(files, `${APP}/src`))).toEqual(['Ship it'])
+    expect(savedUnder(files, APP)).toEqual([])
+  })
+})
+
+describe('Claude Code’s project-folder key (project.ts)', () => {
+  test('every character outside [A-Za-z0-9] becomes a dash, as the folders under ~/.claude/projects show', () => {
+    expect(projectKey('/Users/user/www/paavu/claude/server-setup')).toBe('-Users-user-www-paavu-claude-server-setup')
+    expect(projectKey('/private/var/folders/5b/r57vf_jx0p5bwvn5prqsyksm0000gn/T')).toBe('-private-var-folders-5b-r57vf-jx0p5bwvn5prqsyksm0000gn-T')
+    expect(projectKey('/Users/u/.claude')).toBe('-Users-u--claude')
+    expect(projectKey('/Users/u/My Projects/app_v2')).toBe('-Users-u-My-Projects-app-v2')
+    expect(projectKey('/Users/u/café')).toBe('-Users-u-caf-')
+    expect(projectKey('C:\\Users\\u\\app')).toBe('C--Users-u-app')
+  })
+
+  test('a key past 200 characters is cut there, then a dash and the hash of the whole path in base 36', () => {
+    const long = `/Users/u/${'very-long-folder-name/'.repeat(10)}app`
+    const key = projectKey(long)
+    expect(key).toBe(`${long.replace(/[^a-zA-Z0-9]/g, '-').slice(0, 200)}-nxmrj9`)
+    expect(projectByKey(`${long}/src`, `/c/projects/${key}/s.jsonl`)).toBe(long)
+    expect(projectKey('/x'.repeat(100))).toHaveLength(200)
+  })
+
+  test('the transcript’s key is its folder’s name', () => {
+    expect(keyOfTranscript('/Users/u/.claude/projects/-work-app/s.jsonl')).toBe('-work-app')
+    expect(keyOfTranscript('C:\\Users\\u\\.claude\\projects\\C--app\\s.jsonl')).toBe('C--app')
+    for (const bad of [undefined, null, 7, '', 's.jsonl', '/s.jsonl', '/a/', '//']) expect(keyOfTranscript(bad)).toBe('')
+  })
+
+  test('the project is the ancestor whose key equals the transcript’s exactly, the working folder first', () => {
+    const t = (key: string) => `/c/projects/${key}/s.jsonl`
+    // `/a/b-c` and `/a/b/c` share a key: each matches only itself, never the other spelling
+    expect(projectByKey('/a/b-c/d', t('-a-b-c'))).toBe('/a/b-c')
+    expect(projectByKey('/a/b/c', t('-a-b-c'))).toBe('/a/b/c')
+    expect(projectByKey('/a/b.c/x', t('-a-b-c'))).toBe('/a/b.c')
+    // a key that is a prefix of a folder's key is not that folder
+    expect(projectByKey('/a/b-c/d', t('-a-b'))).toBeNull()
+    expect(projectByKey('/a/b/c/d', t('-a-b'))).toBe('/a/b')
+    expect(projectByKey('/a/b/c/', t('-a-b-c'))).toBe('/a/b/c/')
+    expect(projectByKey('/a/b', t('-'))).toBe('/')
+    expect(projectByKey('/tmp', t('-a-b'))).toBeNull()
+    expect(projectByKey('', t('-a-b'))).toBeNull()
+  })
+
+  test('a key made from the composed (NFC) form of a decomposed path still matches it', () => {
+    const decomposed = '/u/cafe\u0301'
+    expect(projectByKey(`${decomposed}/x`, `/c/projects/${projectKey(decomposed.normalize('NFC'))}/s.jsonl`)).toBe(decomposed)
   })
 })
 

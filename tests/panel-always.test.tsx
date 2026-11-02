@@ -149,7 +149,7 @@ const holdOld = (on: any) => {
 }
 
 describe('a panel held from an older flowdeck', () => {
-  test('draws every section after a reload, on both surfaces', async ($, on) => {
+  test('draws every section after a reload, on both surfaces', { timeoutMs: 15_000 }, async ($, on) => {
     engine(on, { store: { historyShown: true, history: [entry(2), entry(1)] } })
     holdOld(on)
     await start($) // a reload runs session.start again

@@ -41,9 +41,13 @@ export type FakeFs = {
   links: Record<string, string>
   /** another spelling a resolving stat gives a path (a Windows drive path), with no link */
   aliases: Record<string, string>
+  /** folders `exists` says are there (a folder is otherwise never there for `exists`) */
+  dirs: Set<string>
+  /** every call made, in order, with its op */
+  calls: { op: 'read' | 'write' | 'stat' | 'list' | 'exists'; path: string }[]
 }
 
-export function fakeFs(on: any, opts: { files?: Record<string, string>; fail?: Fail; unreadable?: string[]; tooBig?: string[] } = {}): FakeFs {
+export function fakeFs(on: any, opts: { files?: Record<string, string>; fail?: Fail; unreadable?: string[]; tooBig?: string[]; dirs?: string[] } = {}): FakeFs {
   const fs: FakeFs = {
     files: opts.files ?? {},
     fail: opts.fail ?? {},
@@ -52,6 +56,8 @@ export function fakeFs(on: any, opts: { files?: Record<string, string>; fail?: F
     writes: [],
     reads: [],
     tried: [],
+    dirs: new Set(opts.dirs ?? []),
+    calls: [],
     delay: null,
     links: {},
     aliases: {},
@@ -64,6 +70,7 @@ export function fakeFs(on: any, opts: { files?: Record<string, string>; fail?: F
   }
   on('fs.read', async (_$: any, e: any) => {
     await fs.delay?.('read', e.path)
+    fs.calls.push({ op: 'read', path: e.path })
     fs.reads.push(e.path)
     if (fs.fail.fs || fs.fail.read) throw new Error('EIO')
     if (fs.unreadable.has(e.path)) throw new Error('EACCES')
@@ -73,6 +80,7 @@ export function fakeFs(on: any, opts: { files?: Record<string, string>; fail?: F
   })
   on('fs.write', async (_$: any, e: any) => {
     await fs.delay?.('write', e.path)
+    fs.calls.push({ op: 'write', path: e.path })
     const bytes = utf8(e.text)
     fs.tried.push({ path: e.path, bytes })
     const w = fs.fail.write
@@ -84,6 +92,7 @@ export function fakeFs(on: any, opts: { files?: Record<string, string>; fail?: F
   })
   on('fs.stat', async (_$: any, e: any) => {
     await fs.delay?.('stat', e.path)
+    fs.calls.push({ op: 'stat', path: e.path })
     if (fs.fail.fs || fs.fail.stat) throw new Error('EIO')
     // Asked to resolve, a folder holding files stats as a folder, and `links` says where a path lands (itself else).
     if (e.resolve && !(e.path in fs.files) && Object.keys(fs.files).some(p => p.startsWith(`${e.path}/`))) {
@@ -96,6 +105,7 @@ export function fakeFs(on: any, opts: { files?: Record<string, string>; fail?: F
   })
   on('fs.list', async (_$: any, e: any) => {
     await fs.delay?.('list', String(e.path))
+    fs.calls.push({ op: 'list', path: String(e.path) })
     if (fs.fail.fs || fs.fail.list) throw new Error('EIO')
     const list = names(String(e.path))
     if (!list.length) throw new Error('ENOENT') // a folder with no files does not exist here
@@ -103,8 +113,9 @@ export function fakeFs(on: any, opts: { files?: Record<string, string>; fail?: F
   })
   on('fs.exists', async (_$: any, e: any) => {
     await fs.delay?.('exists', e.path)
+    fs.calls.push({ op: 'exists', path: e.path })
     if (fs.fail.fs || fs.fail.exists) throw new Error('EIO')
-    return { value: e.path in fs.files }
+    return { value: e.path in fs.files || fs.dirs.has(e.path) }
   })
   return fs
 }
