@@ -12,6 +12,17 @@ export async function showTab($: any, tab: Tab): Promise<void> {
   await p.unmount()
 }
 
+/**
+ * The panel dated a later day than the clock's (its held `today`): the flows finished on the clock's day are listed in the
+ * Archive tab, as once their day has passed, and no longer in Finished. For tests about saved sessions in the Archive;
+ * the day's own rules (Finished, the merge at the date change) are tested in tests/finished-day.test.tsx.
+ */
+export const laterDay = (on: any, day = '2099-12-31'): void =>
+  on('state.get', { plugin: 'flowdeck', key: 'today' }, async (_$: any, e: any, next: any) => {
+    const r = await next(e)
+    return { value: { value: day, version: r?.value?.version ?? 0 } }
+  })
+
 /** What `read` finds in each tab's pane, in the order given; the Active tab is shown again after. */
 export async function acrossTabs($: any, mount: () => Promise<any>, read: (p: any) => Promise<any[]>, tabs: Tab[] = ['active', 'finished']): Promise<any[]> {
   const out: any[] = []

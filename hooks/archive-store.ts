@@ -14,8 +14,10 @@
 //   records; the session's file stays in `archive/` too (the engine cannot move it).
 // - `archive-migrated.json`: which files of the archive before 1.0.0025 (`history*.json`) were imported; those files are
 //   left as they are.
+// - A day's session (`mergeDays`): the flows finished on one day, merged once the day has passed; each flow's own file
+//   stays in `archive/`, its record marked `mergedInto`.
 import type { ArchiveEntry, ArchiveLists, ArchiveRecord } from '../types'
-import { addEntry, byteLength, INDEX_MAX, isLegacyFile, isNewer, jsonBytes, keyOf, LEGACY_INDEX, MAX_TEXT, mergeEntries, parseArchive, parseSession, WRITE_MAX } from './archive'
+import { addEntry, byteLength, DAY_MAX, dayEntry, dayId, INDEX_MAX, isLegacyFile, isNewer, jsonBytes, keyOf, LEGACY_INDEX, MAX_TEXT, mergeEntries, parseArchive, parseSession, WRITE_MAX } from './archive'
 import { ARCHIVE_DIR, byNewest, DAMAGED_DIR, INDEX_FILE, indexText, MARKER_FILE, parseIndexFile, reconcile, recordOf, sessionName, TRASH_DIR, TRASH_INDEX, trashName, trashStamp, upsertArchive, upsertTrash } from './archive-index'
 
 export type Io = {
@@ -470,7 +472,100 @@ export async function restoreSession(io: Io, project: string, id: string, now: n
   return { ok: true, lists: listsOf(records, trash, warnings) }
 }
 
-type Real = { kind: string; isLink: boolean; realPath: string }
+export type DaysMerged = { ok: boolean; merged: number; error?: string; lists?: ArchiveLists }
+
+// A session file's entry, when it holds the record's own session; null when it cannot be read or holds another.
+const readRecord = async (io: Io, dir: string, rec: ArchiveRecord): Promise<ArchiveEntry | null> => {
+  const got = await getFile(io, `${dir}/${ARCHIVE_DIR}/${rec.file}`)
+  const entry = got.state === 'ok' ? parseSession(parseJson(got.text)) : null
+  return entry && entry.id === rec.id ? entry : null
+}
+
+const mergedInto = (r: ArchiveRecord, id: string): ArchiveRecord => {
+  const { pendingDay: _, ...rest } = r
+  return { ...rest, mergedInto: id }
+}
+
+// The finished flows of every day before `today` (records `pendingDay`) merged into one Archive session per day, in an
+// order no crash can lose: (1) the day's session file is written (a new one, or the day's session saved before written
+// again with the new flows, archive.ts `dayEntry`); (2) the index once, with the day's record and each merged flow's record
+// marked `mergedInto` (listed in neither tab). Each flow's own file stays in `archive/`: the engine cannot move or remove
+// a file, and a heal never lists a file the index names, so none comes back. A day with one flow and no session keeps
+// that flow as it is; a day whose session is in the Trash is left alone. A file that cannot be read or written leaves its
+// day as it is; a failed index write leaves every flow listed, and the next try finds them in the day's session and only
+// marks them. Flows only the shared store holds are not merged.
+export async function mergeDays(io: Io, project: string, today: string, now: number): Promise<DaysMerged> {
+  if (!project) return { ok: true, merged: 0 }
+  const dir = dataDir(project)
+  const { arch, tr, view } = await both(io, dir, now)
+  const warnings = [...arch.warnings, ...tr.warnings]
+  const pending = view.records.filter(r => r.pendingDay && r.day && r.day < today && r.source !== 'store' && !r.missing)
+  if (!pending.length) return { ok: true, merged: 0 }
+  const errors: string[] = []
+  const done: { rec: ArchiveRecord; ids: string[] }[] = []
+  for (const day of [...new Set(pending.map(r => r.day!))].sort()) {
+    const id = dayId(day, project)
+    const held = view.records.find(r => r.id === id)
+    if (!held && arch.records.some(r => r.id === id)) continue
+    // A day's session whose file is gone is made again from its flows' own files.
+    const isLost = !held || !!held.missing
+    const flows = [...(isLost ? arch.records.filter(r => r.mergedInto === id && !r.missing) : []), ...pending.filter(r => r.day === day)]
+    if (!held && flows.length < 2) continue
+    const base = isLost ? undefined : await readRecord(io, dir, held!)
+    if (!isLost && !base) {
+      errors.push(`could not read ${ARCHIVE_DIR}/${held!.file}`)
+      continue
+    }
+    const entries: ArchiveEntry[] = []
+    for (const rec of flows) {
+      const e = await readRecord(io, dir, rec)
+      if (!e) break
+      entries.push(e)
+    }
+    if (entries.length < flows.length) {
+      errors.push(`could not read every flow of ${day}`)
+      continue
+    }
+    // Every flow is in the day's session already (an index rebuilt from the folder lost their marks): only mark them.
+    if (base && entries.every(e => base.mergedIds?.includes(e.id))) {
+      done.push({ rec: held!, ids: flows.map(r => r.id) })
+      continue
+    }
+    const merged = dayEntry(day, project, entries, base ?? undefined)
+    if ((merged.agents?.length ?? 0) > DAY_MAX || merged.tasks.length > DAY_MAX) {
+      errors.push(`${day} holds too many rows for one session`)
+      continue
+    }
+    const text = JSON.stringify(merged)
+    if (base) {
+      if (!(await writeRaw(io, dir, `${ARCHIVE_DIR}/${held!.file}`, text))) {
+        errors.push(`could not write ${ARCHIVE_DIR}/${held!.file}`)
+        continue
+      }
+      done.push({ rec: recordOf(merged, held!.file, byteLength(text)), ids: flows.map(r => r.id) })
+      continue
+    }
+    const put = await putSession(io, dir, merged, text)
+    if ('error' in put) {
+      errors.push(`could not write the session of ${day}`)
+      continue
+    }
+    // A newer copy found in the day's slot is what the index lists: only the flows it holds are marked.
+    done.push({ rec: recordOf(put.entry, put.file, put.size), ids: flows.map(r => r.id).filter(f => (put.entry.mergedIds ?? []).includes(f)) })
+  }
+  const error = errors.length ? errors.join('; ') : undefined
+  if (!done.length) return { ok: !error, merged: 0, error, lists: { ...view, warnings } }
+  // The index read again just before it is written, so a save made meanwhile is kept.
+  const again = await heal(io, dir, 'archive', now)
+  let records = again.records
+  for (const d of done) records = upsertArchive(records, d.rec).map(r => (d.ids.includes(r.id) ? mergedInto(r, d.rec.id) : r))
+  if (!(await writeIndex(io, dir, again, records, now, warnings))) {
+    return { ok: false, merged: 0, error: [`could not write ${INDEX_FILE}`, ...errors].join('; '), lists: listsOf(again.records, tr.records, warnings) }
+  }
+  return { ok: !error, merged: done.length, error, lists: listsOf(records, tr.records, warnings) }
+}
+
+type Real ={ kind: string; isLink: boolean; realPath: string }
 
 const statReal = async (io: Io, path: string): Promise<Real | null> => {
   const s: unknown = await Promise.resolve()

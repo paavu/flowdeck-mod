@@ -104,6 +104,7 @@ export function asFlow(v: unknown): Flow | null {
     tasks: (Array.isArray(v.tasks) ? v.tasks : []).flatMap(asTask),
     ...(Array.isArray(v.accepted) ? { accepted: v.accepted.filter((n): n is number => Number.isInteger(n) && n > 0) } : {}),
     ...(stampsOf(v.acceptedAt) ? { acceptedAt: stampsOf(v.acceptedAt) } : {}),
+    ...(typeof v.archivedAs === 'string' && v.archivedAs ? { archivedAs: v.archivedAs } : {}),
   }
 }
 

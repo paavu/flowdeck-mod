@@ -7,10 +7,10 @@ import type { StepInput } from './agent-items'
 import { countCall, isWorkCall, PLAN_NUDGE, withNudgeLine } from './nudge'
 import { agentState, HOUSEKEEPING, isComplete, isIncomplete, isLive, markOf, progressOf, splitHead, stateText, stepCount } from './agent-state'
 import { contextRows, contextSvg, toReading } from './context'
-import { isWorthKeeping, keyOf, snapshot } from './archive'
-import { INDEX_FILE, parseIndexFile, recordOf, TRASH_DIR, TRASH_INDEX } from './archive-index'
-import { dataDir, emptyTrash, getFile, loadArchive, parseJson, readSession, restoreSession, saveSession, saveToStore, trashSession } from './archive-store'
-import type { Emptied, Io, Moved } from './archive-store'
+import { combineParts, dayPartOf, isWorthKeeping, keyOf, snapshot } from './archive'
+import { INDEX_FILE, isOfDay, parseIndexFile, recordOf, TRASH_DIR, TRASH_INDEX } from './archive-index'
+import { dataDir, emptyTrash, getFile, loadArchive, mergeDays, parseJson, readSession, restoreSession, saveSession, saveToStore, trashSession } from './archive-store'
+import type { DaysMerged, Emptied, Io, Moved } from './archive-store'
 import { archiveSection, groupKey, isGroupOpen } from './archive-view'
 import type { ArchiveWords, FlowDrawing, FlowView, Planned } from './archive-view'
 import { fableRefusal, GUARD_FAILED, isFable } from './fable-guard'
@@ -18,7 +18,7 @@ import { foldGlyph } from './fold'
 import { applyNotes, briefOf, cleanText, fallbackBrief, hasNote, NOTE_ICON, NOTE_MAX, noteAlt, noteOf, noteParts, noteRows, noteSvgBody } from './notes'
 import type { TaskNote } from './notes'
 import { sortNewest } from './order'
-import { doneText } from './time'
+import { dayKey, doneText, isDayKey } from './time'
 import { percent, where } from './plan'
 import { planRows, planSvg, STATE_COLOR, stateLabel } from './plan-view'
 import { acceptedOf, acceptedOnly, allTasksDone, cleanAfter, linkRuns, modelOf, norm, shortTitle, taskOf, taskTag, TASK_MODELS, unstarted, workerTier } from './tasks'
@@ -45,6 +45,9 @@ const now = atom({ plugin: 'flowdeck', key: 'now' } as const, 0)
 // The Archive and Trash lists, from their indexes; the session files read for open groups (at most DETAILS_MAX).
 const archiveLists = atom({ plugin: 'flowdeck', key: 'archiveLists' } as const, { records: [], trash: [], warnings: [] } as ArchiveLists)
 const archiveDetails = atom({ plugin: 'flowdeck', key: 'archiveDetails' } as const, [] as ArchiveDetail[])
+// The session files of the flows finished earlier today (the Finished tab's), and the local date the tick last saw.
+const todayEntries = atom({ plugin: 'flowdeck', key: 'todayEntries' } as const, [] as ArchiveDetail[])
+const today = atom({ plugin: 'flowdeck', key: 'today' } as const, '')
 const flowMeta = atom({ plugin: 'flowdeck', key: 'flowMeta' } as const, null as { startedAt: number; project: string } | null)
 // Why the band above the prompt last failed in this load, '' when it has not; the panel shows it, the band never reads it.
 const bandError = atom({ plugin: 'flowdeck', key: 'bandError' } as const, '')
@@ -95,6 +98,20 @@ const readLists = async ($: EngineInterface): Promise<ArchiveLists> => asLists(a
 const readDetails = async ($: EngineInterface): Promise<ArchiveDetail[]> => asDetails(await read($, archiveDetails))
 const updateDetails = async ($: EngineInterface, change: (list: ArchiveDetail[]) => ArchiveDetail[]): Promise<ArchiveDetail[]> =>
   asDetails(await update($, archiveDetails, prev => change(asDetails(prev))))
+const readTodayEntries = async ($: EngineInterface): Promise<ArchiveDetail[]> => asDetails(await read($, todayEntries))
+// A change that keeps every held file as it was writes nothing (no redraw).
+const updateTodayEntries = async ($: EngineInterface, change: (list: ArchiveDetail[]) => ArchiveDetail[]): Promise<void> => {
+  await update($, todayEntries, prev => {
+    const was = asDetails(prev)
+    const next = change(was)
+    return next.length === was.length && next.every((d, i) => d === was[i]) ? prev : next
+  })
+}
+// The local date the panel lists the Finished tab's flows for: the one the tick last saw, else the clock's.
+const readToday = async ($: EngineInterface): Promise<string> => {
+  const held: unknown = await read($, today)
+  return isDayKey(held) ? held : dayKey(await clockOr($, 0))
+}
 const readUsage = async ($: EngineInterface) => asUsage(await read($, usageState))
 const readReading = async ($: EngineInterface): Promise<Reading | null> => asReading(await read($, reading))
 const readNow = async ($: EngineInterface): Promise<number> => asNow(await read($, now))
@@ -411,13 +428,110 @@ async function resolveProject($: EngineInterface, cwd: string, sid: string): Pro
 }
 
 // The Archive and Trash lists from the project's indexes (healed, the old archive imported once, this project's store
-// entries put into files), then the first group's file.
+// entries put into files), the flows of the days that have passed merged (mergeDays), then the first group's file and
+// today's flows.
 async function loadLists($: EngineInterface): Promise<void> {
   const loadedAt = await clockOr($, 0)
   const loaded = await loadArchive(io($), project, loadedAt).catch((): ArchiveLists => ({ records: [], trash: [], warnings: [] }))
   await update($, archiveDetails, () => [])
+  await update($, todayEntries, () => [])
+  seenDay = dayKey(loadedAt)
+  await update($, today, () => seenDay)
   await updatePanel($, prev => ({ ...prev, confirm: null }))
-  await showLists($, loaded)
+  mergeDue = 0
+  const merged = hasPastDays(loaded.records, dayKey(loadedAt)) ? await queueArchive(() => mergePast($, dayKey(loadedAt), loadedAt)) : null
+  await showLists($, merged?.merged && merged.lists ? merged.lists : loaded)
+}
+
+// A flow of a day before `day` waits to be merged into its day's session.
+const hasPastDays = (records: ArchiveRecord[], day: string): boolean => records.some(r => !!r.pendingDay && !!r.day && r.day < day && r.source !== 'store')
+
+// When the next try to merge the past days' flows is due (clock ms; 0: none): set when the day changes or a flow of a
+// past day is saved, and MERGE_RETRY_MS after a try that could not finish.
+let mergeDue = 0
+const MERGE_RETRY_MS = 60_000
+// The local date the tick last saw (the held `today` follows it); set by every load of the lists.
+let seenDay = ''
+
+// The flows of the days before `day` merged into one session per day (archive-store.ts `mergeDays`); a try that could
+// not read or write everything is made again later. Never throws.
+async function mergePast($: EngineInterface, day: string, at: number): Promise<DaysMerged> {
+  const m = await mergeDays(io($), project, day, at).catch((): DaysMerged => ({ ok: false, merged: 0, error: 'the merge stopped' }))
+  if (!m.ok) mergeDue = at + MERGE_RETRY_MS
+  return m
+}
+
+// The tick's share of the day: when the local date changes, today's flows leave the Finished tab and the days that have
+// passed are merged; a merge that is due (a retry, a flow of a past day saved) is made.
+async function tickDay($: EngineInterface): Promise<void> {
+  const at = await clockAt($)
+  if (at === null) return
+  const day = dayKey(at)
+  const isNewDay = day !== seenDay
+  if (isNewDay) {
+    seenDay = day
+    await update($, today, () => day)
+    mergeDue = at
+  }
+  if (mergeDue && at >= mergeDue) {
+    mergeDue = 0
+    if (hasPastDays((await readLists($)).records, day)) {
+      const m = await queueArchive(() => mergePast($, day, at))
+      if (m.merged && m.lists) return showLists($, m.lists)
+    }
+  }
+  if (isNewDay) await loadToday($)
+}
+
+// The session files of today's finished flows (archive-index.ts `isOfDay`) read for the Finished tab, one after another,
+// unless held or being read; a file that could not be read is tried again on the next call. Never throws.
+async function loadToday($: EngineInterface): Promise<void> {
+  try {
+    const day = await readToday($)
+    const recs = (await readLists($)).records.filter(r => isOfDay(r, day))
+    await updateTodayEntries($, prev => prev.filter(d => recs.some(r => r.id === d.id)))
+    for (const rec of recs) {
+      const held = (await readTodayEntries($)).find(d => d.id === rec.id)
+      if (held && held.state !== 'error') continue
+      await updateTodayEntries($, prev => [...prev.filter(d => d.id !== rec.id), { list: 'archive', id: rec.id, state: 'loading' }])
+      const entry = await readSession(io($), project, 'archive', rec).catch(() => null)
+      await updateTodayEntries($, prev => [...prev.filter(d => d.id !== rec.id), entry ? { list: 'archive', id: rec.id, state: 'ok', entry } : { list: 'archive', id: rec.id, state: 'error' }])
+    }
+  } catch {
+    // A failing store leaves the Finished tab as it is; the next change of the lists reads again.
+  }
+}
+
+// The Archive tab's sessions: today's finished flows show in the Finished tab instead (until their day has passed).
+const archiveShown = (records: ArchiveRecord[], day: string): ArchiveRecord[] => records.filter(r => !isOfDay(r, day))
+
+// The flows finished earlier today as the Finished tab lists them: each read session of today's, but the shown flow's own
+// (the entry it was saved under, or its meta's) and any run the panel still holds; one whose every run the panel holds
+// is the shown flow's too. `waiting`: today's sessions not read yet; `failed`: the ones that could not be read. `read`:
+// the lists and the date when the caller holds them already.
+async function earlierToday($: EngineInterface, f: Flow | null, list: AgentRun[], read?: { lists: ArchiveLists; day: string }): Promise<{ entries: ArchiveEntry[]; waiting: number; failed: ArchiveRecord[] }> {
+  const day = read?.day ?? (await readToday($))
+  const records = (read?.lists ?? (await readLists($))).records.filter(r => isOfDay(r, day))
+  if (!records.length) return { entries: [], waiting: 0, failed: [] }
+  const meta = await readMeta($)
+  const own = new Set([f?.archivedAs, f && meta ? entryIdOf(meta) : undefined].filter(Boolean))
+  const held = await readTodayEntries($)
+  const live = new Set(list.map(a => a.id))
+  const entries: ArchiveEntry[] = []
+  const failed: ArchiveRecord[] = []
+  let waiting = 0
+  for (const rec of records.filter(r => !own.has(r.id))) {
+    const d = held.find(x => x.id === rec.id)
+    if (d?.state === 'error') failed.push(rec)
+    if (d?.state !== 'ok' || !d.entry) {
+      if (d?.state !== 'error') waiting++
+      continue
+    }
+    const agents = (d.entry.agents ?? []).filter(a => !live.has(a.id))
+    if (d.entry.agents?.length && !agents.length) continue
+    entries.push({ ...d.entry, agents })
+  }
+  return { entries: entries.sort((a, b) => a.startedAt - b.startedAt || a.endedAt - b.endedAt), waiting, failed }
 }
 
 // A startup's transcript arriving after session.start resolved without it: a project it names that is not the one
@@ -794,20 +908,34 @@ const rowsOf = (tasks: TaskLike[], list: AgentRun[], accepted: number[], accepte
 // The live flow's numbers from the rows its lists draw, the one source of the tab counts and the band's X/Y and bar:
 // Active = running runs + queued tasks; Finished = finished runs not archived + Accepted rows; done = the finished rows
 // that are complete (a Done run or an Accepted row; Incomplete and failed ones are not); total = every row (archived
-// runs stay counted, as finished, so archiving never moves the band back). `hasRows` is false for a flow with no row
-// at all, which keeps the orchestrator's own total and accepted count (a fresh plan without tasks).
-const flowProgress = (f: Flow | null, list: AgentRun[]) => {
+// runs stay counted, as finished, so archiving never moves the band back). The rows of the flows finished earlier today
+// (`earlier`, earlierToday) are in the Finished list too, so they count as finished and their complete rows as done,
+// before the flow's own. `hasRows` is false with no row at all, which keeps the orchestrator's own total and accepted
+// count (a fresh plan without tasks).
+const flowProgress = (f: Flow | null, list: AgentRun[], earlier: ArchiveEntry[] = []) => {
   const r = rowsOf(f?.tasks ?? [], list, f ? acceptedOf(f) : [])
+  const e = earlierRows(earlier)
   const archived = list.filter(a => !isLive(a) && a.archived)
   const active = r.running.length + plannedOf(f, list).length
-  const finished = r.finished.length + r.acceptedRows.length
-  const done = [...r.finished, ...archived].filter(isComplete).length + r.acceptedRows.length
+  const finished = e.rows + r.finished.length + r.acceptedRows.length
+  const done = e.done + [...r.finished, ...archived].filter(isComplete).length + r.acceptedRows.length
   const total = active + finished + archived.length
   return { active, finished, done, total, running: r.running.length, hasRows: total > 0 }
 }
 
-const flowCounts = (f: Flow | null, list: AgentRun[]): { active: number; finished: number } => {
-  const { active, finished } = flowProgress(f, list)
+// The Finished rows of earlier flows and how many of them are complete, each flow's rows as its own list draws them.
+const earlierRows = (earlier: ArchiveEntry[]): { rows: number; done: number } =>
+  earlier.reduce(
+    (sum, e) => {
+      const p = dayPartOf(e)
+      const r = rowsOf(p.tasks, p.runs, p.accepted, p.acceptedAt, p.fallback)
+      return { rows: sum.rows + r.finished.length + r.acceptedRows.length, done: sum.done + r.finished.filter(isComplete).length + r.acceptedRows.length }
+    },
+    { rows: 0, done: 0 },
+  )
+
+const flowCounts = (f: Flow | null, list: AgentRun[], earlier: ArchiveEntry[] = []): { active: number; finished: number } => {
+  const { active, finished } = flowProgress(f, list, earlier)
   return { active, finished }
 }
 
@@ -831,9 +959,10 @@ const bandTitle = (f: Flow, list: AgentRun[]): string => {
   return (queued.find(p => p.ready) ?? queued[0])?.title.trim() || BAND_LABEL
 }
 
-// The flow as the band draws it (label, bar, percent, ticks): its done/total/running from flowProgress.
-const shownFlow = (f: Flow, list: AgentRun[]): Flow => {
-  const g = flowProgress(f, list)
+// The flow as the band draws it (label, bar, percent, ticks): its done/total/running from flowProgress, today's earlier
+// flows' rows included.
+const shownFlow = (f: Flow, list: AgentRun[], earlier: ArchiveEntry[] = []): Flow => {
+  const g = flowProgress(f, list, earlier)
   return g.hasRows ? { ...f, done: g.done, total: g.total, running: g.running } : f
 }
 
@@ -1258,7 +1387,7 @@ async function loadDetail($: EngineInterface, list: 'archive' | 'trash', rec: Ar
 async function loadOpenDetails($: EngineInterface): Promise<void> {
   const lists = await readLists($)
   const p = await readPanel($)
-  for (const [list, records] of [['archive', lists.records], ['trash', lists.trash]] as const) {
+  for (const [list, records] of [['archive', archiveShown(lists.records, await readToday($))], ['trash', lists.trash]] as const) {
     const shown = records.slice(0, list === 'archive' ? p.archiveLimit : p.trashLimit)
     for (const [i, rec] of shown.entries()) if (isGroupOpen(p, list, rec.id, i)) await loadDetail($, list, rec)
   }
@@ -1275,10 +1404,14 @@ async function showLists($: EngineInterface, lists: ArchiveLists, saved?: Archiv
     }).map(r => `${list}\n${r.id}`)
   const stale = new Set([...changed('archive', lists.records, before.records), ...changed('trash', lists.trash, before.trash)])
   await updateDetails($, prev => prev.filter(d => !stale.has(`${d.list}\n${d.id}`)))
-  // The entry just saved is in memory already: its group, when open, needs no read.
-  const at = saved ? lists.records.findIndex(r => r.id === saved.id) : -1
+  await updateTodayEntries($, prev => prev.filter(d => !stale.has(`archive\n${d.id}`)))
+  // The entry just saved is in memory already: its group, when open, and the Finished tab need no read.
+  const day = await readToday($)
+  const at = saved ? archiveShown(lists.records, day).findIndex(r => r.id === saved.id) : -1
   if (saved && at >= 0 && isGroupOpen(await readPanel($), 'archive', saved.id, at)) await holdDetail($, { list: 'archive', id: saved.id, state: 'ok', entry: saved })
+  if (saved && lists.records.some(r => r.id === saved.id && isOfDay(r, day))) await updateTodayEntries($, prev => [...prev.filter(d => d.id !== saved.id), { list: 'archive', id: saved.id, state: 'ok', entry: saved }])
   await loadOpenDetails($)
+  await loadToday($)
 }
 
 // Without a project folder, or when the project files cannot take it, the save goes to the shared store as before. True
@@ -1286,6 +1419,8 @@ async function showLists($: EngineInterface, lists: ArchiveLists, saved?: Archiv
 async function saveArchive($: EngineInterface, entry: ArchiveEntry): Promise<boolean> {
   if (!isWorthKeeping(entry)) return false
   const now = await clockOr($, entry.endedAt)
+  // A flow of a day that has passed (closed after its session ended) joins that day's session on the next tick.
+  if (entry.day && entry.day < dayKey(now)) mergeDue = now
   let note = ''
   if (project) {
     const saved = await saveSession(io($), project, entry, now).catch(() => null)
@@ -1394,8 +1529,14 @@ async function finishFlow($: EngineInterface, input: ProgressInput = {}, end?: n
     return isEnding ? merge(p, { ...input, finished: true }, at) : p
   })
   if (next && isEnding) {
-    const used = (await recordFlow($, next, 'finished', { meta, agents: list }, end)) ?? meta
+    const saved = await recordFlow($, next, 'finished', { meta, agents: list }, end)
+    const used = saved ?? meta
     await updateMeta($, m => (isSameMeta(m, used) ? null : m))
+    // The shown flow knows its Archive entry, so the Finished tab never lists that entry beside the flow's own rows.
+    if (saved) {
+      const id = entryIdOf(saved)
+      return updateFlow($, f => (f && f.isFinished && f.archivedAs !== id ? { ...f, archivedAs: id } : f))
+    }
   }
   return next
 }
@@ -2092,6 +2233,7 @@ export const register: Register = (on, options) => {
     $.clock.every(TICK_MS, () => {
       void tickCache($).catch(() => {}) // the band's WARM countdown, its flip to COLD and keep warm's renewal
       void tickLive($).catch(() => {}) // flow-live.json, the idle finish, other sessions' records
+      void tickDay($).catch(() => {}) // a new day: today's flows leave the Finished tab, the days passed are merged
       void (async () => {
         const list = await readAgents($)
         if (!list.some(isLive)) return
@@ -3087,6 +3229,10 @@ export const register: Register = (on, options) => {
       emptyAskOne: s.emptyAskOne,
       erase: s.erase,
     }
+    // The local date the panel is drawn for (today's flows are in the Finished tab, not the Archive), and the lists read
+    // once for the counts and the Finished tab; null when they cannot be read.
+    const day = await readToday($).catch(async () => dayKey(await clockOr($, 0)))
+    const shownLists = await readLists($).catch(() => null)
     // The Archive or Trash tab: the list from its index; a group's file is read when it opens and let go when it folds.
     const archivePart = (list: 'archive' | 'trash') => async (): Promise<RenderChildren> => {
       const lists = await readLists($)
@@ -3100,7 +3246,7 @@ export const register: Register = (on, options) => {
         words: archiveWords,
         p,
         list,
-        records: list === 'archive' ? lists.records : lists.trash,
+        records: list === 'archive' ? archiveShown(lists.records, day) : lists.trash,
         details: await readDetails($),
         warnings: lists.warnings,
         canMove: !!project,
@@ -3128,46 +3274,71 @@ export const register: Register = (on, options) => {
     }
 
     // The Active or Finished tab: the flow's header (its totals; never its title), then its one list, always in full.
-    // Without a flow or a run only the list's empty line.
+    // The Finished list also holds the rows of the flows finished earlier today: one list with the flow's own, latest
+    // first, the tasks numbered in the order the flows started (combineParts). Without a flow, a run or such a row only
+    // the list's empty line.
     const drawFlow = async (rows: 'active' | 'finished'): Promise<RenderChildren> => {
       const list = await readAgents($)
       const f = await readFlow($)
-      if (!f && list.length === 0) return <Text dimColor>{rows === 'active' ? s.nothingQueued : s.noFinished}</Text>
+      const none: { entries: ArchiveEntry[]; waiting: number; failed: ArchiveRecord[] } = { entries: [], waiting: 0, failed: [] }
+      const earlier = rows === 'finished' ? await earlierToday($, f, list, shownLists ? { lists: shownLists, day } : undefined).catch(() => none) : none
+      // Today's sessions not read yet, or that could not be read: a dim line each, after the rows.
+      const notes = [
+        ...(earlier.waiting ? [<Text key="today-loading" dimColor>{s.loading}</Text>] : []),
+        ...earlier.failed.map(r => (
+          <Text key={`today-error-${keyOf(r.id)}`} dimColor wrap="truncate-end">
+            {`${s.couldNotRead} ${r.file || 'the shared store'}`}
+          </Text>
+        )),
+      ]
+      const isShown = !!f || list.length > 0
+      if (!isShown && !earlier.entries.length) return notes.length ? notes : <Text dimColor>{rows === 'active' ? s.nothingQueued : s.noFinished}</Text>
       const meta = await readMeta($)
       const at = Math.max(await readNow($), ...list.map(a => a.startedAt), 0)
       const planned = plannedOf(f, list)
       const t = totals(list, at)
+      const own = { tasks: f?.tasks ?? [], runs: list, accepted: f ? acceptedOf(f) : [], acceptedAt: f?.acceptedAt }
+      const c = earlier.entries.length ? combineParts<TaskLike, AgentRun>([...earlier.entries.map(dayPartOf), own]) : null
       const view = flowView({
         kp: '',
         fp: '',
-        list,
-        tasks: f?.tasks ?? [],
-        accepted: f ? acceptedOf(f) : [],
-        acceptedAt: f?.acceptedAt,
+        list: c ? c.runs : list,
+        // Each run's task was linked within its own flow already: no task is free for another flow's run.
+        tasks: c ? c.tasks.map(task => ({ ...task, counted: true })) : own.tasks,
+        accepted: c ? c.accepted : own.accepted,
+        acceptedAt: c ? c.acceptedAt : own.acceptedAt,
         planned,
         at,
         t,
         rows,
       })
-      if (Svg) return [view.header, view.body()]
+      const header = isShown ? view.header : null
+      if (Svg) return [header, view.body(), ...notes]
       return [
-        view.header,
-        <Box flexDirection="column" marginTop={1}>
+        header,
+        <Box flexDirection="column" marginTop={isShown ? 1 : 0}>
           {view.body()}
+          {notes}
         </Box>,
       ]
     }
     // The flowdeck group: the tabs with their counts, then the selected tab's list alone. Each count is read on its own,
     // so one that fails only leaves its number out.
     const flowCount = await Promise.resolve()
-      .then(async () => flowCounts(await readFlow($), await readAgents($)))
+      .then(async () => {
+        const f = await readFlow($)
+        const list = await readAgents($)
+        // Today's earlier flows that cannot be read leave the count with the flow's own rows.
+        const earlier = shownLists ? await earlierToday($, f, list, { lists: shownLists, day }).catch(() => null) : null
+        return flowCounts(f, list, earlier?.entries ?? [])
+      })
       .catch(() => null)
     const counts: Record<PanelTab, number | null> = {
       active: flowCount?.active ?? null,
       finished: flowCount?.finished ?? null,
-      // The sessions each index lists in that tab (archive-index.ts `reconcile`).
-      archive: await readLists($).then(l => l.records.length, () => null),
-      trash: await readLists($).then(l => l.trash.length, () => null),
+      // The sessions each index lists in that tab (archive-index.ts `reconcile`), less today's flows (in Finished).
+      archive: shownLists ? archiveShown(shownLists.records, day).length : null,
+      trash: shownLists ? shownLists.trash.length : null,
     }
     const tabs = await safe('Tabs', () => tabRow($, { Box, Text, Button }, p, counts, tabGap(e.surface)))
     const isFlowTab = p.tab === 'active' || p.tab === 'finished'
@@ -3260,8 +3431,12 @@ export const register: Register = (on, options) => {
     }
     const list = await readAgents($)
     const running = list.filter(isLive).length
-    // X/Y, the bar and the percent come from the rows the panel's tabs count (flowProgress).
-    const g = shownFlow(f, list)
+    // X/Y, the bar and the percent come from the rows the panel's tabs count (flowProgress), today's earlier flows' too.
+    const earlier = await earlierToday($, f, list).then(
+      x => x.entries,
+      (): ArchiveEntry[] => [],
+    )
+    const g = shownFlow(f, list, earlier)
     const title = bandTitle(f, list)
     const crewButton = (
       <Button key="flowdeck-agents" label={`×${running}`} plain onPress={() => void togglePane($)} />

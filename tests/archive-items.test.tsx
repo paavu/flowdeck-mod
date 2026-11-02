@@ -4,7 +4,7 @@ import { doneText } from '../hooks/time'
 import { keyOf } from '../hooks/archive'
 import { fileOf, indexPath, records, sessionPaths, sessions } from './archive-files'
 import { fakeFs } from './fake-fs'
-import { showTab } from './tabs'
+import { laterDay, showTab } from './tabs'
 import type { Tab } from './tabs'
 
 const NOW = Date.UTC(2026, 9, 26, 12, 40)
@@ -134,6 +134,7 @@ describe('Finished rows have no archive button', () => {
 describe('the automatic archive', () => {
   test('closing the flow saves one full entry with every row, and the Archive tab keeps its move-to-Trash controls', async ($, on) => {
     const { files, clock } = engine(on)
+    laterDay(on) // the flows finished today are looked at in the Archive as on a later day (tabs.ts)
     await start($)
     await plan($)
     await finishedRows($, clock, 3)

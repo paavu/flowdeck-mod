@@ -11,7 +11,7 @@
 </p>
 
 <p align="center">
-  <img alt="Version 1.0.0067" src="https://img.shields.io/badge/version-1.0.0067-8f8cf4">
+  <img alt="Version 1.0.0068" src="https://img.shields.io/badge/version-1.0.0068-8f8cf4">
   <img alt="MIT license" src="https://img.shields.io/badge/license-MIT-5fbf8f">
   <img alt="Claude Code 2.1.295 or later" src="https://img.shields.io/badge/Claude%20Code-%E2%89%A5%202.1.295-8f8cf4">
   <img alt="Terminal and desktop" src="https://img.shields.io/badge/surfaces-terminal%20%2B%20desktop-5fbf8f">
@@ -149,7 +149,7 @@ What you see:
 
 1. The dot and the title: the running task's title (the lowest-numbered one and ` +N` when several run), else the next ready task, else `FlowDeck` once every task is done. It is never the flow's own title. The dot is blue-violet while the flow runs and green when it is finished.
 2. The bar: the dense dots are the done share; the faint dots beyond them are tasks handed to workers and not yet accepted; the small ticks mark the task boundaries still ahead.
-3. The label on the bar: the phase word and a count, `Tasks X/Y`. Y counts every row the panel's tabs count; X is the running task's number while one runs, else the done count. The phase word becomes `Plan`, `Design` or `Review` in those phases.
+3. The label on the bar: the phase word and a count, `Tasks X/Y`. Y counts every row the panel's tabs count (Active plus Finished, including the earlier flows of today); X is the running task's number in that list while one runs, else the done count. The phase word becomes `Plan`, `Design` or `Review` in those phases.
 4. The percent: the done fraction. The bar and the label turn green and read `Done` when the flow is finished.
 5. The cache chip: `WARM` (red) with the minutes left, or `COLD` (blue) with the idle time and the cost of the next message. See [the cache chip and card](#the-prompt-cache-chip-and-card).
 6. The chevron: opens and folds the cache card under the band.
@@ -314,8 +314,8 @@ How to use: press a tab to change the list.
 | Tab | Lists |
 |---|---|
 | Active | The flow's cost, tokens and time, then the running workers (newest first) and the queued tasks in plan order. |
-| Finished | Done, Error and Incomplete runs and `Accepted · no worker run` rows, latest first. The rows move to the Archive on their own when the flow closes. |
-| Archive | Saved sessions of this project, newest first, one foldable row each; an opened row shows its tasks one level in under it. |
+| Finished | Done, Error and Incomplete runs and `Accepted · no worker run` rows of the current flow and of every flow finished earlier on the same date, as one list. At the date change they move to the Archive as one session named after the date. |
+| Archive | Saved sessions of this project, newest first, one foldable row each; an opened row shows its tasks one level in under it. Today's flows are in Finished instead; a past day is one session named after its date. |
 | Trash | Sessions moved to the trash, with `↩` and `Empty Trash (n)`. |
 
 ### Commands

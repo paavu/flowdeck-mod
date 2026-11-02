@@ -5,13 +5,16 @@ import { itemsOf } from './agent-items'
 import { sortNewest } from './order'
 import { cleanText, NOTE_MAX, noteOf } from './notes'
 import { isFinished, isStoredStep } from './plan'
-import { acceptedOf, modelOf } from './tasks'
-import { dayParts } from './time'
+import { acceptedOf, linkRuns, modelOf, taskTag } from './tasks'
+import type { RunLike, TaskLike } from './tasks'
+import { dayKey, dayParts, isDayKey } from './time'
 
 const MAX_TASKS = 100
 export const MAX_TEXT = 200
 // Bounds one entry: the newest runs of a flow, each with its capped items and strings.
 export const MAX_AGENTS = 60
+// Bounds a day's session (many flows in one): its tasks, its runs and the flows merged into it.
+export const DAY_MAX = 2000
 // What a file should stay under, in UTF-8 bytes: the engine reads and writes at most 4 MiB (4,194,304 bytes) a file, and
 // the rest is room for one save's growth. The archive's indexes stay under it (an index past it is said).
 export const MAX_ARCHIVE_BYTES = 2_500_000
@@ -144,6 +147,80 @@ export function snapshot(input: {
     // The span from the first start to the last end, as the panel header counts it (parallel runs overlap).
     time: agents.length ? Math.max(0, Math.max(...agents.map(a => a.endedAt ?? endedAt)) - Math.min(...agents.map(a => a.startedAt))) : 0,
     agents: agentsOf(newest, endedAt),
+    day: dayKey(endedAt),
+  }
+}
+
+// The id of a day's session in a project (dayEntry).
+export const dayId = (day: string, project: string): string => `day-${day}-${project}`
+
+/** One flow's rows as a day's list takes them; `sealed`: its runs were linked to its tasks when it was put together, so no run gets a task by likeness any more. */
+export type DayPart<T extends TaskLike, R extends RunLike> = { tasks: T[]; runs: R[]; accepted: number[]; acceptedAt?: Record<string, number>; fallback?: number; sealed?: boolean }
+
+// Several flows as one list: their tasks one after another (each flow's numbers and waits moved past the tasks before
+// it), each run tied to the task its own flow gave it by a `#n` before its description (one its flow linked to no task
+// keeps its description), the accepted tasks renumbered with their times (`fallback` for one without a time).
+export function combineParts<T extends TaskLike, R extends RunLike>(parts: DayPart<T, R>[]): { tasks: T[]; runs: R[]; accepted: number[]; acceptedAt: Record<string, number> } {
+  const tasks: T[] = []
+  const runs: R[] = []
+  const accepted: number[] = []
+  const acceptedAt: Record<string, number> = {}
+  for (const p of parts) {
+    const o = tasks.length
+    const links = linkRuns(p.sealed ? p.tasks.map(t => ({ ...t, counted: true })) : p.tasks, p.runs)
+    for (const t of p.tasks) tasks.push(t.after ? { ...t, after: t.after.map(d => d + o) } : t)
+    for (const a of p.runs) {
+      const i = links.get(a.id)
+      runs.push(i === undefined ? a : { ...a, description: `#${o + i + 1} ${taskTag(a.description).rest}` })
+    }
+    for (const n of p.accepted) {
+      accepted.push(n + o)
+      const at = p.acceptedAt?.[String(n)] ?? p.fallback
+      if (at !== undefined) acceptedAt[String(n + o)] = at
+    }
+  }
+  return { tasks, runs, accepted, acceptedAt }
+}
+
+// An entry as one part of a day's list: its runs ended by its own end at the latest.
+export const dayPartOf = (e: ArchiveEntry): DayPart<ArchiveTask, ArchiveAgent> => ({
+  tasks: e.tasks,
+  runs: (e.agents ?? []).map(a => (a.endedAt === undefined ? { ...a, endedAt: e.endedAt } : a)),
+  accepted: acceptedOf(e),
+  acceptedAt: e.acceptedAt,
+  fallback: e.endedAt,
+  sealed: !!e.mergedIds,
+})
+
+// The finished flows of one day as one session: titled with the day's date, from the first start to the last end, their
+// tasks and runs one after another in the order the flows started (combineParts), their totals added up. `base` is the
+// day's session saved before, which the flows join; a flow it holds already is not added again.
+export function dayEntry(day: string, project: string, flows: ArchiveEntry[], base?: ArchiveEntry): ArchiveEntry {
+  const had = base?.mergedIds ?? []
+  const added = flows.filter(e => !had.includes(e.id))
+  const parts = [...(base ? [base] : []), ...added].sort((a, b) => a.startedAt - b.startedAt || a.endedAt - b.endedAt || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0))
+  const c = combineParts(parts.map(dayPartOf))
+  const startedAt = Math.min(...parts.map(e => e.startedAt))
+  const endedAt = Math.max(...parts.map(e => e.endedAt))
+  const sum = (k: 'done' | 'total' | 'cost' | 'tokens' | 'time') => parts.reduce((s, e) => s + e[k], 0)
+  return {
+    id: dayId(day, project),
+    project,
+    title: entryDate({ startedAt: endedAt, endedAt }, undefined, true),
+    startedAt,
+    endedAt,
+    status: 'finished',
+    done: sum('done'),
+    total: sum('total'),
+    tasks: c.tasks,
+    accepted: c.accepted,
+    ...(Object.keys(c.acceptedAt).length ? { acceptedAt: c.acceptedAt } : {}),
+    cost: sum('cost'),
+    tokens: sum('tokens'),
+    time: sum('time'),
+    agents: c.runs,
+    day,
+    mergedIds: [...had, ...parts.filter(e => e !== base).map(e => e.id)],
   }
 }
 
@@ -261,6 +338,9 @@ function parseEntry(v: unknown): ArchiveEntry | null {
   const status = o.status === 'finished' || o.status === 'open' ? o.status : null
   if (id === null || project === null || title === null || status === null || !Array.isArray(o.tasks) || nums.some(n => n === null)) return null
   const [startedAt, endedAt, done, total, cost, tokens, time] = nums as number[]
+  // A day's session holds many flows: its own, larger bounds.
+  const mergedIds = Array.isArray(o.mergedIds) ? o.mergedIds.filter((x): x is string => typeof x === 'string' && !!x).slice(0, DAY_MAX) : null
+  const maxTasks = mergedIds ? DAY_MAX : MAX_TASKS
   const tasks: ArchiveTask[] = o.tasks
     .flatMap(t => {
       const r = t && typeof t === 'object' ? (t as Record<string, unknown>) : {}
@@ -273,15 +353,17 @@ function parseEntry(v: unknown): ArchiveEntry | null {
       if (Array.isArray(r.after)) task.after = afterOf(r.after)
       return [task]
     })
-    .slice(0, MAX_TASKS)
+    .slice(0, maxTasks)
   const entry: ArchiveEntry = { id, project, title, startedAt: startedAt!, endedAt: endedAt!, status, done: done!, total: total!, tasks, cost: cost!, tokens: tokens!, time: time! }
-  if (Array.isArray(o.agents)) entry.agents = agentsOf(o.agents).slice(-MAX_AGENTS)
+  if (Array.isArray(o.agents)) entry.agents = agentsOf(o.agents).slice(-(mergedIds ? DAY_MAX : MAX_AGENTS))
   if (o.partial === true) entry.partial = true
-  if (Array.isArray(o.accepted)) entry.accepted = afterOf(o.accepted).slice(0, MAX_TASKS)
+  if (Array.isArray(o.accepted)) entry.accepted = afterOf(o.accepted).slice(0, maxTasks)
   const stamps = stampsOf(o.acceptedAt)
   if (stamps) entry.acceptedAt = stamps
   const plan = planOf(o.plan)
   if (plan && plan.stages.length) entry.plan = plan
+  if (isDayKey(o.day)) entry.day = o.day
+  if (mergedIds) entry.mergedIds = mergedIds
   return entry
 }
 

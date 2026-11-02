@@ -5,7 +5,7 @@ import { newestFirst } from '../hooks/order'
 import { doneText, hhmm } from '../hooks/time'
 import { fakeFs } from './fake-fs'
 import { seed, sessions } from './archive-files'
-import { showTab } from './tabs'
+import { laterDay, showTab } from './tabs'
 import type { Tab } from './tabs'
 
 // Every finished row shows when it finished, and every list is ordered by it, latest on top, whatever the order the
@@ -176,6 +176,7 @@ describe('one order everywhere: latest completion first', () => {
 
   test('closing the flow archives the rows in the same order as the Finished list', async ($, on) => {
     const { clock } = engine(on)
+    laterDay(on) // the flows finished today are looked at in the Archive as on a later day (tabs.ts)
     await start($)
     await runs($, clock, [3, 1, 4, 2])
     await progress($, { finished: true })

@@ -157,7 +157,8 @@ function groupBody(v: ArchiveView, rec: ArchiveRecord, key: string): RenderChild
     kp,
     fp: `${groupKey(v.list, entry.id)}:`,
     list: runs,
-    tasks: entry.tasks,
+    // A day's session linked each run to its own flow's task when it was merged: no task is free for another flow's run.
+    tasks: entry.mergedIds ? entry.tasks.map(t => ({ ...t, counted: true })) : entry.tasks,
     accepted: acceptedOf(entry),
     acceptedAt: entry.acceptedAt,
     acceptedFallback: entry.endedAt,

@@ -2,6 +2,11 @@
 
 Versions are `M.m.xxxx`; every build bumps the 4-digit build number. Details and rulings: `docs/ledger.md`, `docs/design.md`.
 
+## 1.0.0068 (2026-11-02)
+- The Finished tab keeps the whole day: the rows of every flow finished today stay in it as one list, with the current flow's rows, and `Finished (n)` counts all of them. They leave it at the date change.
+- The band's `Tasks X/Y`, bar and percent count that same list, so Y is Active plus Finished until the rows go to the Archive.
+- At the date change, the flows of each past day are merged into one Archive session named after the date (`Nov 2, 2026`); a day with a single flow keeps that flow's own title. Today's flows are not listed in the Archive meanwhile. The merge writes the day's session first, then marks the flows it holds (their files stay in `archive/`, hidden). Archive records from before this version are not touched.
+
 ## 1.0.0067 (2026-11-02)
 - FlowDeck keeps its data only in the project root's `.claude/flowdeck`. After a reload the mod finds the root from the session's transcript file, so a working folder that moved into a child folder no longer gets a `.claude/flowdeck` of its own, and the Archive no longer shows only part of the records.
 - The folder remembered per session (store key `projectOf`) is gone; nothing about folders is stored any more.

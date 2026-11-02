@@ -5,7 +5,7 @@ import { applyNotes, briefOf, cells, cleanText, fallbackBrief, NOTE_ICON, NOTE_X
 import { textWidth } from '../hooks/plan-view'
 import { asAgents, asFlow, asPanel } from '../hooks/shapes'
 import type { AgentRun } from '../types'
-import { showTab } from './tabs'
+import { laterDay, showTab } from './tabs'
 import type { Tab } from './tabs'
 
 const NOW = Date.UTC(2026, 9, 31, 10, 0)
@@ -408,6 +408,7 @@ describe('the note button and panel', () => {
     const flow = { title: 'Old', total: 2, done: 2, running: 0, phase: 'close' as const, isFinished: true, isLinked: true, accepted: [1, 2], tasks: [{ title: 'Wire it', tier: 'medium', after: [], goal: 'Add retry.', result: 'Added.' }, { title: 'Docs', tier: 'light', after: [], feedback: 'Fine.' }, { title: 'Bare', tier: 'light', after: [] }] }
     const entry = { ...snapshot({ flow: { ...flow, accepted: [1, 2, 3] }, agents: runs, project: '', startedAt: NOW - 700_000, endedAt: NOW - 200_000, status: 'finished' }), id: 'g1' }
     engine(on, { store: { history: [entry] } })
+    laterDay(on) // the flows finished today are looked at in the Archive as on a later day (tabs.ts)
     await start($)
     await settle()
     const a = await look($, 'archive')

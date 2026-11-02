@@ -56,6 +56,8 @@ export type Flow = {
   accepted?: number[]
   /** When each accepted task was accepted, by task number; absent for tasks accepted before 1.0.0025. */
   acceptedAt?: Record<string, number>
+  /** The id of the Archive entry this flow was saved under when it finished: the Finished tab does not list that entry again. */
+  archivedAs?: string
 }
 
 export type AgentStatus = 'running' | 'done' | 'failed'
@@ -131,6 +133,10 @@ export type ArchiveEntry = {
   partial?: boolean
   /** A finished plan's own entry (id `plan-<plan id>-<startedAt>-<project>`), saved by a flowdeck before 1.0.0035 and still shown: the plan as it finished; no tasks or runs. */
   plan?: TaskPlan
+  /** The local date the flow ended on (`YYYY-MM-DD`), set on every flow saved from this release on; older entries have none. */
+  day?: string
+  /** A day's session: the ids of the flows of that day merged into it (their own files stay in `archive/`). */
+  mergedIds?: string[]
 }
 
 /**
@@ -164,6 +170,12 @@ export type ArchiveRecord = {
   originalFile?: string
   /** In memory only: a session only the shared store holds (no project folder, or the folder refused it). */
   source?: 'store'
+  /** The local date its session ended on (`YYYY-MM-DD`), from the entry. */
+  day?: string
+  /** A finished flow saved with its day: listed in the Finished tab (not the Archive) while its day is today, merged into that day's session once the day has passed. */
+  pendingDay?: true
+  /** Merged into the day's session with this id: listed in neither tab; its file stays in `archive/`. */
+  mergedInto?: string
 }
 
 /** The Archive and Trash tabs' lists, newest first by the session's end, and what the last read or save could not do. */
@@ -262,6 +274,10 @@ declare module 'claude-code' {
       archiveLists: ArchiveLists
       /** The session files read for open groups, at most 10. */
       archiveDetails: ArchiveDetail[]
+      /** The session files of the flows finished earlier today, whose rows the Finished tab lists. */
+      todayEntries: ArchiveDetail[]
+      /** The local date (`YYYY-MM-DD`) the tick last saw: its change takes the day's flows out of the Finished tab. */
+      today: string
       flowMeta: { startedAt: number; project: string } | null
       /** Why the band above the prompt last failed in this load (the panel's `band error` line), '' when it has not. */
       bandError: string

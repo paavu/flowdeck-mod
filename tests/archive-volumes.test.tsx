@@ -4,7 +4,7 @@ import { keyOf, WRITE_MAX } from '../hooks/archive'
 import type { ArchiveEntry } from '../types'
 import { fileOf, indexPath, markerPath, records, sessionPaths, sessions } from './archive-files'
 import { fakeFs, utf8 } from './fake-fs'
-import { showTab } from './tabs'
+import { laterDay, showTab } from './tabs'
 
 // The archive before 1.0.0025 as the engine meets it in a project folder: `history.json`, its volumes `history-<n>.json`,
 // the volume index `history-index.json` and the side files `history-extra-<startedAt>.json`. A session start imports
@@ -227,6 +227,7 @@ describe('the archive before 1.0.0025 is imported once', () => {
   test('a flow finished after the import gets its own session file and shows first; the old files stay as they were', async ($, on) => {
     const before = legacy()
     const env = engine(on, { files: legacy() })
+    laterDay(on) // the flow finished today is looked at in the Archive as on a later day (tabs.ts)
     await start($)
     await settle()
     expect(await flow($, env)).toContain('ok')
@@ -335,6 +336,7 @@ describe('data safety', () => {
   test('read, stat, the listing and `exists` all failing: whether anything is there is unknown, so nothing in the folder is written; the flow is kept in the store and shows', async ($, on) => {
     const before = JSON.stringify([entry(1), entry(2)])
     const env = engine(on, { store: { historyShown: true }, files: { [HISTORY]: before }, unreadable: [HISTORY] })
+    laterDay(on) // the flow finished today is looked at in the Archive as on a later day (tabs.ts)
     Object.assign(env.fs.fail, { stat: true, list: true, exists: true })
     await start($)
     expect(await flow($, env)).toContain('ok')

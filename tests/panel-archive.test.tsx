@@ -1,7 +1,7 @@
 import { describe, expect, test } from 'claude-code/testing'
 
 import { keyOf } from '../hooks/archive'
-import { showTab } from './tabs'
+import { laterDay, showTab } from './tabs'
 import type { Tab } from './tabs'
 
 const NOW = Date.UTC(2026, 9, 26, 12, 40)
@@ -109,6 +109,7 @@ describe('the archive of flows', () => {
 
   test('finishing an already finished flow is a no-op: the panel keeps its agents and no blank entry is stored', async ($, on) => {
     const { store, clock } = engine(on)
+    laterDay(on) // the flows finished today are looked at in the Archive as on a later day (tabs.ts)
     workers(on)
     await start($)
     await plan($)
@@ -239,6 +240,7 @@ describe('the archive of flows', () => {
 
   test('a throwing store does not break progress', async ($, on) => {
     engine(on, { storeFails: true })
+    laterDay(on) // the flows finished today are looked at in the Archive as on a later day (tabs.ts)
     await start($)
     const r: any = await plan($)
     expect(String(r?.result ?? r)).toContain('ok')
@@ -321,6 +323,7 @@ describe('archive section in the panel', () => {
 
   test('a finished flow appears in the open panel', async ($, on) => {
     engine(on, { store: { historyShown: true } })
+    laterDay(on) // the flows finished today are looked at in the Archive as on a later day (tabs.ts)
     await start($)
     await plan($)
     await progress($, { finished: true })

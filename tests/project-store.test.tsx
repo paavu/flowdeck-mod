@@ -5,7 +5,7 @@ import { keyOfTranscript, projectByKey, projectKey } from '../hooks/project'
 import { fileOf, indexPath, markerPath, records, seed, sessionPaths, sessions, titles } from './archive-files'
 import { fakeFs } from './fake-fs'
 import type { Fail } from './fake-fs'
-import { showTab } from './tabs'
+import { laterDay, showTab } from './tabs'
 
 const NOW = Date.UTC(2026, 9, 26, 12, 40)
 const HOUR = 3_600_000
@@ -146,6 +146,7 @@ describe('the archive in the project folder', () => {
     const A = '/a/.claude/flowdeck'
     const B = '/b/.claude/flowdeck'
     const { files, clock } = engine(on, { store: { historyShown: true } })
+    laterDay(on) // the flows finished today are looked at in the Archive as on a later day (tabs.ts)
     await start($, '/a')
     await flow($, 'Alpha')
     clock.now = NOW + 60_000
@@ -209,6 +210,7 @@ describe('the archive in the project folder', () => {
   test('an index that is there but cannot be read (oversized) is never written; the flow still gets its file and shows', async ($, on) => {
     const big = JSON.stringify({ version: 1, sessions: [] })
     const { files, fs, store } = engine(on, { store: { historyShown: true }, files: { [INDEX]: big }, tooBig: [INDEX] })
+    laterDay(on) // the flows finished today are looked at in the Archive as on a later day (tabs.ts)
     await start($)
     await settle()
     let p = await pane($)
@@ -260,6 +262,7 @@ describe('the archive in the project folder', () => {
 
   test('a failing write falls back to the shared store without throwing', async ($, on) => {
     const { store, files } = engine(on, { store: { historyShown: true }, fail: { write: true } })
+    laterDay(on) // the flows finished today are looked at in the Archive as on a later day (tabs.ts)
     await start($)
     expect(String((await flow($)).result)).toContain('ok')
     expect((store.history as any[]).map(e => e.title)).toEqual(['Ship it'])
@@ -270,6 +273,7 @@ describe('the archive in the project folder', () => {
 
   test('a flow neither the folder nor the store can take still shows for this session, and the panel says so', async ($, on) => {
     const { store, files, fail } = engine(on, { store: { historyShown: true }, fail: { write: true } })
+    laterDay(on) // the flows finished today are looked at in the Archive as on a later day (tabs.ts)
     await start($)
     fail.store = true
     expect(String((await flow($)).result)).toContain('ok')
@@ -292,6 +296,7 @@ describe('the archive in the project folder', () => {
   })
   test('a flow that went to the store because the write failed gets its session file at the next load; the store keeps it', async ($, on) => {
     const { files, store, fail, clock } = engine(on, { store: { historyShown: true } })
+    laterDay(on) // the flows finished today are looked at in the Archive as on a later day (tabs.ts)
     fail.write = true
     await start($)
     await flow($)

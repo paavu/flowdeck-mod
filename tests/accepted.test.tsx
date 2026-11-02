@@ -5,7 +5,7 @@ import { STATE_COLOR } from '../hooks/plan-view'
 import { asFlow, asArchive } from '../hooks/shapes'
 import { acceptedOf, acceptedOnly, linkRuns, unstarted } from '../hooks/tasks'
 import type { AgentRun } from '../types'
-import { acrossTabs, showTab } from './tabs'
+import { acrossTabs, laterDay, showTab } from './tabs'
 import type { Tab } from './tabs'
 
 const NOW = Date.UTC(2026, 9, 29, 14, 0)
@@ -187,6 +187,7 @@ describe('accepted tasks in the panel', () => {
     const named = { ...snapshot({ flow: { ...flow, accepted: [2, 3] }, agents: runs, project: '', startedAt: NOW - 700_000, endedAt: NOW - 200_000, status: 'finished' }), id: 'g1' }
     const older = { ...snapshot({ flow, agents: runs, project: '', startedAt: NOW - 900_000, endedAt: NOW - 800_000, status: 'finished' }), id: 'g2' }
     engine(on, { store: { historyShown: true, history: [named, older] } })
+    laterDay(on) // the flows finished today are looked at in the Archive as on a later day (tabs.ts)
     await start($)
     await settle()
     await showTab($, 'archive')

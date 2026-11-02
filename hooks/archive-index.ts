@@ -8,6 +8,7 @@
 import type { ArchiveEntry, ArchiveRecord } from '../types'
 import { isNewer, itemCountOf, keyOf, MAX_TEXT, taskCountOf } from './archive'
 import { sortNewest } from './order'
+import { isDayKey } from './time'
 
 export const INDEX_VERSION = 1
 export const ARCHIVE_DIR = 'archive'
@@ -48,8 +49,17 @@ export function recordOf(entry: ArchiveEntry, file: string, size: number): Archi
     size,
   }
   if (entry.partial) r.partial = true
+  if (entry.day) r.day = entry.day
+  if (isPendingDay(entry)) r.pendingDay = true
   return r
 }
+
+// A finished flow saved with its day (archive.ts `snapshot`) that is no day's session itself: the Finished tab lists it
+// while its day is today, and once that day has passed it is merged into the day's session (archive-store.ts `mergeDays`).
+const isPendingDay = (e: ArchiveEntry): boolean => !!e.day && !e.mergedIds && !e.plan && !e.partial && e.status === 'finished'
+
+// A record of the Finished tab's: a flow finished on `day` and not merged yet.
+export const isOfDay = (r: ArchiveRecord, day: string): boolean => !!r.pendingDay && r.day === day && !r.mergedInto
 
 const num = (v: unknown): number | null => (typeof v === 'number' && Number.isFinite(v) ? Math.max(0, v) : null)
 const NUMS = ['startedAt', 'endedAt', 'itemCount', 'taskCount', 'cost', 'tokens', 'time', 'size'] as const
@@ -81,6 +91,9 @@ export function parseRecord(v: unknown): ArchiveRecord | null {
   if (num(o.restoredAt) !== null) r.restoredAt = num(o.restoredAt)!
   if (typeof o.originalFile === 'string' && o.originalFile) r.originalFile = o.originalFile
   if (o.source === 'store') r.source = 'store'
+  if (isDayKey(o.day)) r.day = o.day
+  if (o.pendingDay === true && r.day) r.pendingDay = true
+  if (typeof o.mergedInto === 'string' && o.mergedInto) r.mergedInto = o.mergedInto
   return r
 }
 
@@ -133,13 +146,15 @@ const isLive = (t: ArchiveRecord): boolean => !(typeof t.restoredAt === 'number'
 
 // Which list each session shows in, from both indexes: it is in the Trash when its latest move to the trash is later
 // than its latest save (its end) or restore; it then shows its newest trash copy not restored. A session the trash
-// index lost every copy of (the user emptied `.trash/` by hand) shows in neither list; its file stays in `archive/`.
+// index lost every copy of (the user emptied `.trash/` by hand) shows in neither list; its file stays in `archive/`. A
+// flow merged into its day's session shows in neither list either: the day's session holds it.
 export function reconcile(archive: ArchiveRecord[], trash: ArchiveRecord[]): { records: ArchiveRecord[]; trash: ArchiveRecord[] } {
   const ids = new Set([...archive.map(r => r.id), ...trash.map(r => r.id)])
   const shown: ArchiveRecord[] = []
   const binned: ArchiveRecord[] = []
   for (const id of ids) {
     const a = archive.find(r => r.id === id)
+    if (a?.mergedInto) continue
     const copies = trash.filter(r => r.id === id)
     const lastTrash = latest(a?.trashedAt, ...copies.map(t => t.trashedAt))
     const lastBack = latest(a?.endedAt, a?.restoredAt, ...copies.map(t => t.restoredAt))

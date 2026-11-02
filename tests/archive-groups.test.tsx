@@ -7,7 +7,7 @@ import type { Io } from '../hooks/archive-store'
 import { STATE_COLOR } from '../hooks/plan-view'
 import { doneText } from '../hooks/time'
 import { fileOf, indexPath, records, sessionPaths, sessions } from './archive-files'
-import { showTab } from './tabs'
+import { laterDay, showTab } from './tabs'
 import type { Tab } from './tabs'
 import type { AgentRun, Flow, ArchiveEntry } from '../types'
 import { utf8 } from './fake-fs'
@@ -337,16 +337,19 @@ const desktop = async ($: any) => {
   return { svgs, texts, buttons, keys: buttons.map((b: any) => String(b.props.key)), alts: svgs.map((s: any) => String(s.props.alt ?? '')) }
 }
 
-// Two saved flows with their agents: the newer one has a done run, a failed run with items and an unstarted task.
+// Two saved flows with their agents: the newer one has a done run, a failed run with items and an unstarted task. Saved
+// without a day, as an earlier release saved them, so the Archive lists them whatever the date (the Finished tab keeps
+// a flow saved with today's date: tests/finished-day.test.tsx).
+const undated = ({ day: _, ...e }: ArchiveEntry): ArchiveEntry => e
 const groupA = (): ArchiveEntry =>
   ({
-    ...snap(
+    ...undated(snap(
       [
         run(),
         run({ id: 'a2', agentId: 'a2', description: 'wire it', type: 'flowdeck-medium', status: 'failed', startedAt: NOW - 2 * HOUR + MIN, endedAt: NOW - 2 * HOUR + 3 * MIN, tokens: 8000, costUsd: 0.25, items: [{ title: 'read code', status: 'done', startedAt: NOW - 2 * HOUR + MIN, doneAt: NOW - 2 * HOUR + 2 * MIN }, { title: 'patch it', status: 'error', startedAt: NOW - 2 * HOUR + 2 * MIN, doneAt: NOW - 2 * HOUR + 3 * MIN }] }),
       ],
       { flow: flow({ title: 'Flow A', done: 1 }) },
-    ),
+    )),
     id: 'gA',
     cost: 1.5,
     tokens: 12_000,
@@ -354,7 +357,7 @@ const groupA = (): ArchiveEntry =>
   }) as ArchiveEntry
 const groupB = (): ArchiveEntry =>
   ({
-    ...snap([run({ id: 'b1', agentId: 'b1', description: 'only task' })], { flow: flow({ title: 'Flow B', tasks: [{ title: 'only task', tier: 'careful', after: [] }], total: 1, done: 1 }), startedAt: NOW - 30 * HOUR, endedAt: NOW - 25 * HOUR }),
+    ...undated(snap([run({ id: 'b1', agentId: 'b1', description: 'only task' })], { flow: flow({ title: 'Flow B', tasks: [{ title: 'only task', tier: 'careful', after: [] }], total: 1, done: 1 }), startedAt: NOW - 30 * HOUR, endedAt: NOW - 25 * HOUR })),
     id: 'gB',
     cost: 0.75,
     tokens: 3_000,
@@ -559,7 +562,7 @@ describe('archive groups in the panel', () => {
 
   test('a group of 60 agents draws flat without overflow', async ($, on) => {
     const agents = Array.from({ length: 60 }, (_, k) => run({ id: `m${k}`, agentId: `m${k}`, description: `task ${k} ${'d'.repeat(150)}`, startedAt: NOW - 2 * HOUR + k * 1000, endedAt: NOW - 2 * HOUR + k * 1000 + MIN }))
-    const e = { ...snap(agents), id: 'gL' } as ArchiveEntry
+    const e = { ...undated(snap(agents)), id: 'gL' } as ArchiveEntry
     engine(on, { store: { historyShown: true, history: [e] } })
     await start($)
     await settle()
@@ -621,7 +624,7 @@ describe('archive groups in the panel', () => {
   })
 
   test('a run saved while still running keeps its status and reads Running at finish in blue-violet, its time fixed', async ($, on) => {
-    const e = { ...snap([run({ status: 'running', endedAt: undefined, startedAt: NOW - HOUR - 2 * MIN })]), id: 'gR' }
+    const e = { ...undated(snap([run({ status: 'running', endedAt: undefined, startedAt: NOW - HOUR - 2 * MIN })])), id: 'gR' }
     expect(e.agents![0]!.status).toBe('running')
     const { clock } = engine(on, { store: { historyShown: true, history: [e] } })
     await start($)
@@ -643,6 +646,7 @@ describe('archive groups in the panel', () => {
 
   test('a flow finished while a worker still runs saves the run as running, ended at the save, and the group draws it Running at finish', async ($, on) => {
     const { store, clock } = engine(on, { store: { historyShown: true } })
+    laterDay(on) // the flow finished today is looked at in the Archive as on a later day (tabs.ts)
     await start($)
     await progress($, { title: 'Live one', total: 1, done: 0, phase: 'delegate', tasks: [{ title: 'write tests', tier: 'careful' }] })
     clock.now = NOW + 1000
@@ -711,6 +715,7 @@ describe('archive groups in the panel', () => {
 
   test('a flow finished through finishFlow is saved with its agents and appears as a group', async ($, on) => {
     const { store, clock } = engine(on, { store: { historyShown: true } })
+    laterDay(on) // the flow finished today is looked at in the Archive as on a later day (tabs.ts)
     await start($)
     await progress($, { title: 'Live one', total: 2, done: 0, phase: 'delegate', tasks: [{ title: 'write tests', tier: 'careful' }, { title: 'wire it', tier: 'medium' }] })
     clock.now = NOW + 1000

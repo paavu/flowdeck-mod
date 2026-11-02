@@ -4,7 +4,7 @@ import { snapshot } from '../hooks/archive'
 import { STATE_COLOR } from '../hooks/plan-view'
 import { cleanAfter, linkRuns, taskOf, unstarted } from '../hooks/tasks'
 import type { AgentRun } from '../types'
-import { showTab } from './tabs'
+import { laterDay, showTab } from './tabs'
 
 const NOW = Date.UTC(2026, 9, 29, 11, 0)
 
@@ -221,6 +221,7 @@ describe('task numbers and waits on the rows', () => {
     const flow = { title: 'Old', total: 2, done: 2, running: 0, phase: 'close' as const, isFinished: true, isLinked: true, tasks: [{ title: 'Read code', tier: 'light', after: [] }, { title: 'Wire it', tier: 'medium', after: [1] }] }
     const entry = { ...snapshot({ flow, agents: runs, project: '', startedAt: NOW - 700_000, endedAt: NOW - 200_000, status: 'finished' }), id: 'g1' }
     engine(on, { store: { historyShown: true, history: [entry] } })
+    laterDay(on) // the flows finished today are looked at in the Archive as on a later day (tabs.ts)
     await start($)
     await settle()
     await showTab($, 'archive')

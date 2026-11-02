@@ -3,7 +3,7 @@ import { describe, expect, test } from 'claude-code/testing'
 import { IDLE_FINISH_MS, LIVE_STALE_MS } from '../hooks/live'
 import { indexPath, records, sessionPaths, sessions } from './archive-files'
 import { fakeFs } from './fake-fs'
-import { showTab } from './tabs'
+import { laterDay, showTab } from './tabs'
 
 // The flow's lifecycle, all of it from the mod itself: a task list or a worker starts a flow, it finishes by itself,
 // flow-live.json keeps it across a restart, and the next session closes and archives the last one.
@@ -248,6 +248,7 @@ describe('a flow finishes by itself', () => {
 
   test('a finished flow is replaced by the next task: a new flow, the old one archived once', async ($, on) => {
     const { files, clock } = engine(on)
+    laterDay(on) // the flows finished today are looked at in the Archive as on a later day (tabs.ts)
     await start($)
     await todo($, [['first job', 'pending']])
     await todo($, [['first job', 'completed']])
@@ -359,6 +360,7 @@ describe('flow-live.json', () => {
 
   test('another session\'s record is closed: finished at its last activity, its running run ended then, archived, taken out of the file', async ($, on) => {
     const { files } = engine(on, { files: seedLive([record('old', { endedAt: NOW - 28 * MIN })]) })
+    laterDay(on) // the flows finished today are looked at in the Archive as on a later day (tabs.ts)
     await start($)
     const list = archived(files)
     expect(list.map(e => [e.title, e.status, e.endedAt])).toEqual([['Old work', 'finished', NOW - 30 * MIN]])
