@@ -2,6 +2,14 @@
 
 Versions are `M.m.xxxx`; every build bumps the 4-digit build number. Details and rulings: `docs/ledger.md`, `docs/design.md`.
 
+## 1.0.0069 (2026-11-03)
+- The plan reminder repeats: with task tracking on and no flow open, the main session's 1st work call of a turn and then every 3rd (1, 4, 7, ...) gets the line (`PLAN_NUDGE_EVERY` in `hooks/nudge.ts`). The count starts over at a new turn, at any `progress` call and while a flow is open. The line no longer excuses multi-file edits, scripted rewrites, builds, renders, trials or bumps; only a pure question or a single edit to one file needs no flow.
+- Turn-end check: a main turn that made 2 or more work calls with tracking on and no flow open is sent back once (`PLAN_SEND_BACK`), telling Claude to open a flow with the tasks it carried out, mark them done and give a result note for each. Never for a worker, never with tracking off.
+- Untracked-work log: each such main turn (1 or more work calls) adds `{day, time, calls, tools, sentBack}` to `.claude/flowdeck/untracked-work.json` (time in 24-hour `HH:MM`, the newest 200 kept, the file rewritten in place). Under the tab row the panel shows a muted `N turns without a flow today`; nothing at zero.
+- The reminder and the send-back follow the stored tracking choice (`/flowdeck-rule` and the `Track tasks` switch), no longer a session that ran `/flowdeck:flowdeck`, so they stop at once when tracking is off.
+- The flow rule says "No flow only for a pure question or a single edit to one file".
+- README: the demo clip is a 38-second tour of the progress bar, one task's steps, the tabs, the warm cache and handoff notes.
+
 ## 1.0.0068 (2026-11-02)
 - The Finished tab keeps the whole day: the rows of every flow finished today stay in it as one list, with the current flow's rows, and `Finished (n)` counts all of them. They leave it at the date change.
 - The band's `Tasks X/Y`, bar and percent count that same list, so Y is Active plus Finished until the rows go to the Archive.
@@ -23,14 +31,14 @@ Versions are `M.m.xxxx`; every build bumps the 4-digit build number. Details and
 - The band's cache block (chip, minutes left, chevron) and agents block (worker icon and `×N`) sit on cards, the gaps are tighter and the close `✕` is at the right edge (desktop; the terminal band is unchanged).
 
 ## 1.0.0064 (2026-11-02)
-- Task tracking is now checked, not only requested. With tracking on and no flow open, the main session's first work call of a turn (edit, write, shell, worker launch) gets one line in its result telling Claude to plan a multi-step task with `progress` first (`PLAN_NUDGE` in `hooks/nudge.ts`). It fires at most once a turn, stops once a flow is open, never reaches a worker and never blocks a call.
+- Task tracking is now checked, not only requested. With tracking on and no flow open, the main session's first work call of a turn (edit, write, shell, worker launch) gets one line in its result telling Claude to plan a multi-step task with `progress` first (`PLAN_NUDGE` in `hooks/nudge.ts`). It came at most once a turn (since 1.0.0069 it repeats every third work call), stops once a flow is open, never reaches a worker and never blocks a call.
 - The flow rule gains one sentence: plan with `progress` before a multi-step task's first edit, build or Agent call; a trial counts. Seen in a real session: a Kotlin bump and build ran inline although tracking was on, because the rule's "one-step edit" exception was the only guidance.
 
 ## 1.0.0063 (2026-10-31)
 - Keep warm renews up to 8 times between two of your messages (was 2), so an idle session stays warm for about 7 h 40 min instead of 2 h 40 min. Eight renewals of a 770k-token Opus context cost about $1.20, against about $6.16 to write the cache again; renewals still count against the plan's usage limits. After the eighth the card says `kept warm ×8 · limit reached`. The cold-cache screenshot is redrawn to match.
 
 ## 1.0.0062 (2026-10-31)
-- README: a framed 20-second screen recording of the panel, band, crew and archive (sample data) sits at the top, as a GIF with a link to the full-resolution MP4 in `docs/media/`.
+- README: a framed screen recording (sample data) sits at the top, as a GIF with a link to the full-resolution MP4 in `docs/media/`. Since 1.0.0069 the clip is a 38-second tour of the progress bar, one task's steps, the tabs, the warm cache and handoff notes.
 
 ## 1.0.0061 (2026-10-31)
 - README: the "How it works" diagram is now a vertical image with larger text (light and dark), drawn by `scripts/diagrams/how-it-works.py`, instead of a small left-to-right Mermaid chart.

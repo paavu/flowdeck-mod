@@ -14,9 +14,18 @@ export function countCall(calls: Map<string, number>, agentId: string): boolean 
   return true
 }
 
-// The plan nudge: with task tracking on and no flow open, the main session's first work call of a turn gets this line.
+// The plan nudge: with task tracking on and no flow open, the main session's first work call of a turn gets this line,
+// and again every PLAN_NUDGE_EVERY-th work call after it while still no flow is open.
 export const PLAN_NUDGE =
-  'flowdeck: task tracking is on and no flow is open. If this is a task of two or more steps (a trial, a branch, a bump, a build count), plan it with mcp__flowdeck__progress (title, tasks, tier) before going on. A question or a one-step edit needs no flow.'
+  'flowdeck: task tracking is on and no flow is open. Plan this task with mcp__flowdeck__progress (title, tasks, tier) before going on: work of two or more steps needs a flow, and so do multi-file edits, scripted rewrites, builds, renders, trials and bumps. Only a pure question or a single edit to a single file needs none.'
+export const PLAN_NUDGE_EVERY = 3
+
+// True for the n-th work call (from 1) since the turn started or a flow was last open: the 1st, then every PLAN_NUDGE_EVERY-th after it.
+export const isPlanNudgeCall = (n: number): boolean => n >= 1 && (n - 1) % PLAN_NUDGE_EVERY === 0
+
+// The turn-end check: a main turn that made work calls with tracking on and no flow open is sent back once with this.
+export const PLAN_SEND_BACK =
+  'flowdeck: task tracking is on and this turn did work with no flow open. Open one now with mcp__flowdeck__progress (ToolSearch select:mcp__flowdeck__progress if deferred): a title and the tasks this turn carried out, then done with their numbers and a result note for each. Then end the turn.'
 
 // Calls that only look or ask: they never start the plan nudge. Everything else (edits, shells, workers) is work.
 const LOOKING_TOOLS: ReadonlySet<string> = new Set([

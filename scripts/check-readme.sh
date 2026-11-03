@@ -1,6 +1,6 @@
 #!/bin/sh
 # Checks README.md against docs/images/ and the callout data: every image path exists, every <img> has alt text, and each
-# annotated image's numbered legend (the "1. ..." list after its <picture>) has the same count, numbered 1..N, as the callouts in
+# annotated image's numbered legend (the "1. ..." list after its <img>) has the same count, numbered 1..N, as the callouts in
 # scripts/screenshots/callouts.tsv for that image, and that every in-page #link names a heading. Exits 1 on the first kind of failure found, listing every problem.
 cd "$(dirname "$0")/.." || exit 1
 status=0
@@ -34,13 +34,11 @@ awk -F'\t' '
     next
   }
   /^#/ { flush() }
-  /<picture>/ { flush(); legend = 0; open = 1 }
-  open && /<img / {
-    if (match($0, /docs\/images\/[A-Za-z0-9-]*-light\.png/)) {
-      name = substr($0, RSTART + 12, RLENGTH - 22)
-      shot = name
+  /<img / && /docs\/images\/[A-Za-z0-9-]*-dark\.png/ {
+    flush(); legend = 0
+    if (match($0, /docs\/images\/[A-Za-z0-9-]*-dark\.png/)) {
+      shot = substr($0, RSTART + 12, RLENGTH - 21)
     }
-    open = 0
   }
   shot != "" && /^[0-9]+\. / {
     legend++
@@ -54,7 +52,7 @@ awk -F'\t' '
   END {
     flush()
     for (s in callouts) if (!(s in used)) {
-      printf "callouts.tsv: %s has callouts but no <picture> of it in README.md\n", s > "/dev/stderr"
+      printf "callouts.tsv: %s has callouts but no <img> of it in README.md\n", s > "/dev/stderr"
       bad = 1
     }
     exit bad

@@ -295,6 +295,8 @@ declare module 'claude-code' {
       liveError: string
       /** True once `/flowdeck:flowdeck` ran in this session: the flow rule is injected for it whatever the stored choice. */
       ruleSession: boolean
+      /** The days (`YYYY-MM-DD`) of the untracked-work log's records (untracked.ts), for the panel's count of today's. */
+      untrackedDays: string[]
     }
   }
 }

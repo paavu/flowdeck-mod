@@ -184,7 +184,7 @@ describe('the flow rule in the system prompt', () => {
       '`done: [n]` with notes [{task, result, feedback}]', // result and feedback on accept
       '`#<n> <title>`',
       'Plan with',
-      'No flow for a question or a one-step edit',
+      'No flow only for a pure question or a single edit to one file',
       'never leave another task unreported',
       'Pick the Agent `model` per task and send it as the task\'s `model`', // model choice
       'Fable only after the user approves, once Opus heavy failed; state why atop its brief',

@@ -4,7 +4,7 @@ import type { Elements, EngineInterface, Register, RenderChildren } from 'claude
 import type { AgentRun, ArchiveDetail, ArchiveEntry, ArchiveLists, ArchiveRecord, Flow, Panel, PanelTab, Phase, PlannedTask, Reading, Rule, Samples, TaskPlan, UsageWindow } from '../types'
 import { derive, finishItems, hasItemOps, ITEM_H, itemAlt, itemLine, itemsOf, itemSvg, noteSvg, stepItems, timedItems } from './agent-items'
 import type { StepInput } from './agent-items'
-import { countCall, isWorkCall, PLAN_NUDGE, withNudgeLine } from './nudge'
+import { countCall, isPlanNudgeCall, isWorkCall, PLAN_NUDGE, PLAN_SEND_BACK, withNudgeLine } from './nudge'
 import { agentState, HOUSEKEEPING, isComplete, isIncomplete, isLive, markOf, progressOf, splitHead, stateText, stepCount } from './agent-state'
 import { contextRows, contextSvg, toReading } from './context'
 import { combineParts, dayPartOf, isWorthKeeping, keyOf, snapshot } from './archive'
@@ -18,7 +18,7 @@ import { foldGlyph } from './fold'
 import { applyNotes, briefOf, cleanText, fallbackBrief, hasNote, NOTE_ICON, NOTE_MAX, noteAlt, noteOf, noteParts, noteRows, noteSvgBody } from './notes'
 import type { TaskNote } from './notes'
 import { sortNewest } from './order'
-import { dayKey, doneText, isDayKey } from './time'
+import { dayKey, doneText, hhmm, isDayKey } from './time'
 import { percent, where } from './plan'
 import { planRows, planSvg, STATE_COLOR, stateLabel } from './plan-view'
 import { acceptedOf, acceptedOnly, allTasksDone, cleanAfter, linkRuns, modelOf, norm, shortTitle, taskOf, taskTag, TASK_MODELS, unstarted, workerTier } from './tasks'
@@ -30,6 +30,7 @@ import { SMALL_SIZE } from './sizes'
 import { VERSION } from './version'
 import { projectByKey, transcriptGuesses } from './project'
 import { asRule, estimateTokens, isStoredRule, isTracking, RULE_KEY, SCHEMA_CHARS_PER_TOKEN, toggledRule } from './rule'
+import { appendUntracked, readUntracked, toolsOf, untrackedLine } from './untracked'
 import { live, record, resetKey, resets, toWindows, usageHeadSvg, usageRows, usageSvg } from './usage'
 import { CACHE_HUE, cacheKey, isCardOpen, isRenewDue, isShowable, KEEP_WARM_DEFAULT, measured, remeasured, renewalEnded, seeded, stamped, toggledFold, userSpoke, viewOf } from './cache'
 import type { CacheFacts, CacheMode, KeepWarm } from './cache'
@@ -62,6 +63,8 @@ const liveState = atom({ plugin: 'flowdeck', key: 'live' } as const, LIVE_DEFAUL
 const liveError = atom({ plugin: 'flowdeck', key: 'liveError' } as const, '')
 // /flowdeck:flowdeck ran in this session: the flow rule is injected for it whatever the stored choice (rule.ts).
 const ruleSession = atom({ plugin: 'flowdeck', key: 'ruleSession' } as const, false)
+// The days of the untracked-work log's records (untracked.ts), for the panel's count of today's.
+const untrackedDays = atom({ plugin: 'flowdeck', key: 'untrackedDays' } as const, [] as string[])
 
 // A reload keeps the held values an older flowdeck wrote, in its older shape: every read goes through its normalizer
 // (shapes.ts), and every update hands its change the normalized value. A change that returns that value unchanged hands
@@ -135,7 +138,7 @@ const TICK_MS = 5000
 const PHASES: readonly Phase[] = ['plan', 'design', 'delegate', 'review', 'close']
 // The flow rule, in the system prompt only while task tracking is on (rule.ts) or in a session that ran /flowdeck:flowdeck.
 const FLOW_RULE = `# flowdeck
-Track each task with ${TOOL} (ToolSearch \`select:${TOOL}\` if deferred; workers use only ${STEP_TOOL}). Plan once: title, tasks [{title, tier, after, goal}] from 1; chain tasks editing the same files with \`after\`. New task: \`add\` with its goal. Accepted: \`done: [n]\` with notes [{task, result, feedback}]. Worker Agent description: \`#<n> <title>\`. Pick the Agent \`model\` per task and send it as the task's \`model\`. Fable only after the user approves, once Opus heavy failed; state why atop its brief. Plan with ${TOOL} before a multi-step task's first edit, build or Agent call (a trial counts). No flow for a question or a one-step edit; never leave another task unreported.`
+Track each task with ${TOOL} (ToolSearch \`select:${TOOL}\` if deferred; workers use only ${STEP_TOOL}). Plan once: title, tasks [{title, tier, after, goal}] from 1; chain tasks editing the same files with \`after\`. New task: \`add\` with its goal. Accepted: \`done: [n]\` with notes [{task, result, feedback}]. Worker Agent description: \`#<n> <title>\`. Pick the Agent \`model\` per task and send it as the task's \`model\`. Fable only after the user approves, once Opus heavy failed; state why atop its brief. Plan with ${TOOL} before a multi-step task's first edit, build or Agent call. No flow only for a pure question or a single edit to one file; never leave another task unreported.`
 const GOAL_TEXT = "The user's request for this task in a sentence; plain text, at most 300 characters."
 // The pane keeps its id from before the command's rename, so a pane the desktop app placed still opens.
 const PANE = 'flowdeck-agents'
@@ -541,6 +544,7 @@ async function followTranscript($: EngineInterface, cwd: string): Promise<void> 
   if (!project || !at || at === project) return
   project = at
   await loadLists($)
+  await loadUntracked($)
   await adoptLive($, sessionId)
 }
 
@@ -1793,22 +1797,44 @@ const shown = new Map<string, { tool?: string; isAsked: boolean }>()
 // Tool calls a worker made since its last step call (nudge.ts).
 const quiet = new Map<string, number>()
 
-// The main session's first work call of a turn, with tracking on and no flow open, gets one line to plan first (nudge.ts
-// PLAN_NUDGE). While the system prompt does not hold the rule yet (tracking turned on after the last compose), the line
-// carries the whole rule, so the running session tracks tasks at once. Never alters the call itself; a failing read adds nothing.
-async function planNudge($: EngineInterface, e: { tool: string; agentId?: string }, next: (e: any) => Promise<any>): Promise<any> {
-  if (planNudged || !isWorkCall(e.tool)) return next(e)
-  let isDue = false
+// Task tracking is on (the stored choice) and no linked flow is open; false when a read fails.
+async function isPlanDue($: EngineInterface): Promise<boolean> {
   try {
-    if (await isRuleOn($)) {
-      const f = await readFlow($)
-      isDue = !(f && f.isLinked && !f.isFinished)
-    }
+    if (!(await isTrackingChosen($))) return false
+    const f = await readFlow($)
+    return !(f && f.isLinked && !f.isFinished)
   } catch {
-    isDue = false
+    return false
   }
-  if (!isDue) return next(e)
-  planNudged = true
+}
+
+// The turn's untracked work appended to the project's log (untracked.ts), and the panel's days from what was written.
+// Without a project folder, or a clock, nothing is written.
+async function logUntracked($: EngineInterface, sentBack: boolean): Promise<void> {
+  const at = await clockAt($)
+  if (at === null || !project) return
+  const list = await appendUntracked(io($), project, { day: dayKey(at), time: hhmm(at), calls: planCalls, tools: toolsOf(planTools), sentBack })
+  if (list) await update($, untrackedDays, () => list.map(r => r.day))
+}
+
+// The project's untracked-work log read for the panel's count; none when it cannot be read. Never throws.
+async function loadUntracked($: EngineInterface): Promise<void> {
+  const list = await readUntracked(io($), project).catch(() => [])
+  await update($, untrackedDays, () => list.map(r => r.day)).catch(() => {})
+}
+
+// The main session's work calls with tracking on and no flow open are counted (planCalls): the first of a turn, then every
+// PLAN_NUDGE_EVERY-th, gets one line to plan first (nudge.ts PLAN_NUDGE, isPlanNudgeCall); an open flow starts the count
+// over. While the system prompt does not hold the rule yet (tracking turned on after the last compose), the line carries
+// the whole rule, so the running session tracks tasks at once. Never alters the call itself; a failing read adds nothing.
+async function planNudge($: EngineInterface, e: { tool: string; agentId?: string }, next: (e: any) => Promise<any>): Promise<any> {
+  if (!isWorkCall(e.tool)) return next(e)
+  if (!(await isPlanDue($))) {
+    resetPlanCalls()
+    return next(e)
+  }
+  planTools.set(e.tool, (planTools.get(e.tool) ?? 0) + 1)
+  if (!isPlanNudgeCall(++planCalls)) return next(e)
   return withNudgeLine(await next(e), ruleComposed ? PLAN_NUDGE : `${PLAN_NUDGE} ${FLOW_RULE}`)
 }
 
@@ -1905,8 +1931,15 @@ async function tickCache($: EngineInterface): Promise<void> {
 // no prompt started is the renewal's own request, should the engine raise one, and is not taken for the user's.
 let renewing = false
 let prompted = false
-// The plan nudge went out in this main turn (nudge.ts PLAN_NUDGE): at most one a turn.
-let planNudged = false
+// The main turn's work calls with tracking on and no flow open, since it started or a flow call (planNudge), by tool too,
+// and whether its end was logged already (untracked.ts), and sent back when due (nudge.ts PLAN_SEND_BACK): once a turn.
+let planCalls = 0
+const planTools = new Map<string, number>()
+let planEnded = false
+const resetPlanCalls = (): void => {
+  planCalls = 0
+  planTools.clear()
+}
 // The last prompt compose put the flow rule in the system prompt; false from session start until one does.
 let ruleComposed = false
 const RENEW_PROMPT = 'This request only renews the prompt cache for an idle session. Reply with the single word: ok'
@@ -1987,6 +2020,12 @@ async function setRule($: EngineInterface, rule: Rule): Promise<void> {
 // when it cannot be read. Never throws: a failing read counts as on.
 async function isRuleOn($: EngineInterface): Promise<boolean> {
   if ((await read($, ruleSession).catch(() => false)) === true) return true
+  return isTrackingChosen($)
+}
+
+// The stored choice alone, as /flowdeck-rule and the Track tasks switch write and report it (the panel's copy when the
+// store cannot be read): the plan nudge and the turn-end check follow it, never a /flowdeck:flowdeck session's rule.
+async function isTrackingChosen($: EngineInterface): Promise<boolean> {
   const stored: unknown = await $.store.get(RULE_KEY).catch(() => null)
   const rule = isStoredRule(stored) ? asRule(stored) : (await readPanel($).catch(() => asPanel(null))).rule
   return isTracking(rule)
@@ -2205,6 +2244,7 @@ export const register: Register = (on, options) => {
     const storedKeepWarm = await loadKeepWarm($).catch(() => undefined)
     if (typeof storedKeepWarm === 'boolean') await updatePanel($, prev => ({ ...prev, isKeepWarm: storedKeepWarm }))
     await loadLists($)
+    await loadUntracked($)
     void refreshContext($).catch(() => {})
     // A (re)load starts with no band or flow-live.json error: one that still happens is said again.
     faults.band.clear()
@@ -2289,6 +2329,7 @@ export const register: Register = (on, options) => {
   })
 
   on('tool.call', { tool: TOOL }, async ($, e) => {
+    resetPlanCalls() // a flow call: the plan nudge's count starts over
     const input = e as unknown as ProgressInput
     let prev = await readFlow($)
     // Finishing a flow that is already finished changes nothing; it would otherwise open a blank one. So does a call on a
@@ -2505,7 +2546,8 @@ export const register: Register = (on, options) => {
     const result = await next(e)
     if (!e.agentId && (!renewing || prompted)) {
       prompted = false
-      planNudged = false
+      resetPlanCalls()
+      planEnded = false
       const at = await $.clock.now().catch(() => 0)
       if (at) await updateKeepWarm($, k => ({ ...k, turnAt: at })).catch(() => {})
     }
@@ -2599,6 +2641,21 @@ export const register: Register = (on, options) => {
     }
     if (!agentId) await autoFinish($).catch(() => {}) // the main turn ended: a flow whose tasks are all done finishes
     return result
+  })
+
+  // A main turn that made work calls with tracking on and no flow open (planCalls) is logged once (untracked.ts), and with
+  // two or more (more than a single edit) sent back once to record them in a flow (nudge.ts PLAN_SEND_BACK). Never a
+  // worker's or keep warm's renewal; a turn a Stop hook sent back already (stop_hook_active) is logged, not sent back; one
+  // another hook blocks goes on as it would and is logged when it ends. A failing read logs and sends nothing back.
+  on('classic.Stop', async ($, e, next) => {
+    const result = await next(e)
+    if (e.agent_id || planEnded || planCalls === 0) return result
+    if ((await isRenewalEcho($).catch(() => true)) || !(await isPlanDue($))) return result
+    const isSentBack = !e.stop_hook_active && result.block === undefined && planCalls >= 2
+    if (!isSentBack && result.block !== undefined) return result
+    planEnded = true
+    await logUntracked($, isSentBack).catch(() => {})
+    return isSentBack ? { ...result, block: PLAN_SEND_BACK } : result
   })
 
   // The engine measured the main window again: the cache's size follows, once a request is known.
@@ -3347,6 +3404,9 @@ export const register: Register = (on, options) => {
         ? safe(TAB_LABEL[p.tab], () => drawFlow(p.tab === 'finished' ? 'finished' : 'active'))
         : safe(TAB_LABEL[p.tab], archivePart(p.tab === 'trash' ? 'trash' : 'archive'))
     const strip = isFlowTab ? await safe('Task tracking', () => ruleStrip($, { Box, Text, Button }, p.rule)) : null
+    const heldDays: unknown = await read($, untrackedDays).catch(() => [])
+    const untrackedText = untrackedLine(Array.isArray(heldDays) ? heldDays.filter((d): d is string => typeof d === 'string') : [], day)
+    const untrackedRow = untrackedText ? <Text key="untracked-today" dimColor>{untrackedText}</Text> : null
     const pane = (shown: RenderChildren) => (
       <Box flexDirection="column">
         {topToggles}
@@ -3357,6 +3417,7 @@ export const register: Register = (on, options) => {
         <Box key="flowdeck-group" flexDirection="column" marginTop={1}>
           {flowTitleRow($, { Box, Text, Button }, p)}
           {tabs}
+          {untrackedRow}
           {strip}
           {shown}
         </Box>
