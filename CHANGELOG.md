@@ -2,6 +2,11 @@
 
 Versions are `M.m.xxxx`; every build bumps the 4-digit build number. Details and rulings: `docs/ledger.md`, `docs/design.md`.
 
+## 1.0.0070 (2026-11-03)
+- Handoff notes: the part labels (Goal, Brief, Result, Feedback) are drawn in the accent violet (`#8f8cf4`) instead of grey, on the desktop and in the terminal, as in the demo clip. The note's text is unchanged.
+- The `ⓘ` note icon stays dim while its note is closed and turns accent violet while it is open.
+- README screenshots that show an open note are rendered again.
+
 ## 1.0.0069 (2026-11-03)
 - The plan reminder repeats: with task tracking on and no flow open, the main session's 1st work call of a turn and then every 3rd (1, 4, 7, ...) gets the line (`PLAN_NUDGE_EVERY` in `hooks/nudge.ts`). The count starts over at a new turn, at any `progress` call and while a flow is open. The line no longer excuses multi-file edits, scripted rewrites, builds, renders, trials or bumps; only a pure question or a single edit to one file needs no flow.
 - Turn-end check: a main turn that made 2 or more work calls with tracking on and no flow open is sent back once (`PLAN_SEND_BACK`), telling Claude to open a flow with the tasks it carried out, mark them done and give a result note for each. Never for a worker, never with tracking off.

@@ -330,6 +330,59 @@ describe('the note button and panel', () => {
     expect(NOTE_ICON).toBe('ⓘ')
   })
 
+  test('the labels are in the accent on both surfaces; the text is not; the drawing has no dim label', () => {
+    const parts = noteParts({ goal: 'Find where uploads fail.', result: 'Fixed.' })
+    const { body } = noteSvgBody(400, parts)
+    const labels = [...body.matchAll(/<text ([^>]*)>(Goal|Result)<\/text>/g)]
+    expect(labels.map(m => m[2])).toEqual(['Goal', 'Result'])
+    for (const m of labels) {
+      expect(m[1]).toContain('fill="#8f8cf4"')
+      expect(m[1]).not.toContain('class=')
+    }
+    expect(body).toContain('<text class="t"')
+    expect(body).not.toContain('class="m"')
+  })
+
+  test('the icon is dim while its note is closed and in the accent, not dim, while it is open, on both surfaces', async ($, on) => {
+    engine(on)
+    await start($)
+    await progress($, { title: 'Ship', phase: 'delegate', tasks: PLAN })
+    await press($, 'active', 'note-task-1')
+    for (const surface of ['terminal', 'desktop'] as const) {
+      const a = await look($, 'active', surface)
+      const by = (k: string) => a.buttons.find((b: any) => String(b.props.key) === k)
+      const open = by('note-task-1')
+      expect(open.props.label).toBe(NOTE_ICON)
+      expect(open.props.plain).toBe(true)
+      expect(open.props.dimColor).not.toBe(true)
+      const glyph = (open.children ?? []).find((c: any) => c?.type === 'Text')
+      expect(glyph.props.color).toBe('#8f8cf4')
+      expect(JSON.stringify(glyph.children)).toBe(JSON.stringify([NOTE_ICON]))
+      const closed = by('note-task-2')
+      expect(closed.props.dimColor).toBe(true)
+      expect((closed.children ?? []).some((c: any) => c?.props?.color)).toBe(false)
+      if (surface === 'desktop') {
+        const note = a.svgs.find((s: any) => /^Goal: Find where uploads fail/.test(String(s.props.alt)))
+        expect(String(note.props.source)).toMatch(/<text fill="#8f8cf4"[^>]*>Goal<\/text>/)
+      }
+    }
+    // the terminal's label line in the accent, not dim; the note's text keeps the default colour
+    await showTab($, 'active')
+    const p = await mount($, 'terminal')
+    const texts = await p.findAll({ type: 'Text' })
+    await p.unmount()
+    const label = texts.find((x: any) => x.text === '   Goal')
+    expect(label.props.color).toBe('#8f8cf4')
+    expect(label.props.dimColor).not.toBe(true)
+    const text = texts.find((x: any) => x.text === '   Find where uploads fail.')
+    expect(text.props.color).toBeUndefined()
+    expect(text.props.dimColor).not.toBe(true)
+    // closed again, the icon is dim again
+    await press($, 'active', 'note-task-1')
+    const b = (await look($, 'active')).buttons.find((x: any) => String(x.props.key) === 'note-task-1')
+    expect(b.props.dimColor).toBe(true)
+  })
+
   test('an opened note sits under the title, before the worker line, the bar and the steps, on both surfaces', async ($, on) => {
     const { clock } = engine(on)
     await start($)

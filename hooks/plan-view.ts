@@ -3,8 +3,10 @@
 import { elapsed, isFinished, percent, where } from './plan'
 import type { PlanState, TaskPlan, Where } from './plan'
 
+/** The mod's accent (blue-violet): the band, the running state, the selected tab, the note labels and an open note's icon. */
+export const ACCENT = '#8f8cf4'
 // the state is drawn by name and colour; these are the only colours on the bar and the pill
-export const STATE_COLOR: Record<PlanState, string> = { running: '#8f8cf4', needs_input: '#e8b13c', error: '#e5534b', done: '#5fbf8f' }
+export const STATE_COLOR: Record<PlanState, string> = { running: ACCENT, needs_input: '#e8b13c', error: '#e5534b', done: '#5fbf8f' }
 const PILL_TEXT: Record<PlanState, string> = { running: '#ffffff', needs_input: '#1f1f1f', error: '#ffffff', done: '#1f1f1f' } // dark text on the light pills
 const STATE_NAME: Record<PlanState, string> = { running: 'Running', needs_input: 'Needs input', error: 'Error', done: 'Done' }
 const STATES = Object.keys(STATE_COLOR) as PlanState[]

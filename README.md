@@ -11,7 +11,7 @@
 </p>
 
 <p align="center">
-  <img alt="Version 1.0.0069" src="https://img.shields.io/badge/version-1.0.0069-8f8cf4">
+  <img alt="Version 1.0.0070" src="https://img.shields.io/badge/version-1.0.0070-8f8cf4">
   <img alt="MIT license" src="https://img.shields.io/badge/license-MIT-5fbf8f">
   <img alt="Claude Code 2.1.295 or later" src="https://img.shields.io/badge/Claude%20Code-%E2%89%A5%202.1.295-8f8cf4">
   <img alt="Terminal and desktop" src="https://img.shields.io/badge/surfaces-terminal%20%2B%20desktop-5fbf8f">

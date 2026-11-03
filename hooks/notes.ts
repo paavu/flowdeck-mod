@@ -2,7 +2,7 @@
 // list has each task's context. `goal` (the user's request, from the orchestrator when it creates the task), `brief` (taken
 // by the mod from the worker's delegation prompt when the worker starts), `result` and `feedback` (from the orchestrator
 // when it accepts the task). Every text is cleaned and capped here, whatever the caller sent.
-import { textWidth } from './plan-view'
+import { ACCENT, textWidth } from './plan-view'
 import { taskTag } from './tasks'
 
 export type NoteKey = 'goal' | 'brief' | 'result' | 'feedback'
@@ -177,7 +177,7 @@ const TEXT_SIZE = 11
 const LINE_H = 15
 const PART_GAP = 4
 
-/** The opened note on the desktop, W wide: each part's dim label on its own line, then its text wrapped to the width. */
+/** The opened note on the desktop, W wide: each part's accent label on its own line, then its text wrapped to the width. */
 export function noteSvgBody(W: number, parts: NotePart[]): { body: string; height: number; lines: string[] } {
   const maxW = Math.max(40, W - NOTE_RIGHT - NOTE_X)
   let y = 2
@@ -186,7 +186,7 @@ export function noteSvgBody(W: number, parts: NotePart[]): { body: string; heigh
   parts.forEach((p, i) => {
     if (i) y += PART_GAP
     y += LINE_H
-    out.push(`<text class="m" x="${NOTE_X}" y="${y - 4}" font-family="${FONT}" font-size="${LABEL_SIZE}" font-weight="600">${esc(p.label)}</text>`)
+    out.push(`<text fill="${ACCENT}" x="${NOTE_X}" y="${y - 4}" font-family="${FONT}" font-size="${LABEL_SIZE}" font-weight="600">${esc(p.label)}</text>`)
     for (const l of wrapNote(p.text, maxW, s => textWidth(s, TEXT_SIZE))) {
       y += LINE_H
       lines.push(l)
@@ -196,7 +196,7 @@ export function noteSvgBody(W: number, parts: NotePart[]): { body: string; heigh
   return { body: out.join('\n'), height: y + 6, lines }
 }
 
-/** The opened note in the terminal: a dim label line per part, then its text wrapped to `cols`, indented as step rows are. */
+/** The opened note in the terminal: an accent label line per part, then its text wrapped to `cols`, indented as step rows are. */
 export function noteRows(parts: NotePart[], cols: number): { text: string; isLabel: boolean }[] {
   const room = Math.max(8, cols - 4)
   return parts.flatMap(p => [{ text: `   ${p.label}`, isLabel: true }, ...wrapNote(p.text, room, cells).map(l => ({ text: `   ${l}`, isLabel: false }))])

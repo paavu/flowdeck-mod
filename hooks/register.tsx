@@ -20,7 +20,7 @@ import type { TaskNote } from './notes'
 import { sortNewest } from './order'
 import { dayKey, doneText, hhmm, isDayKey } from './time'
 import { percent, where } from './plan'
-import { planRows, planSvg, STATE_COLOR, stateLabel } from './plan-view'
+import { ACCENT, planRows, planSvg, STATE_COLOR, stateLabel } from './plan-view'
 import { acceptedOf, acceptedOnly, allTasksDone, cleanAfter, linkRuns, modelOf, norm, shortTitle, taskOf, taskTag, TASK_MODELS, unstarted, workerTier } from './tasks'
 import type { TaskLike } from './tasks'
 import { ARCHIVE_PAGE, asAgents, asCacheFacts, asCacheFold, asCacheTick, asDetails, asFlow, asKeepWarm, asLists, asLive, asMeta, asNow, asPanel, asReading, asUsage, LIVE_DEFAULT, PANEL_DEFAULT } from './shapes'
@@ -259,7 +259,6 @@ const RULE_WORDS = {
   timing: 'Turning it on applies from the next work call, and in the system prompt from a new session, /clear or a compaction; running and queued tasks are not affected.',
   on: 'Track all tasks',
 }
-const ACCENT = '#8f8cf4'
 const DONE = '#5fbf8f'
 
 type ProgressInput = {
@@ -2770,20 +2769,21 @@ export const register: Register = (on, options) => {
 
     // A row's handoff note opens under it by its note button; `k` is the row's key, prefixed as fold states are.
     const isNoteOpen = (k: string) => (p.openNotes ?? []).includes(k)
-    const noteButton = (k: string, key: string) => (
-      <Button
-        key={key}
-        label={NOTE_ICON}
-        plain
-        dimColor
-        onPress={() =>
-          updatePanel($, prev => {
-            const open = prev.openNotes ?? []
-            return { ...prev, openNotes: open.includes(k) ? open.filter(x => x !== k) : [...open, k] }
-          })
-        }
-      />
-    )
+    // Dim while its note is closed, in the accent while it is open.
+    const noteButton = (k: string, key: string) => {
+      const toggle = () =>
+        updatePanel($, prev => {
+          const open = prev.openNotes ?? []
+          return { ...prev, openNotes: open.includes(k) ? open.filter(x => x !== k) : [...open, k] }
+        })
+      return isNoteOpen(k) ? (
+        <Button key={key} label={NOTE_ICON} plain onPress={toggle}>
+          <Text color={ACCENT}>{NOTE_ICON}</Text>
+        </Button>
+      ) : (
+        <Button key={key} label={NOTE_ICON} plain dimColor onPress={toggle} />
+      )
+    }
 
     // Set to null when the drawings make the panel too large for the desktop (PANE_MAX_CHARS): the tab then draws its text rows.
     let Svg = e.surface === 'desktop' && 'Svg' in ui ? ui.Svg : null
@@ -2873,7 +2873,7 @@ export const register: Register = (on, options) => {
       }
       if (Svg) {
         const viewSummary = `≈${fmtCost(v.t.cost)}, ${fmtTokens(v.t.tokens)} ${s.tokensWord}, ${fmtTime(v.t.time)}`
-        // The opened note: its parts under their dim labels, wrapped to the panel's width.
+        // The opened note: its parts under their accent labels, wrapped to the panel's width.
         const notePanel = (key: string, n: TaskNote) => {
           const parts = noteParts(n)
           const d = noteSvgBody(W, parts)
@@ -3058,10 +3058,10 @@ export const register: Register = (on, options) => {
           </Box>
         )
       }
-      // The opened note: a dim label line per part, its text wrapped to the panel's columns.
+      // The opened note: an accent label line per part, its text wrapped to the panel's columns.
       const noteLines = (key: string, n: TaskNote) =>
         noteRows(noteParts(n), cols).map((r, i) => (
-          <Text key={`${key}-${i}`} dimColor={r.isLabel} wrap="truncate-end">
+          <Text key={`${key}-${i}`} color={r.isLabel ? ACCENT : undefined} wrap="truncate-end">
             {r.text}
           </Text>
         ))
