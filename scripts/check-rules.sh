@@ -16,7 +16,7 @@ check 'after chaining of same-file tasks' 'Tasks that edit the same files must b
 check 'the #n worker description' '`#3 History module`'
 check 'a goal on every task created' 'Send `goal` on every task you create or add'
 check 'result and feedback on accept' 'send `result` (what it delivered) and `feedback`'
-check 'no flow for trivial work' 'A question or a one-step edit needs no flow.'
+check 'even a one-step task gets a flow' 'Even a one-step task gets a flow (one task); only an answer with no work calls needs none.'
 check 'never leaving a task unreported' 'never leave a task unreported'
 check 'the per-task model sent in the plan' 'Send the same value as the task'"'"'s `model` in the plan'
 check 'the escalation order' 'Escalation order: a task that fails review on Sonnet goes to Opus careful'

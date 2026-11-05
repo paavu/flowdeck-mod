@@ -183,9 +183,9 @@ describe('the flow rule in the system prompt', () => {
       '`add` with its goal',
       '`done: [n]` with notes [{task, result, feedback}]', // result and feedback on accept
       '`#<n> <title>`',
-      'Plan with',
-      'No flow only for a pure question or a single edit to one file',
-      'never leave another task unreported',
+      'Any task doing work (edit, shell, worker) opens or joins a flow first, even a one-step one (one task)',
+      'only an answer with no work calls needs none',
+      'Close each task with `done` + notes before the turn ends',
       'Pick the Agent `model` per task and send it as the task\'s `model`', // model choice
       'Fable only after the user approves, once Opus heavy failed; state why atop its brief',
     ]) {

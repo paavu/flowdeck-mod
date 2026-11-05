@@ -156,7 +156,7 @@ describe('restart', () => {
     await plan($, 'Old work')
     clock.now = NOW + 60_000
     const r = await progress($, { restart: true, title: 'New work', total: 1, phase: 'delegate', tasks: [{ title: 'new task', tier: 'light' }] })
-    expect(String(r.result)).toBe('ok: Tasks 0/1')
+    expect(String(r.result)).toBe('ok: Tasks 0/1\nnew flow started: 1 new task')
     let list = entries(files)
     expect(list.length).toBe(1)
     expect(list[0].title).toBe('Old work')
@@ -238,7 +238,7 @@ describe('restart', () => {
     fail.store = true
     fail.clock = true
     const r = await progress($, { restart: true, title: 'Next', total: 1, phase: 'delegate', tasks: [{ title: 'z', tier: 'light' }] })
-    expect(String(r.result)).toBe('ok: Tasks 0/1')
+    expect(String(r.result)).toBe('ok: Tasks 0/1\nnew flow started: 1 z')
   })
 
   test('without restart a linked flow still takes a re-plan, add and a second finish as before', async ($, on) => {
@@ -320,7 +320,7 @@ describe('finish races', () => {
     const finishing = progress($, { finished: true })
     while (!h.isHeld) await settle()
     clock.now = NOW + 60_000
-    expect(String((await progress($, { restart: true, title: 'New work', total: 1, phase: 'delegate', tasks: [{ title: 'new task', tier: 'light' }] })).result)).toBe('ok: Tasks 0/1')
+    expect(String((await progress($, { restart: true, title: 'New work', total: 1, phase: 'delegate', tasks: [{ title: 'new task', tier: 'light' }] })).result)).toBe('ok: Tasks 0/1\nnew flow started: 1 new task')
     h.release()
     await finishing
     fs.delay = null

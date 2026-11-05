@@ -2,6 +2,17 @@
 
 Versions are `M.m.xxxx`; every build bumps the 4-digit build number. Details and rulings: `docs/ledger.md`, `docs/design.md`.
 
+## 1.0.0072 (2026-11-03)
+- The band counts what the panel lists: every Finished run of an accepted task counts as done, an Incomplete one too (return rounds of a task that was then accepted), on the current flow and on today's earlier flows. A panel with 7 Finished rows, 2 running and 5 queued, all finished ones accepted, now reads `Tasks 7/14` (it read 5/14).
+- The band's X is the done count while a task runs too; it no longer adds the running task (`done + 1`). The bar and percent are unchanged, and 100% means every row is done.
+- New work (`add`, a plan or `restart`) after a finished flow starts a new flow numbered from 1, and the `progress` reply now says so and lists its tasks: `new flow started: 1 title, 2 title`.
+- Linking a run to its task: when the description after a `#n` is exactly a task's title, that task wins over the number (an old flow's number no longer links the run, or a later `done`, to the wrong task).
+
+## 1.0.0071 (2026-11-03)
+- Every task that does work goes through a flow. The flow rule no longer exempts a single edit to one file: any task doing work (an edit, a shell command, a worker) opens or joins a flow first, even a one-step task (a flow of one task); only an answer with no work calls needs none, and each task is closed with `done` and its notes before the turn ends. The plan reminder (`PLAN_NUDGE`) and the turn-end message (`PLAN_SEND_BACK`) say the same.
+- The turn-end check sends back a main turn with 1 work call and no flow open (it needed 2 before).
+- New turn-end check for an open flow: a main turn that did work while a flow is open, ending with no worker running and tasks not reported done, is sent back once (`FLOW_SEND_BACK`) to report done with a result note for each finished task and to add or plan the rest. Once a turn, never for a worker, never with tracking off.
+
 ## 1.0.0070 (2026-11-03)
 - Handoff notes: the part labels (Goal, Brief, Result, Feedback) are drawn in the accent violet (`#8f8cf4`) instead of grey, on the desktop and in the terminal, as in the demo clip. The note's text is unchanged.
 - The `ⓘ` note icon stays dim while its note is closed and turns accent violet while it is open.

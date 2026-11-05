@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'claude-code/testing'
 
-import { countCall, isPlanNudgeCall, isWorkCall, PLAN_NUDGE, PLAN_NUDGE_EVERY, PLAN_SEND_BACK, STEP_NUDGE, STEP_NUDGE_AFTER, withNudgeLine } from '../hooks/nudge'
+import { countCall, FLOW_SEND_BACK, isPlanNudgeCall, isWorkCall, PLAN_NUDGE, PLAN_NUDGE_EVERY, PLAN_SEND_BACK, STEP_NUDGE, STEP_NUDGE_AFTER, withNudgeLine } from '../hooks/nudge'
 
 const NOW = Date.UTC(2026, 9, 31, 9, 0)
 
@@ -245,10 +245,11 @@ describe('the plan nudge: cadence', () => {
     expect(isPlanNudgeCall(0)).toBe(false)
   })
 
-  test('the line no longer offers the one-step-edit escape: only a pure question or a single-file single edit is exempt', () => {
-    expect(PLAN_NUDGE).not.toMatch(/one-step edit/)
-    for (const s of ['multi-file edits', 'scripted rewrites', 'renders', 'mcp__flowdeck__progress']) expect(PLAN_NUDGE).toContain(s)
-    expect(PLAN_NUDGE).toMatch(/Only a pure question or a single edit to a single file needs none\.$/)
+  test('the line exempts no task that does work, not even a single edit: only an answer with no work calls', () => {
+    expect(PLAN_NUDGE).not.toMatch(/one-step edit|pure question|single edit to a single file needs none/)
+    for (const s of ['multi-file edits', 'scripted rewrites', 'renders', 'mcp__flowdeck__progress', 'even a single edit']) expect(PLAN_NUDGE).toContain(s)
+    expect(PLAN_NUDGE).toMatch(/Only an answer with no work calls needs none\.$/)
+    expect(PLAN_SEND_BACK).toContain('even a single edit')
   })
 
   test('tracking on, no flow: the 1st, 4th, 7th and 10th work call of a turn get the line', async ($, on) => {
@@ -327,17 +328,14 @@ describe('the turn-end check', () => {
     expect(await sentBack($)).toBe(true)
   })
 
-  test('a single work call (a single edit to one file) is not sent back; two are', async ($, on) => {
+  test('a single work call (a single edit to one file) is sent back too', async ($, on) => {
     engine(on, { rule: 'on' })
     await start($)
     await turn($)
     await plans($, 1)
-    expect(await sentBack($)).toBe(false)
+    expect(await sentBack($)).toBe(true)
     await turn($)
     await plans($, 1, true)
-    expect(await sentBack($)).toBe(false)
-    await turn($)
-    await plans($, 2)
     expect(await sentBack($)).toBe(true)
   })
 
@@ -410,5 +408,83 @@ describe('the turn-end check', () => {
     await turn($)
     await plans($, 2)
     expect(await sentBack($)).toBe(true)
+  })
+})
+
+describe('the turn-end check for an open flow', () => {
+  const TWO = { title: 'Trial', tasks: [{ title: 'Build', tier: 'light' }, { title: 'Test', tier: 'light' }], phase: 'delegate' }
+  const flowBack = async ($: any, e: Record<string, unknown> = {}): Promise<boolean> => (await stop($, e)).block === FLOW_SEND_BACK
+
+  test('work with a flow open and tasks not reported done is sent back once', async ($, on) => {
+    engine(on, { rule: 'on' })
+    await start($)
+    await progress($, TWO)
+    await turn($)
+    await bare($, null, 'Edit')
+    const r = await stop($)
+    expect(r.block).toBe(FLOW_SEND_BACK)
+    expect(r.block).toContain('mcp__flowdeck__progress')
+    expect(await flowBack($, { stop_hook_active: true })).toBe(false)
+    await bare($, null, 'Edit')
+    expect(await flowBack($)).toBe(false)
+    await turn($)
+    await bare($, null, 'Bash')
+    expect(await flowBack($)).toBe(true)
+  })
+
+  test('not once every task is reported done, nor with only some done and none left after a report', async ($, on) => {
+    engine(on, { rule: 'on' })
+    await start($)
+    await progress($, TWO)
+    await turn($)
+    await bare($, null, 'Edit')
+    await progress($, { done: [1], notes: [{ task: 1, result: 'built' }] })
+    expect(await flowBack($)).toBe(true)
+    await turn($)
+    await bare($, null, 'Edit')
+    await progress($, { done: [2], notes: [{ task: 2, result: 'tested' }] })
+    expect(await flowBack($)).toBe(false)
+  })
+
+  test('not for a turn without work calls, nor while a worker runs', async ($, on) => {
+    engine(on, { rule: 'on' })
+    await start($)
+    await progress($, TWO)
+    await turn($)
+    for (const t of ['Read', 'mcp__lean-ctx__ctx_read', 'ToolSearch']) await bare($, null, t)
+    expect(await flowBack($)).toBe(false)
+    await turn($)
+    await bare($, null, 'Agent')
+    await spawn($, '#1 Build')
+    expect(await flowBack($)).toBe(false)
+  })
+
+  test("never a worker's stop; another hook's block is kept", async ($, on) => {
+    engine(on, { rule: 'on', stopBlock: 'other: still open' })
+    await start($)
+    await progress($, TWO)
+    await turn($)
+    await bare($, null, 'Edit')
+    expect((await stop($)).block).toBe('other: still open')
+    expect((await stop($, { agent_id: 'w1' })).block).toBe('other: still open')
+  })
+
+  test('a store that fails never throws the stop', async ($, on) => {
+    engine(on, { storeDown: true, rule: 'on' })
+    await start($)
+    await turn($)
+    await bare($, null, 'Edit')
+    await expect(stop($)).resolves.toBeDefined()
+  })
+})
+
+describe('the open-flow check follows the tracking choice', () => {
+  test('tracking off: work with an open flow and tasks not done is not sent back', async ($, on) => {
+    engine(on, { rule: 'off' })
+    await start($)
+    await progress($, OPEN)
+    await turn($)
+    await bare($, null, 'Edit')
+    expect((await stop($)).block).toBeUndefined()
   })
 })

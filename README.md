@@ -137,7 +137,7 @@ What you see:
 
 1. The dot and the title: the running task's title (the lowest-numbered one and ` +N` when several run), else the next ready task, else `FlowDeck` once every task is done. It is never the flow's own title. The dot is blue-violet while the flow runs and green when it is finished.
 2. The bar: the dense dots are the done share; the faint dots beyond them are tasks handed to workers and not yet accepted; the small ticks mark the task boundaries still ahead.
-3. The label on the bar: the phase word and a count, `Tasks X/Y`. Y counts every row the panel's tabs count (Active plus Finished, including the earlier flows of today); X is the running task's number in that list while one runs, else the done count. The phase word becomes `Plan`, `Design` or `Review` in those phases.
+3. The label on the bar: the phase word and a count, `Tasks X/Y`. Y counts every row the panel's tabs count (Active plus Finished, including the earlier flows of today); X is the done count, whether a task runs or not: the Finished rows that are done (a Done run, any run of an accepted task, an Accepted row), so the band reads 100% only when every row is. The phase word becomes `Plan`, `Design` or `Review` in those phases.
 4. The percent: the done fraction. The bar and the label turn green and read `Done` when the flow is finished.
 5. The cache chip: `WARM` (red) with the minutes left, or `COLD` (blue) with the idle time and the cost of the next message. See [the cache chip and card](#the-prompt-cache-chip-and-card).
 6. The chevron: opens and folds the cache card under the band.
@@ -332,7 +332,7 @@ How to use:
 | Incomplete (ended, steps left) | amber |
 | Error | red |
 
-A finished row shows when it finished (`14:07`, or `Oct 29 · 14:07` on an earlier day). The mod links each run to its planned task by itself: by the `#n` at the start of the Agent description, else the exact title, else the closest title, else the only open task of the worker's tier.
+A finished row shows when it finished (`14:07`, or `Oct 29 · 14:07` on an earlier day). The mod links each run to its planned task by itself: by the exact title (also after a `#n` at the start of the Agent description, which then wins over that number), else the `#n`, else the closest title, else the only open task of the worker's tier.
 
 Five worker agents ship with the mod; the orchestrator picks the cheapest one likely to get the task right:
 
@@ -350,7 +350,7 @@ Tasks that edit the same files are chained with `after` and never run in paralle
 
 | Tool | Called by | Purpose |
 |---|---|---|
-| `mcp__flowdeck__progress` | the main session | The flow's title and phase, its tasks (`title`, `tier`, `after`, `goal`), `add` for a new task, `done: [numbers]` for accepted tasks, `notes` for handoff notes, `finished` and `restart`. One call can carry `add`, `done` and `notes` together. |
+| `mcp__flowdeck__progress` | the main session | The flow's title and phase, its tasks (`title`, `tier`, `after`, `goal`), `add` for a new task, `done: [numbers]` for accepted tasks, `notes` for handoff notes, `finished` and `restart`. One call can carry `add`, `done` and `notes` together. New work after a finished flow starts a new one, numbered from 1, and the reply lists its tasks (`new flow started: 1 title, 2 title`). |
 | `mcp__flowdeck__step` | workers | A worker's own plan as a `steps` list, then `next`, `done`, `active`, `failed`. |
 
 The flow's task list is the only task list: there is no separate plan tool.
@@ -473,12 +473,12 @@ What you see:
 
 How to use: switch tracking from the strip, the switch beside the `FlowDeck` title or `/flowdeck-rule`; the choice is kept for every project. With tracking on there is no strip.
 
-Task tracking decides whether the mod puts its flow rule (`flowdeck:flow-rule`) into the system prompt of every session. It is on unless switched off. The rule tells Claude to report every task through `progress`: the plan once with `title` and `tasks` (`title`, `tier`, `after` for tasks that edit the same files, `goal`), `add` for a new task, `done` with `result` and `feedback` notes when a task is accepted, and `#<n> <title>` at the start of each worker's Agent description; only a pure question or a single edit to one file gets no flow. It blocks no edit or tool call.
+Task tracking decides whether the mod puts its flow rule (`flowdeck:flow-rule`) into the system prompt of every session. It is on unless switched off. The rule tells Claude to report every task through `progress`: the plan once with `title` and `tasks` (`title`, `tier`, `after` for tasks that edit the same files, `goal`), `add` for a new task, `done` with `result` and `feedback` notes when a task is accepted, and `#<n> <title>` at the start of each worker's Agent description. Every task that does work (an edit, a shell command, a worker) opens or joins a flow first, even a one-step task (a flow of one task), and each task is closed with `done` and its notes before the turn ends; only an answer given with no work calls gets no flow. It blocks no edit or tool call.
 
 The rule is a request, so the mod also checks it, in three ways. All three follow the stored choice (`/flowdeck-rule` and the `Track tasks` switch), not a session that ran `/flowdeck:flowdeck`, so they stop at once when tracking is off, and none reaches a worker.
 
-- **The plan reminder.** With tracking on and no flow open, the main session's 1st work call of a turn (an edit, a write, a shell command, a worker launch; reads, searches and flowdeck's own tools do not count) gets one extra line in its result, and so does every 3rd work call after it (the 4th, the 7th, ...): plan the task with `progress` before going on. Multi-file edits, scripted rewrites, builds, renders, trials and bumps need a flow; only a pure question or a single edit to one file needs none. The count starts over at a new turn, at any `progress` call and while a flow is open. The line never changes or blocks the call.
-- **The turn-end check.** A main turn that made 2 or more work calls with tracking on and no flow open is sent back once when it ends, with a message telling Claude to open a flow now with the tasks it carried out, mark them done and give a result note for each. A turn with a single work call is not sent back.
+- **The plan reminder.** With tracking on and no flow open, the main session's 1st work call of a turn (an edit, a write, a shell command, a worker launch; reads, searches and flowdeck's own tools do not count) gets one extra line in its result, and so does every 3rd work call after it (the 4th, the 7th, ...): plan the task with `progress` before going on. Every task that does work needs a flow, even a single edit; only an answer with no work calls needs none. The count starts over at a new turn, at any `progress` call and while a flow is open. The line never changes or blocks the call.
+- **The turn-end check.** A main turn that made 1 or more work calls with tracking on and no flow open is sent back once when it ends, with a message telling Claude to open a flow now with the tasks it carried out, mark them done and give a result note for each. A main turn that did work while a flow is open, and ends with no worker running and tasks of the flow not reported done, is sent back once too, telling Claude to report done with a result note for each task it finished and to add or plan the rest.
 - **The untracked-work log.** Each main turn that made 1 or more such work calls adds one record to `.claude/flowdeck/untracked-work.json`: the day, the time (24-hour `HH:MM`), the number of work calls, the tools used most and whether the turn was sent back. Under the tab row the panel shows a muted line with today's count, `3 turns without a flow today`; at zero it shows nothing.
 
 | Choice | The system prompt | Set by |

@@ -162,7 +162,7 @@ describe('the Finished tab keeps the day', () => {
     expect(env.files[INDEX]).toBe(before)
   })
 
-  test("the band counts the day's rows: 2 finished earlier and the 3rd of 6 running reads 3/8; two more tasks read 3/10", async ($, on) => {
+  test("the band counts the day's rows: 2 finished earlier and the 3rd of 6 running reads 2/8; two more tasks read 2/10", async ($, on) => {
     const env = engine(on)
     await start($)
     await flowDone($, env, 'Alpha', ['Alpha one', 'Alpha two'], ['a1', 'a2'])
@@ -170,13 +170,13 @@ describe('the Finished tab keeps the day', () => {
     await progress($, { title: 'Beta', phase: 'delegate', tasks: tasks('B1', 'B2', 'B3', 'B4', 'B5', 'B6') })
     await spawn($, 'b1', '#1 B1')
     let band = await bandSays($)
-    expect(band).toContain('Tasks 3/8')
+    expect(band).toContain('Tasks 2/8')
     expect(band).toContain('25%')
     let f = await look($, 'finished')
     expect([f.label('tab-active'), f.label('tab-finished')]).toEqual(['Active (6)', 'Finished (2)'])
     await progress($, { add: tasks('B7', 'B8') })
     band = await bandSays($)
-    expect(band).toContain('Tasks 3/10')
+    expect(band).toContain('Tasks 2/10')
     expect(band).toContain('20%')
     // the running task done: 3 of 10 done, nothing running
     await env.step()
@@ -186,6 +186,23 @@ describe('the Finished tab keeps the day', () => {
     expect(band).toContain('30%')
     f = await look($, 'finished')
     expect([f.label('tab-active'), f.label('tab-finished')]).toEqual(['Active (7)', 'Finished (3)'])
+  })
+
+  test('an earlier flow’s Incomplete run of an accepted task counts as done in the band', async ($, on) => {
+    const env = engine(on)
+    await start($)
+    await env.step()
+    await progress($, { title: 'Alpha', phase: 'delegate', tasks: tasks('Alpha one') })
+    await spawn($, 'a1', '#1 Alpha one')
+    await $.tool.call({ tool: 'mcp__flowdeck__step', agentId: 'a1', steps: [{ title: 'one' }, { title: 'two' }] } as any)
+    await env.step()
+    await complete($, 'a1') // `two` stays open: Incomplete
+    await progress($, { done: [1], finished: true })
+    await env.step()
+    await progress($, { title: 'Beta', phase: 'delegate', tasks: tasks('B1', 'B2') })
+    const band = await bandSays($)
+    expect(band).toContain('Tasks 1/3')
+    expect(band).toContain('33%')
   })
 
   test("the shown flow's own saved entry is not listed twice", async ($, on) => {
@@ -234,7 +251,7 @@ describe('the date change', () => {
     let f = await look($, 'finished')
     expect(f.label('tab-finished')).toBe('Finished (4)')
     let band = await bandSays($)
-    expect(band).toContain('Tasks 5/6')
+    expect(band).toContain('Tasks 4/6')
     const before = Object.fromEntries(sessionPaths(env.files, DIR).map(p => [p, env.files[p]]))
     const alpha = (records(env.files, INDEX) ?? []).find((r: any) => r.title === 'Alpha')
     const beta = (records(env.files, INDEX) ?? []).find((r: any) => r.title === 'Beta')
@@ -245,7 +262,7 @@ describe('the date change', () => {
     expect(f.text).toContain('G1')
     expect(f.text).not.toMatch(/Alpha|Beta/)
     band = await bandSays($)
-    expect(band).toContain('Tasks 2/3')
+    expect(band).toContain('Tasks 1/3')
     expect(band).toContain('33%')
     // one session for the day: titled with its date, from the first start to the last end, every row
     const a = await look($, 'archive')

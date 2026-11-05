@@ -78,7 +78,7 @@ const expectBand = async ($: any, count: string, percent: string) => {
 const SIX = ['Read code', 'Wire it', 'Polish', 'Docs', 'Tests', 'Release'].map(title => ({ title, tier: 'medium' }))
 
 describe('the band counts the rows the tabs count', () => {
-  test("the owner's flow: 2 finished, 3 running, 1 ready reads 3/6 (where it is; not the orchestrator's 1/3)", async ($, on) => {
+  test("the owner's flow: 2 finished, 3 running, 1 ready reads 2/6 (the done rows; not the orchestrator's 1/3)", async ($, on) => {
     engine(on)
     await start($)
     await progress($, { title: 'Ship', phase: 'delegate', tasks: SIX.map((t, i) => (i === 5 ? { ...t, after: [1] } : t)) })
@@ -87,21 +87,21 @@ describe('the band counts the rows the tabs count', () => {
     await complete($, 'w2')
     // The orchestrator's own count lags behind: one accepted, as the live panel showed `1/3`.
     await progress($, { done: 1 })
-    await expectBand($, '3/6', '33%')
+    await expectBand($, '2/6', '33%')
     expect(await tabCounts($)).toEqual({ active: 'Active (4)', finished: 'Finished (2)' })
   })
 
-  test('while a task runs X is the running task: 0 done + 1 running of 2 reads 1/2, the bar still empty', async ($, on) => {
+  test('while a task runs X stays the done count: 0 done + 1 running of 2 reads 0/2, the bar still empty', async ($, on) => {
     engine(on)
     await start($)
     await progress($, { title: 'Ship', phase: 'delegate', tasks: SIX.slice(0, 2) })
-    await expectBand($, '0/2', '0%') // nothing runs: the done count
+    await expectBand($, '0/2', '0%')
     await spawn($, 'w1', 'Read code')
-    await expectBand($, '1/2', '0%')
+    await expectBand($, '0/2', '0%')
     expect((await bandSays($)).source).toContain('#8f8cf4') // not green: nothing is done
   })
 
-  test('3 done and the 4th running of 7 reads 4/7; idle with 3 done reads 3/7; all done reads 7/7, then Done in green', async ($, on) => {
+  test('3 done reads 3/7, idle or with the 4th running; all done reads 7/7, then Done in green', async ($, on) => {
     engine(on)
     await start($)
     const SEVEN = [...SIX, { title: 'Announce', tier: 'medium' }]
@@ -112,7 +112,7 @@ describe('the band counts the rows the tabs count', () => {
     }
     await expectBand($, '3/7', '43%')
     await spawn($, 'w4', 'Docs')
-    await expectBand($, '4/7', '43%')
+    await expectBand($, '3/7', '43%')
     await complete($, 'w4')
     for (const [i, t] of SEVEN.slice(4).entries()) {
       await spawn($, `w${i + 5}`, t.title)
@@ -215,9 +215,65 @@ describe('the band counts the rows the tabs count', () => {
     await complete($, 'w2', 'error')
     await expectBand($, '0/3', '0%')
     expect(await tabCounts($)).toEqual({ active: 'Active (1)', finished: 'Finished (2)' })
-    // Accepting the Incomplete task does not make its run done; an accepted task with no run is.
+    // Accepting the Incomplete task makes its run done, and an accepted task with no run is an Accepted row that is done.
     await progress($, { done: [1, 3] })
-    await expectBand($, '1/3', '33%')
+    await expectBand($, '2/3', '67%')
+  })
+
+  test("every run of an accepted task counts as done: the user's 7 Finished with 2 running and 5 queued read 7/14", async ($, on) => {
+    engine(on)
+    await start($)
+    const TASKS = Array.from({ length: 12 }, (_, i) => ({ title: `Task ${String.fromCharCode(65 + i)}`, tier: 'medium' }))
+    await progress($, { title: 'Ship', phase: 'delegate', tasks: TASKS })
+    for (const [i, t] of TASKS.slice(0, 4).entries()) {
+      await spawn($, `w${i + 1}`, t.title)
+      await complete($, `w${i + 1}`)
+    }
+    // Three return rounds of task 5, each ended with a step left: Incomplete.
+    for (const id of ['r1', 'r2', 'r3']) {
+      await spawn($, id, 'Task E')
+      await step($, id, { steps: [{ title: 'one' }, { title: 'two' }] })
+      await complete($, id)
+    }
+    await spawn($, 'w6', 'Task F')
+    await spawn($, 'w7', 'Task G')
+    expect(await tabCounts($)).toEqual({ active: 'Active (7)', finished: 'Finished (7)' })
+    await expectBand($, '4/14', '29%')
+    await progress($, { done: [1, 2, 3, 4, 5] })
+    await expectBand($, '7/14', '50%')
+  })
+
+  test('100% only once every row is done: an accepted task makes its Incomplete run done', async ($, on) => {
+    engine(on)
+    await start($)
+    await progress($, { title: 'Ship', phase: 'delegate', tasks: SIX.slice(0, 2) })
+    await spawn($, 'w1', 'Read code')
+    await complete($, 'w1')
+    await spawn($, 'w2', 'Wire it')
+    await step($, 'w2', { steps: [{ title: 'one' }, { title: 'two' }] })
+    await complete($, 'w2')
+    await expectBand($, '1/2', '50%')
+    await progress($, { done: [2] })
+    await expectBand($, '2/2', '100%')
+  })
+})
+
+describe('a new flow after a finished one is numbered from 1', () => {
+  test('an add after the flow finished says a new flow started and lists its tasks from 1', async ($, on) => {
+    engine(on)
+    await start($)
+    await progress($, { title: 'Ship', phase: 'delegate', tasks: SIX.slice(0, 3) })
+    await progress($, { finished: true })
+    const reply = await progress($, { add: [{ title: 'Cinematic intro', tier: 'medium' }, { title: 'Credits', tier: 'light' }] })
+    expect(reply).toContain('\nnew flow started: 1 Cinematic intro, 2 Credits')
+    // within the open flow an add says nothing of the kind
+    expect(await progress($, { add: [{ title: 'Trailer', tier: 'light' }] })).not.toContain('new flow started')
+  })
+
+  test('a plan on an open flow does not say a new flow started', async ($, on) => {
+    engine(on)
+    await start($)
+    expect(await progress($, { title: 'Ship', phase: 'delegate', tasks: SIX.slice(0, 2) })).not.toContain('new flow started')
   })
 
   test('with no row at all the orchestrator total and count stay; a fresh plan reads 0/N', async ($, on) => {

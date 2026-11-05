@@ -40,6 +40,13 @@ describe('linking workers to planned tasks', () => {
     expect(links(tasks, [run('w1', '#9 Wire it')])).toEqual({ w1: 2 })
   })
 
+  test('rule 2: the exact title after the number wins over a number that names another task (an old flow’s number)', () => {
+    const tasks = [task('Read code'), task('Cinematic intro'), task('Credits')]
+    expect(links(tasks, [run('w1', '#3 Cinematic intro'), run('w2', '#1 Credits')])).toEqual({ w1: 2, w2: 3 })
+    // a title that is not a task's leaves the number in charge
+    expect(links(tasks, [run('w1', '#3 the credits roll')])).toEqual({ w1: 3 })
+  })
+
   test('rules 1 and 2 give a return round the same task', () => {
     expect(links([task('Wire it')], [run('w1', 'Wire it'), run('w2', 'Wire it', 'flowdeck-medium', NOW + 1), run('w3', '#1 again', 'flowdeck-medium', NOW + 2)])).toEqual({ w1: 1, w2: 1, w3: 1 })
   })

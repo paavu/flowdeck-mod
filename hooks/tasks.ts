@@ -80,8 +80,9 @@ export function cleanAfter<T extends TaskLike>(tasks: T[]): T[] {
 
 // Which task each run works on, by run id (the task's index). The rules, in order; a run gets at most one task:
 // 1. The description is the task's title, letter case and punctuation aside (the rule before all others).
-// 2. A task number at the start of the description (`#3 …`, `[3] …`, `task 3 …`) names the task, if it exists; else
-//    the description without it is tried as a title.
+// 2. With a task number at the start of the description (`#3 …`, `[3] …`, `task 3 …`), the description without it is
+//    tried as a title first (a number left over from an earlier flow must not win over the task's own title); else the
+//    number names the task, if it exists.
 //    Rules 1 and 2 may give one task several runs: a return round reuses the task's description.
 // 3. Otherwise the task whose title best matches the description (titleScore, at least MATCH_SCORE), among the tasks no
 //    run has yet; on a tie the one of the worker's own tier wins, and a tie that stays links nothing.
@@ -101,7 +102,7 @@ export function linkRuns(tasks: TaskLike[], runs: RunLike[]): Map<string, number
     const tag = taskTag(a.description)
     rest.set(a.id, tag.rest)
     const exact = byTitle.get(norm(a.description))
-    const i = exact ?? (tag.n !== null && tag.n >= 1 && tag.n <= tasks.length ? tag.n - 1 : byTitle.get(norm(tag.rest)))
+    const i = exact ?? byTitle.get(norm(tag.rest)) ?? (tag.n !== null && tag.n >= 1 && tag.n <= tasks.length ? tag.n - 1 : undefined)
     if (i !== undefined) links.set(a.id, i)
   }
   const claimed = (): Set<number> => new Set(links.values())

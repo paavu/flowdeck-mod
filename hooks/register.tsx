@@ -4,7 +4,7 @@ import type { Elements, EngineInterface, Register, RenderChildren } from 'claude
 import type { AgentRun, ArchiveDetail, ArchiveEntry, ArchiveLists, ArchiveRecord, Flow, Panel, PanelTab, Phase, PlannedTask, Reading, Rule, Samples, TaskPlan, UsageWindow } from '../types'
 import { derive, finishItems, hasItemOps, ITEM_H, itemAlt, itemLine, itemsOf, itemSvg, noteSvg, stepItems, timedItems } from './agent-items'
 import type { StepInput } from './agent-items'
-import { countCall, isPlanNudgeCall, isWorkCall, PLAN_NUDGE, PLAN_SEND_BACK, withNudgeLine } from './nudge'
+import { countCall, FLOW_SEND_BACK, isPlanNudgeCall, isWorkCall, PLAN_NUDGE, PLAN_SEND_BACK, withNudgeLine } from './nudge'
 import { agentState, HOUSEKEEPING, isComplete, isIncomplete, isLive, markOf, progressOf, splitHead, stateText, stepCount } from './agent-state'
 import { contextRows, contextSvg, toReading } from './context'
 import { combineParts, dayPartOf, isWorthKeeping, keyOf, snapshot } from './archive'
@@ -138,7 +138,7 @@ const TICK_MS = 5000
 const PHASES: readonly Phase[] = ['plan', 'design', 'delegate', 'review', 'close']
 // The flow rule, in the system prompt only while task tracking is on (rule.ts) or in a session that ran /flowdeck:flowdeck.
 const FLOW_RULE = `# flowdeck
-Track each task with ${TOOL} (ToolSearch \`select:${TOOL}\` if deferred; workers use only ${STEP_TOOL}). Plan once: title, tasks [{title, tier, after, goal}] from 1; chain tasks editing the same files with \`after\`. New task: \`add\` with its goal. Accepted: \`done: [n]\` with notes [{task, result, feedback}]. Worker Agent description: \`#<n> <title>\`. Pick the Agent \`model\` per task and send it as the task's \`model\`. Fable only after the user approves, once Opus heavy failed; state why atop its brief. Plan with ${TOOL} before a multi-step task's first edit, build or Agent call. No flow only for a pure question or a single edit to one file; never leave another task unreported.`
+Track each task with ${TOOL} (ToolSearch \`select:${TOOL}\` if deferred; workers use only ${STEP_TOOL}). Plan once: title, tasks [{title, tier, after, goal}] from 1; chain tasks editing the same files with \`after\`. New task: \`add\` with its goal. Accepted: \`done: [n]\` with notes [{task, result, feedback}]. Worker Agent description: \`#<n> <title>\`. Pick the Agent \`model\` per task and send it as the task's \`model\`. Fable only after the user approves, once Opus heavy failed; state why atop its brief. Any task doing work (edit, shell, worker) opens or joins a flow first, even a one-step one (one task); only an answer with no work calls needs none. Close each task with \`done\` + notes before the turn ends.`
 const GOAL_TEXT = "The user's request for this task in a sentence; plain text, at most 300 characters."
 // The pane keeps its id from before the command's rename, so a pane the desktop app placed still opens.
 const PANE = 'flowdeck-agents'
@@ -638,15 +638,13 @@ const merge = (prev: Flow | null, input: ProgressInput, at: number | null = null
   }
 }
 
-// `isAt` (the band): while a task runs, X is where the flow is, the running task's number (done + 1, at most the total);
-// idle, the done count. The bar, percent and colour still say what is done.
-const label = (f: Flow, isAt = false): string => {
+// X is the done count, running or not, so the band says what the panel's Finished list counts as done.
+const label = (f: Flow): string => {
   const s = tr()
   if (f.isFinished) return s.done
   if (f.phase === 'plan') return s.plan
   if (f.phase === 'design') return s.design
-  const x = isAt && f.running > 0 ? Math.min(f.total, f.done + 1) : f.done
-  const count = f.total ? `${x}/${f.total}` : `${f.running} ${s.busy}`
+  const count = f.total ? `${f.done}/${f.total}` : `${f.running} ${s.busy}`
   return `${f.phase === 'review' ? s.review : s.tasks} ${count}`
 }
 
@@ -747,7 +745,7 @@ const rowSvg = (f: Flow, W: number, name: string): string => {
     if (x > fillW + 4) ticks.push(`<rect x="${x}" y="${BAR_H / 2 - 4}" width="1.5" height="8" rx="0.75"/>`)
   }
 
-  const text = label(f, true)
+  const text = label(f)
   const pillW = Math.round(18 + text.length * 6.6)
   const pillX = Math.max(0, Math.min(BAR_W - pillW, fillW - pillW))
   const percent = `${Math.round(ratio(f) * 100)}%`
@@ -895,6 +893,8 @@ const rowsOf = (tasks: TaskLike[], list: AgentRun[], accepted: number[], accepte
   const links = linkRuns(tasks, list)
   return {
     links,
+    // A row that counts as done: a complete run, or any run of an accepted task (an Incomplete run of it too).
+    isDone: (a: AgentRun) => isComplete(a) || accepted.includes((links.get(a.id) ?? -2) + 1),
     // An accepted task no run belongs to is an Accepted row of its own, placed by when it was accepted.
     acceptedRows: acceptedOnly(tasks, links, accepted).map((t): Planned => {
       const doneAt = acceptedAt?.[String(t.n)] ?? fallback
@@ -910,8 +910,8 @@ const rowsOf = (tasks: TaskLike[], list: AgentRun[], accepted: number[], accepte
 
 // The live flow's numbers from the rows its lists draw, the one source of the tab counts and the band's X/Y and bar:
 // Active = running runs + queued tasks; Finished = finished runs not archived + Accepted rows; done = the finished rows
-// that are complete (a Done run or an Accepted row; Incomplete and failed ones are not); total = every row (archived
-// runs stay counted, as finished, so archiving never moves the band back). The rows of the flows finished earlier today
+// that are done (a Done run, any run of an accepted task, or an Accepted row; other Incomplete and failed ones are not);
+// total = every row (archived runs stay counted, as finished, so archiving never moves the band back). The rows of the flows finished earlier today
 // (`earlier`, earlierToday) are in the Finished list too, so they count as finished and their complete rows as done,
 // before the flow's own. `hasRows` is false with no row at all, which keeps the orchestrator's own total and accepted
 // count (a fresh plan without tasks).
@@ -921,18 +921,18 @@ const flowProgress = (f: Flow | null, list: AgentRun[], earlier: ArchiveEntry[] 
   const archived = list.filter(a => !isLive(a) && a.archived)
   const active = r.running.length + plannedOf(f, list).length
   const finished = e.rows + r.finished.length + r.acceptedRows.length
-  const done = e.done + [...r.finished, ...archived].filter(isComplete).length + r.acceptedRows.length
+  const done = e.done + [...r.finished, ...archived].filter(r.isDone).length + r.acceptedRows.length
   const total = active + finished + archived.length
   return { active, finished, done, total, running: r.running.length, hasRows: total > 0 }
 }
 
-// The Finished rows of earlier flows and how many of them are complete, each flow's rows as its own list draws them.
+// The Finished rows of earlier flows and how many of them are done, each flow's rows as its own list draws them.
 const earlierRows = (earlier: ArchiveEntry[]): { rows: number; done: number } =>
   earlier.reduce(
     (sum, e) => {
       const p = dayPartOf(e)
       const r = rowsOf(p.tasks, p.runs, p.accepted, p.acceptedAt, p.fallback)
-      return { rows: sum.rows + r.finished.length + r.acceptedRows.length, done: sum.done + r.finished.filter(isComplete).length + r.acceptedRows.length }
+      return { rows: sum.rows + r.finished.length + r.acceptedRows.length, done: sum.done + r.finished.filter(r.isDone).length + r.acceptedRows.length }
     },
     { rows: 0, done: 0 },
   )
@@ -1807,6 +1807,21 @@ async function isPlanDue($: EngineInterface): Promise<boolean> {
   }
 }
 
+// Task tracking is on, a linked flow is open, no run goes, and some of its tasks were not reported done (`done` or the
+// session task list); false when a read fails.
+async function isFlowUnreported($: EngineInterface): Promise<boolean> {
+  try {
+    if (!(await isTrackingChosen($))) return false
+    const f = await readFlow($)
+    if (!f || !f.isLinked || f.isFinished || !f.tasks.length) return false
+    if ((await readAgents($)).some(isLive)) return false
+    const accepted = acceptedOf(f)
+    return f.tasks.some((t, i) => !t.counted && !accepted.includes(i + 1))
+  } catch {
+    return false
+  }
+}
+
 // The turn's untracked work appended to the project's log (untracked.ts), and the panel's days from what was written.
 // Without a project folder, or a clock, nothing is written.
 async function logUntracked($: EngineInterface, sentBack: boolean): Promise<void> {
@@ -1830,6 +1845,7 @@ async function planNudge($: EngineInterface, e: { tool: string; agentId?: string
   if (!isWorkCall(e.tool)) return next(e)
   if (!(await isPlanDue($))) {
     resetPlanCalls()
+    flowWork++
     return next(e)
   }
   planTools.set(e.tool, (planTools.get(e.tool) ?? 0) + 1)
@@ -1935,6 +1951,8 @@ let prompted = false
 let planCalls = 0
 const planTools = new Map<string, number>()
 let planEnded = false
+// The main turn's work calls while no plan is due (a flow open, or tracking off): the open-flow check (FLOW_SEND_BACK).
+let flowWork = 0
 const resetPlanCalls = (): void => {
   planCalls = 0
   planTools.clear()
@@ -2339,6 +2357,8 @@ export const register: Register = (on, options) => {
     }
     // A restart ends the open flow as finished: true does; the rest of the input then starts the new one.
     if (input.restart === true && prev && !prev.isFinished) prev = await finishFlow($)
+    // New work after a finished flow starts a new one, numbered from 1: the reply lists its tasks so old numbers are not reused.
+    const isAfterFinished = prev?.isFinished === true
     // The flow being replaced goes to the archive first, with its own agents; a finished one is there already.
     if (isNewFlow(prev, input)) await beginFlow($, prev)
     const at = await clockAt($)
@@ -2346,7 +2366,8 @@ export const register: Register = (on, options) => {
     if (next && (input.tasks?.length || input.add?.length)) await autoOpen($, next.title)
     await persistLive($)
     const unknown = applyNotes(next?.tasks ?? [], input.notes).unknown
-    return { result: `ok: ${label(next ?? blank())}${unknown.length ? `\nnotes ignored for unknown tasks: ${unknown.join(', ')}` : ''}` }
+    const started = isAfterFinished && next?.tasks.length ? `\nnew flow started: ${next.tasks.map((t, i) => `${i + 1} ${t.title}`).join(', ')}` : ''
+    return { result: `ok: ${label(next ?? blank())}${started}${unknown.length ? `\nnotes ignored for unknown tasks: ${unknown.join(', ')}` : ''}` }
   })
 
   // Every task the session adds goes into the flow: the model's task list items are mirrored as planned tasks, and a list
@@ -2547,6 +2568,7 @@ export const register: Register = (on, options) => {
       prompted = false
       resetPlanCalls()
       planEnded = false
+      flowWork = 0
       const at = await $.clock.now().catch(() => 0)
       if (at) await updateKeepWarm($, k => ({ ...k, turnAt: at })).catch(() => {})
     }
@@ -2642,19 +2664,25 @@ export const register: Register = (on, options) => {
     return result
   })
 
-  // A main turn that made work calls with tracking on and no flow open (planCalls) is logged once (untracked.ts), and with
-  // two or more (more than a single edit) sent back once to record them in a flow (nudge.ts PLAN_SEND_BACK). Never a
+  // A main turn that made work calls with tracking on and no flow open (planCalls) is logged once (untracked.ts) and sent
+  // back once to record them in a flow (nudge.ts PLAN_SEND_BACK). A main turn that did work while a flow is open (flowWork)
+  // and ends with no run going and tasks not reported done is sent back once to report them (FLOW_SEND_BACK). Never a
   // worker's or keep warm's renewal; a turn a Stop hook sent back already (stop_hook_active) is logged, not sent back; one
   // another hook blocks goes on as it would and is logged when it ends. A failing read logs and sends nothing back.
   on('classic.Stop', async ($, e, next) => {
     const result = await next(e)
-    if (e.agent_id || planEnded || planCalls === 0) return result
-    if ((await isRenewalEcho($).catch(() => true)) || !(await isPlanDue($))) return result
-    const isSentBack = !e.stop_hook_active && result.block === undefined && planCalls >= 2
-    if (!isSentBack && result.block !== undefined) return result
+    if (e.agent_id || planEnded || (planCalls === 0 && flowWork === 0)) return result
+    if (await isRenewalEcho($).catch(() => true)) return result
+    if (planCalls > 0 && (await isPlanDue($))) {
+      const isSentBack = !e.stop_hook_active && result.block === undefined
+      if (!isSentBack && result.block !== undefined) return result
+      planEnded = true
+      await logUntracked($, isSentBack).catch(() => {})
+      return isSentBack ? { ...result, block: PLAN_SEND_BACK } : result
+    }
+    if (flowWork === 0 || e.stop_hook_active || result.block !== undefined || !(await isFlowUnreported($))) return result
     planEnded = true
-    await logUntracked($, isSentBack).catch(() => {})
-    return isSentBack ? { ...result, block: PLAN_SEND_BACK } : result
+    return { ...result, block: FLOW_SEND_BACK }
   })
 
   // The engine measured the main window again: the cache's size follows, once a request is known.
@@ -3525,7 +3553,7 @@ export const register: Register = (on, options) => {
       return (
         <Box flexDirection="column">
           <Box flexDirection="row" alignItems="center" gap={0} flexShrink={1} minWidth={0} overflow="hidden">
-            <Svg source={rowSvg(g, width, title)} alt={`${title}: ${label(g, true)}, ${percent}`} width={width} height={H} />
+            <Svg source={rowSvg(g, width, title)} alt={`${title}: ${label(g)}, ${percent}`} width={width} height={H} />
             <Box key="flowdeck-band-spacer" flexGrow={1} flexShrink={1} minWidth={0} />
             {cache ? card('flowdeck-cache-card', cache.row) : null}
             {card('flowdeck-agents-card', [
@@ -3553,7 +3581,7 @@ export const register: Register = (on, options) => {
           <Text wrap="truncate-end">{title}</Text>
         </Box>
         <Text color={f.isFinished ? DONE : ACCENT}>{barText(g, width)}</Text>
-        <Text bold>{label(g, true)}</Text>
+        <Text bold>{label(g)}</Text>
         <Text dimColor>{percent}</Text>
         {cache ? (
           <Box key="flowdeck-cache" flexDirection="row" gap={1} flexShrink={0}>

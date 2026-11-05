@@ -87,7 +87,7 @@ describe('the untracked-work log', () => {
     expect(files[`${DIR}/.gitignore`]).toBe('*\n')
   })
 
-  test('one record a turn: the stop after the send-back adds none; a single call is logged, not sent back', async ($, on) => {
+  test('one record a turn: the stop after the send-back adds none; a single call is logged and sent back', async ($, on) => {
     const { files } = engine(on, { rule: 'on' })
     await start($)
     await turn($)
@@ -98,8 +98,8 @@ describe('the untracked-work log', () => {
     expect(logOf(files)).toHaveLength(1)
     await turn($)
     await call($, 'Edit')
-    expect((await stop($)).block).toBeUndefined()
-    expect(logOf(files).map(r => [r.calls, r.sentBack])).toEqual([[2, true], [1, false]])
+    expect((await stop($)).block).toBe(PLAN_SEND_BACK)
+    expect(logOf(files).map(r => [r.calls, r.sentBack])).toEqual([[2, true], [1, true]])
   })
 
   test('nothing for a question, a turn with a flow open, or work done before a flow was opened', async ($, on) => {
