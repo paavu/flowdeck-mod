@@ -603,7 +603,7 @@ describe('archive groups in the panel', () => {
     expect(String(kids[1].props.alt)).toMatch(/^patch it: Error/)
   })
 
-  test('an entry saved without agents shows its task list when open', async ($, on) => {
+  test('an entry saved without agents shows its tasks when open: Accepted · Orchestrator rows and queued rows', async ($, on) => {
     const old = { id: 'old', project: '/work/app', title: 'Old flow', startedAt: NOW - 2 * HOUR, endedAt: NOW - HOUR, status: 'open', done: 1, total: 2, tasks: [{ title: 'write tests', tier: 'careful' }, { title: 'wire it', tier: 'medium' }], cost: 1.5, tokens: 12_000, time: 30 * MIN }
     engine(on, { store: { historyShown: true, history: [old] } })
     await start($)
@@ -613,8 +613,9 @@ describe('archive groups in the panel', () => {
       expect(t.text).not.toContain('ended with the session')
       expect(t.text).toMatch(/^▼ .* \(2\)$/m)
       expect(t.text).toContain('≈$1.50 · 12k tokens · 30:00')
-      expect(t.text).toMatch(/✓ write tests \(careful\)/)
-      expect(t.text).toMatch(/○ wire it \(medium\)/)
+      expect(t.text).toMatch(/✓ {3}1\. write tests/)
+      expect(t.text).toMatch(/careful · Accepted · Orchestrator/)
+      expect(t.text).toMatch(/2\. wire it ◷/)
       expect(t.keys).not.toContain('archive-finished-old')
       await press($, surface, `archive-${keyOf('old')}`)
       t = await terminal($)

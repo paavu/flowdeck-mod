@@ -1,10 +1,10 @@
 // The flow's planned tasks and the runs that work on them: which run belongs to which task, which tasks wait on others
 // (`after`, task numbers from 1) and which planned task can start now.
-import type { AgentRun } from '../types'
+import type { AgentRun, OrchestratorSteps } from '../types'
 import { isComplete } from './agent-state'
 
-export type TaskLike = { title: string; tier?: string; after?: number[]; counted?: boolean; mirrored?: boolean }
-export type RunLike = Pick<AgentRun, 'id' | 'description' | 'status'> & Partial<Pick<AgentRun, 'stepDone' | 'stepTotal' | 'type' | 'startedAt'>>
+export type TaskLike = { title: string; tier?: string; after?: number[]; counted?: boolean; mirrored?: boolean } & OrchestratorSteps
+export type RunLike = Pick<AgentRun, 'id' | 'description' | 'status'> & Partial<Pick<AgentRun, 'stepDone' | 'stepTotal' | 'type' | 'startedAt' | 'endedAt'>>
 /** A planned task with its number in plan order, and whether everything it waits for is done. */
 export type Numbered<T> = T & { n: number; ready?: boolean }
 
@@ -181,7 +181,8 @@ export function unstarted<T extends TaskLike>(tasks: T[], runs: RunLike[], accep
     .filter((_, i) => !started.has(i) && !isAccepted.has(i + 1))
 }
 
-// The accepted tasks no run belongs to (the orchestrator did them, or one run covered several): drawn as Accepted rows.
+// The accepted tasks no run belongs to (the orchestrator did them, or one run covered several): drawn as Accepted rows
+// that name the Orchestrator.
 export function acceptedOnly<T extends TaskLike>(tasks: T[], links: Map<string, number>, accepted: number[]): Numbered<T>[] {
   const started = new Set(links.values())
   return [...new Set(accepted)].filter(n => !started.has(n - 1) && tasks[n - 1]).sort((a, b) => a - b).map(n => ({ ...tasks[n - 1]!, n }))

@@ -285,8 +285,9 @@ describe('archived plans an older flowdeck saved', () => {
     await start($)
     const t = await terminal($)
     expect(t.group('old').text).toMatch(/^▼ .* \(2\)$/)
-    expect(t.text).toMatch(/✓ a \(light\)/)
-    expect(t.text).toMatch(/○ b \(light\)/)
+    expect(t.text).toMatch(/✓ {3}1\. a/)
+    expect(t.text).toMatch(/light · Accepted · Orchestrator/)
+    expect(t.text).toMatch(/2\. b ◷/)
     expect(parseArchive(store.history)).toEqual([old as ArchiveEntry])
   })
 

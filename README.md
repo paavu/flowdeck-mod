@@ -11,7 +11,7 @@
 </p>
 
 <p align="center">
-  <img alt="Version 1.0.0070" src="https://img.shields.io/badge/version-1.0.0070-8f8cf4">
+  <img alt="Version 1.0.0074" src="https://img.shields.io/badge/version-1.0.0074-8f8cf4">
   <img alt="MIT license" src="https://img.shields.io/badge/license-MIT-5fbf8f">
   <img alt="Claude Code 2.1.295 or later" src="https://img.shields.io/badge/Claude%20Code-%E2%89%A5%202.1.295-8f8cf4">
   <img alt="Terminal and desktop" src="https://img.shields.io/badge/surfaces-terminal%20%2B%20desktop-5fbf8f">
@@ -135,7 +135,7 @@ One row for the open flow. On the desktop the cache chip and its chevron sit on 
 
 What you see:
 
-1. The dot and the title: the running task's title (the lowest-numbered one and ` +N` when several run), else the next ready task, else `FlowDeck` once every task is done. It is never the flow's own title. The dot is blue-violet while the flow runs and green when it is finished.
+1. The dot and the title: the running task's title (a worker's, or an [Orchestrator row](#orchestrator-rows)'s; the lowest-numbered one and ` +N` when several run), else the next ready task, else `FlowDeck` once every task is done. It is never the flow's own title. The dot is blue-violet while the flow runs and green when it is finished.
 2. The bar: the dense dots are the done share; the faint dots beyond them are tasks handed to workers and not yet accepted; the small ticks mark the task boundaries still ahead.
 3. The label on the bar: the phase word and a count, `Tasks X/Y`. Y counts every row the panel's tabs count (Active plus Finished, including the earlier flows of today); X is the done count, whether a task runs or not: the Finished rows that are done (a Done run, any run of an accepted task, an Accepted row), so the band reads 100% only when every row is. The phase word becomes `Plan`, `Design` or `Review` in those phases.
 4. The percent: the done fraction. The bar and the label turn green and read `Done` when the flow is finished.
@@ -279,8 +279,8 @@ Under the tab row, a muted line counts today's turns that did work with tracking
 
 | Tab | Lists |
 |---|---|
-| Active | The flow's cost, tokens and time, then the running workers (newest first) and the queued tasks in plan order. |
-| Finished | Done, Error and Incomplete runs and `Accepted · no worker run` rows of the current flow and of every flow finished earlier on the same date, as one list. At the date change they move to the Archive as one session named after the date. |
+| Active | The flow's cost, tokens and time, then the running workers (newest first), the tasks the orchestrator works on itself ([Orchestrator rows](#orchestrator-rows)) and the queued tasks in plan order. |
+| Finished | Done, Error and Incomplete runs and `Accepted · Orchestrator` rows of the current flow and of every flow finished earlier on the same date, as one list. At the date change they move to the Archive as one session named after the date. |
 | Archive | Saved sessions of this project, newest first, one foldable row each; an opened row shows its tasks one level in under it. Today's flows are in Finished instead; a past day is one session named after its date. |
 | Trash | Sessions moved to the trash, with `↩` and `Empty Trash (n)`. |
 
@@ -332,6 +332,17 @@ How to use:
 | Incomplete (ended, steps left) | amber |
 | Error | red |
 
+#### Orchestrator rows
+
+A planned task no worker run belongs to is one the orchestrator (the main session) does itself. While it works on it, the Active tab draws it as a worker's row is drawn, with `Orchestrator` where a worker's model is: the tier, what it waits for and the time since it started on the meta line, then the state (`Running · 2/4 · Run the backtest`), the bar and, folded out, its own steps. The orchestrator reports those steps with `mcp__flowdeck__step` as a worker does, with `task` naming the task when several are open. The row runs:
+
+- while the orchestrator's step list for the task has a step left (once every step ended it reads `Done`, or `Incomplete` with a step not done, until the task is accepted);
+- without a step list, from the orchestrator's first own work call (an edit, a shell command; not a worker launch) while the task is the lowest ready one with no worker run, no worker running, no worker result waiting for review and the flow in its delegate or review phase.
+
+Once accepted, the row moves to Finished as `Accepted · Orchestrator`, its steps still behind the fold glyph. A task a worker run covers never gets an Orchestrator row.
+
+The Archive draws them the same way: an opened session shows its Orchestrator rows and `Accepted · Orchestrator` rows among the worker rows, latest completion first, with their steps and notes. A session saved without worker runs also lists its tasks never started, as queued rows.
+
 A finished row shows when it finished (`14:07`, or `Oct 29 · 14:07` on an earlier day). The mod links each run to its planned task by itself: by the exact title (also after a `#n` at the start of the Agent description, which then wins over that number), else the `#n`, else the closest title, else the only open task of the worker's tier.
 
 Five worker agents ship with the mod; the orchestrator picks the cheapest one likely to get the task right:
@@ -351,7 +362,7 @@ Tasks that edit the same files are chained with `after` and never run in paralle
 | Tool | Called by | Purpose |
 |---|---|---|
 | `mcp__flowdeck__progress` | the main session | The flow's title and phase, its tasks (`title`, `tier`, `after`, `goal`), `add` for a new task, `done: [numbers]` for accepted tasks, `notes` for handoff notes, `finished` and `restart`. One call can carry `add`, `done` and `notes` together. New work after a finished flow starts a new one, numbered from 1, and the reply lists its tasks (`new flow started: 1 title, 2 title`). |
-| `mcp__flowdeck__step` | workers | A worker's own plan as a `steps` list, then `next`, `done`, `active`, `failed`. |
+| `mcp__flowdeck__step` | workers, and the main session for a task it does itself | A worker's own plan as a `steps` list, then `next`, `done`, `active`, `failed`. From the main session the list goes on an [Orchestrator row](#orchestrator-rows): `task` names the task (by default the task whose list is open, else the lowest ready task with no worker run), only a `steps` list is taken, and the reply names the task (`ok: task 3`). |
 
 The flow's task list is the only task list: there is no separate plan tool.
 
@@ -394,7 +405,7 @@ The brief leaves out headings, code fences and common preamble lines (repository
 
 <img alt="The Finished tab with one finished run, with eight numbered callouts: the tab, the fold glyph, the note icon, the finish time, the Done state with its step count, the green bar, the statistics and the check mark" src="docs/images/panel-finished-list-dark.png" width="780">
 
-Runs that ended: `Done`, `Error` and `Incomplete` runs, and `Accepted · no worker run` rows, latest first. The flow's rows move to the Archive on their own when the flow closes.
+Runs that ended: `Done`, `Error` and `Incomplete` runs, and `Accepted · Orchestrator` rows (tasks the orchestrator did itself), latest first. The flow's rows move to the Archive on their own when the flow closes.
 
 What you see:
 

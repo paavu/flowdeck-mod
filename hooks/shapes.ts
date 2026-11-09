@@ -5,6 +5,7 @@ import type { AgentRun, AgentStatus, ArchiveDetail, ArchiveEntry, ArchiveLists, 
 import { parseArchive, stampsOf } from './archive'
 import { parseRecords } from './archive-index'
 import { noteOf } from './notes'
+import { stepsOfTask } from './orchestrator'
 import { asRule } from './rule'
 import { modelOf } from './tasks'
 
@@ -83,7 +84,7 @@ const PHASES: readonly Phase[] = ['plan', 'design', 'delegate', 'review', 'close
 const asTask = (t: unknown): PlannedTask[] => {
   if (!isObj(t) || typeof t.title !== 'string') return []
   // A task held from before 1.0.0033 has no note; a part of the wrong kind is no part.
-  const task: PlannedTask = { title: t.title, tier: text(t.tier, ''), after: Array.isArray(t.after) ? t.after.filter((n): n is number => Number.isInteger(n) && n > 0) : [], ...noteOf(t) }
+  const task: PlannedTask = { title: t.title, tier: text(t.tier, ''), after: Array.isArray(t.after) ? t.after.filter((n): n is number => Number.isInteger(n) && n > 0) : [], ...noteOf(t), ...stepsOfTask(t) }
   const model = modelOf(t.model)
   if (model) task.model = model
   if (typeof t.mirrored === 'boolean') task.mirrored = t.mirrored

@@ -2,6 +2,18 @@
 
 Versions are `M.m.xxxx`; every build bumps the 4-digit build number. Details and rulings: `docs/ledger.md`, `docs/design.md`.
 
+## 1.0.0074 (2026-11-09)
+- Archive: a saved flow draws the orchestrator's own tasks as the live panel does. An accepted one is the `Accepted · Orchestrator` row with its steps behind the fold glyph; one with a step list that was not accepted is an Orchestrator row (`Orchestrator` where the model is, its time, the state, the bar and its steps with their marks and times; a step still open at the save reads Running, its clock stopped at the save). The rows sit among the worker rows, latest completion first, with their notes behind `ⓘ`, on the desktop and in the terminal.
+- A flow saved without worker runs is no longer a plain task list (`✓ title (tier)`, `○ title (tier)`): its group draws those rows, and its tasks never started as queued rows after them (never `ready`), so it still shows every task it holds. Its summary line stays; it gets no tiles.
+- A group with worker runs draws as before, plus the Orchestrator rows of its tasks with a step list; its tasks never started stay out. Item counts, tab counts, ordering, folding and trash/restore are unchanged.
+
+## 1.0.0073 (2026-11-09)
+- Orchestrator rows: a planned task no worker run belongs to is the orchestrator's own, and the panel now says so. While the orchestrator works on it, the Active tab draws it like a worker's row, with `Orchestrator` where the model is: the tier, what it waits for and the live time since it started, then the state (`Running · 2/4 · Run the backtest`), the bar and its steps behind the fold glyph. It sits after the running workers and before the queued tasks; the band's title counts it as running.
+- The `step` tool now takes the main session's own step list for a task it does itself: `steps` once, then `next: true` as each finishes, on the task the new `task` field names (by default the task whose list is still open, else the lowest ready task with no worker run). The reply names the task (`ok: task 3`); a task a worker run covers is refused, and a bare count is ignored with the reason. The list is kept with the flow in `flow-live.json` and the archive.
+- Without a step list, the task the orchestrator is on (the lowest ready one, no worker running, no worker result waiting for review, in the delegate or review phase) runs from its first edit or shell call; a plan waiting for the user's answer shows no running row.
+- Accepted tasks without a worker run read `Accepted · Orchestrator` (was `Accepted · no worker run`), green as before, with their notes, and fold out the orchestrator's steps when it kept a list.
+- SKILL.md tells the orchestrator to open its own step list for work it does itself (with `task` when more than one task without a worker is open) and to close it before accepting the task; `scripts/check-rules.sh` checks those lines.
+
 ## 1.0.0072 (2026-11-03)
 - The band counts what the panel lists: every Finished run of an accepted task counts as done, an Incomplete one too (return rounds of a task that was then accepted), on the current flow and on today's earlier flows. A panel with 7 Finished rows, 2 running and 5 queued, all finished ones accepted, now reads `Tasks 7/14` (it read 5/14).
 - The band's X is the done count while a task runs too; it no longer adds the running task (`done + 1`). The bar and percent are unchanged, and 100% means every row is done.

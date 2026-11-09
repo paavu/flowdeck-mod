@@ -129,22 +129,23 @@ describe('accepted tasks in the panel', () => {
     expect(tabLabel(t.buttons, 'finished')).toBe('Finished (2)')
   })
 
-  test('an accepted task with no worker run is an Accepted row: tick, no bar, no archive icon, counted in Finished', async ($, on) => {
+  test('an accepted task with no worker run is an Accepted · Orchestrator row: tick, no bar, no archive icon, counted in Finished', async ($, on) => {
     engine(on)
     await start($)
     await progress($, { title: 'Ship', phase: 'delegate', tasks: PLAN })
     await progress($, { done: [1] })
     const d = await desktop($)
-    const row = d.source(/^1\. Read code: Accepted · no worker run$/)
+    const row = d.source(/^1\. Read code: Accepted · Orchestrator$/)
     expect(row).toContain(TICK)
-    expect(row).toContain(`fill="${STATE_COLOR.done}">  Accepted · no worker run`)
+    expect(row).toContain(`fill="${STATE_COLOR.done}">  Accepted · Orchestrator`)
     expect(row).not.toContain('height="4" rx="2"') // no step bar
     expect(d.keys.some(k => k.startsWith('archive-item-'))).toBe(false)
     expect(d.svgs.some((s: any) => /^1\. Read code: planned/.test(String(s.props.alt)))).toBe(false)
     // task 3 waits for task 1: ready now
     expect(d.source(/^3\. Polish/)).toContain('>ready</tspan>')
     const t = await terminal($)
-    expect(t.text).toMatch(/Accepted · no worker run/)
+    expect(t.text).toMatch(/Accepted · Orchestrator/)
+    expect(t.text).not.toMatch(/no worker run/)
     expect(tabLabel(t.buttons, 'finished')).toBe('Finished (1)')
     expect(tabLabel(t.buttons, 'active')).toBe('● Active (3)')
   })

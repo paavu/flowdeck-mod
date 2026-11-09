@@ -24,6 +24,9 @@ check 'Fable only after the user approved' 'Use `flowdeck-fable` only after an e
 check 'the failure reason atop the Fable brief' 'state at the top of the Fable brief which task failed on Opus heavy and why'
 check 'the step-list line at the top of every brief' 'Update your step list after each finished step, before starting the next.'
 check 'the batch-close review hint' 'closed in one batch call at the end'
+check 'the orchestrator step list for its own work' 'For work you do yourself, open your own step list for that task with `mcp__flowdeck__step`'
+check 'task named when several are open' 'Pass `task` whenever more than one task without a worker is open'
+check 'the own list closed before accepting' 'Close your step list before accepting the task'
 agent() {
   f="agents/flowdeck-$1.md"
   if ! grep -qx "model: $2" "$f" || ! grep -qx "effort: $3" "$f"; then

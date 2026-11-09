@@ -1,7 +1,7 @@
 import { atom, read, update } from 'claude-code'
 import type { Elements, EngineInterface, Register, RenderChildren } from 'claude-code'
 
-import type { AgentRun, ArchiveDetail, ArchiveEntry, ArchiveLists, ArchiveRecord, Flow, Panel, PanelTab, Phase, PlannedTask, Reading, Rule, Samples, TaskPlan, UsageWindow } from '../types'
+import type { AgentItem, AgentRun, ArchiveDetail, ArchiveEntry, ArchiveLists, ArchiveRecord, Flow, Panel, PanelTab, Phase, PlannedTask, Reading, Rule, Samples, TaskPlan, UsageWindow } from '../types'
 import { derive, finishItems, hasItemOps, ITEM_H, itemAlt, itemLine, itemsOf, itemSvg, noteSvg, stepItems, timedItems } from './agent-items'
 import type { StepInput } from './agent-items'
 import { countCall, FLOW_SEND_BACK, isPlanNudgeCall, isWorkCall, PLAN_NUDGE, PLAN_SEND_BACK, withNudgeLine } from './nudge'
@@ -17,6 +17,8 @@ import { fableRefusal, GUARD_FAILED, isFable } from './fable-guard'
 import { foldGlyph } from './fold'
 import { applyNotes, briefOf, cleanText, fallbackBrief, hasNote, NOTE_ICON, NOTE_MAX, noteAlt, noteOf, noteParts, noteRows, noteSvgBody } from './notes'
 import type { TaskNote } from './notes'
+import { isOwnWork, orchestrated, ownTask, stepsOfTask, stepTask } from './orchestrator'
+import type { Orch } from './orchestrator'
 import { sortNewest } from './order'
 import { dayKey, doneText, hhmm, isDayKey } from './time'
 import { percent, where } from './plan'
@@ -218,10 +220,16 @@ const STEP_SPEC = {
   name: 'step',
   description:
     'For flowdeck workers: report your own steps to the panel. Send your plan once as steps (3-8 short titles), then next: true as each finishes; done (titles), active or failed for the others. ' +
-    'Without a list: total and done (a count) with a note. Silent: it only draws your row.',
+    'Without a list: total and done (a count) with a note. Silent: it only draws your row. ' +
+    'The orchestrator (main session) reports a task it does itself the same way, with a list, on that task\'s Orchestrator row.',
   inputSchema: {
     type: 'object',
     properties: {
+      task: {
+        type: 'integer',
+        minimum: 1,
+        description: 'Orchestrator only (workers leave it out): the task number the list is for. Default: the task whose list is open, else the lowest ready task with no worker run.',
+      },
       steps: {
         type: 'array',
         description: 'Your plan, up to 12 steps, sent once (again only if it changes); the first starts active.',
@@ -305,7 +313,7 @@ const STRINGS = {
     busy: 'running',
     ready: 'ready',
     acceptedRow: 'Accepted',
-    noRun: 'no worker run',
+    orchestrator: 'Orchestrator',
     acceptedTag: 'accepted',
     nothingQueued: 'Nothing running or queued',
     noFinished: 'No finished items yet',
@@ -358,7 +366,7 @@ const STRINGS = {
     busy: 'в работе',
     ready: 'можно начать',
     acceptedRow: 'Принята',
-    noRun: 'без запуска исполнителя',
+    orchestrator: 'Оркестратор',
     acceptedTag: 'принята',
     nothingQueued: 'Ничего не выполняется и не ждёт запуска',
     noFinished: 'Завершённых пока нет',
@@ -882,6 +890,11 @@ const elapsed = (a: AgentRun, at: number): number => (a.endedAt ?? Math.max(at, 
 
 const plannedOf = (f: Flow | null, list: AgentRun[]): Planned[] => (!f || f.isFinished ? [] : unstarted(f.tasks ?? [], list, acceptedOf(f)))
 
+// The open flow's Orchestrator rows by task number (orchestrator.ts).
+const orchOf = (f: Flow | null, list: AgentRun[]): Map<number, Orch> => (!f || f.isFinished ? new Map() : orchestrated(f.tasks ?? [], list, acceptedOf(f), f.phase))
+// An Orchestrator row runs: the clocks tick for it as for a running worker.
+const isOrchestrating = (f: Flow | null, list: AgentRun[]): boolean => [...orchOf(f, list).values()].some(o => o.state === 'running')
+
 // Where a row sits in a finished list (order.ts): when it finished, then when it started. A run without an end sits
 // last; an accepted task without a time sits at `fallback` (an archive entry's end), else last.
 const runPlace = (a: AgentRun) => ({ end: a.endedAt ?? 0, start: a.startedAt, id: a.id })
@@ -898,7 +911,7 @@ const rowsOf = (tasks: TaskLike[], list: AgentRun[], accepted: number[], accepte
     // An accepted task no run belongs to is an Accepted row of its own, placed by when it was accepted.
     acceptedRows: acceptedOnly(tasks, links, accepted).map((t): Planned => {
       const doneAt = acceptedAt?.[String(t.n)] ?? fallback
-      return { title: t.title, tier: t.tier ?? '', after: t.after ?? [], n: t.n, ...(doneAt === undefined ? {} : { doneAt }) }
+      return { title: t.title, tier: t.tier ?? '', after: t.after ?? [], n: t.n, ...stepsOfTask(t), ...(doneAt === undefined ? {} : { doneAt }) }
     }),
     running: list.filter(isLive).reverse(),
     // Archived rows leave the finished list; the totals and the planned tasks still count them. A run that was going when
@@ -943,7 +956,8 @@ const flowCounts = (f: Flow | null, list: AgentRun[], earlier: ArchiveEntry[] = 
 }
 
 // The band's title, where the flow is: the running task (its task's title, else the run's description without its `#n`;
-// with several running, the lowest-numbered one and ` +N` for the others), else the next ready task (else the next
+// a running Orchestrator row's task counts too; with several running, the lowest-numbered one and ` +N` for the others),
+// else the next ready task (else the next
 // queued one), else `FlowDeck`. Never the flow's own title.
 const bandTitle = (f: Flow, list: AgentRun[]): string => {
   if (f.isFinished) return BAND_LABEL
@@ -955,6 +969,7 @@ const bandTitle = (f: Flow, list: AgentRun[]): string => {
       const t = taskOf(tasks, links, a)
       return { n: t?.n ?? Infinity, at: a.startedAt, title: ((t && tasks[t.n - 1]?.title) || taskTag(a.description || '').rest).trim() }
     })
+    .concat([...orchOf(f, list)].flatMap(([n, o]) => (o.state === 'running' ? [{ n, at: o.startedAt ?? 0, title: (tasks[n - 1]?.title ?? '').trim() }] : [])))
     .filter(r => r.title)
     .sort((x, y) => x.n - y.n || x.at - y.at)
   if (running.length) return `${running[0]!.title}${running.length > 1 ? ` +${running.length - 1}` : ''}`
@@ -1207,16 +1222,16 @@ ${statusMark(W - 8, out ? 12 : 16, 'planned', color)}
   )
 }
 
-// An accepted task no worker run belongs to: its number and title, its tier, `Accepted · no worker run` in green and the
-// tick; no step bar.
+// An accepted task no worker run belongs to (the orchestrator's): its number and title, its tier, `Accepted · Orchestrator`
+// in green and the tick; no step bar.
 const ACCEPTED_H = 46
-// `titleOutside`: the title and when it was accepted are drawn natively above (a row with a note), so neither is here.
+// `titleOutside`: the title and when it was accepted are drawn natively above (a row with a note or steps), so neither is here.
 const acceptedSvg = (W: number, p: Planned, done = '', titleOutside = false): string => {
   const out = titleOutside
   const H = out ? TASK_OUT_H : ACCEPTED_H
   const tier = p.tier in TIER_COLOR ? p.tier : 'other'
   const textW = W - 42 - 22
-  const word = `${tr().acceptedRow} · ${tr().noRun}`
+  const word = `${tr().acceptedRow} · ${tr().orchestrator}`
   // When it was accepted, dim at the right of the title line; the title gives way to it.
   const doneW = done ? textWidth(done, 11) + 10 : 0
   return svg(
@@ -1231,6 +1246,49 @@ ${statusMark(W - 8, out ? 12 : 16, 'done', colorOf(tier))}
   )
 }
 
+// An Orchestrator row's state as a run's: running or done, with its list's counts, so the state word, the `n/total`, the
+// bar and the mark come from the same helpers as a worker's row (a list ended with a step not done reads Incomplete).
+const orchShown = (o: Orch): Pick<AgentRun, 'status' | 'stepDone' | 'stepTotal' | 'stepNote'> => {
+  const d = derive(o.items)
+  return { status: o.state === 'running' ? 'running' : 'done', ...(d.total ? { stepDone: d.done, stepTotal: d.total, stepNote: d.note } : {}) }
+}
+// The time it took, or has taken so far: from its start to its last step's end, or to `at` while it runs; '' without a start.
+const orchTime = (o: Orch, at: number): string =>
+  o.startedAt === undefined ? '' : fmtTime(Math.max(0, (o.endedAt ?? (o.state === 'running' ? Math.max(at, o.startedAt) : o.startedAt)) - o.startedAt))
+
+// A task the orchestrator does itself (orchestrator.ts), drawn as a worker's row is with `Orchestrator` where the
+// worker's model is: the tier, what it waits for and the time at the right on the meta line; the state, the steps and the
+// bar below; the sprite walks while it runs. `titleOutside` as on an agent row.
+const orchestratorSvg = (W: number, p: Planned, o: Orch, at: number, titleOutside = false): string => {
+  const out = titleOutside
+  const dy = out ? TITLE_LINE : 0
+  const tier = p.tier in TIER_COLOR ? p.tier : 'other'
+  const color = colorOf(tier)
+  const textW = W - 42 - 22
+  const a = orchShown(o)
+  const state = agentState(a)
+  const time = orchTime(o, at)
+  const timeW = time ? textWidth(time, 11) + 12 : 0
+  const waits = afterText(p.after)
+  const room = Math.max(0, textW - textWidth(`${tier}  `, 11) - timeW)
+  const meta = waits && textWidth([tr().orchestrator, waits].join('  ·  '), 11) <= room ? [tr().orchestrator, waits] : [tr().orchestrator]
+  const steps = a.stepTotal ? `${stepCount(a)}${a.stepNote ? ' · ' + a.stepNote : ''}` : ''
+  const [lead, rest] = splitHead(fitText(steps ? `${state.name} · ${steps}` : state.name, 11, textW), state.name)
+  const H = agentHeight(out)
+  return svg(
+    W,
+    H,
+    `${sprite(0, out ? 10 : 14, tier, false, o.state === 'running')}
+${out ? '' : `<text class="t" x="42" y="18" font-family="${FONT}" font-size="13" font-weight="600">${xml(fitText(`${p.n}. ${p.title}`, 13, textW))}</text>`}
+<text x="42" y="${34 - dy}" font-family="${FONT}" font-size="11"><tspan fill="${color}">${xml(tier)}</tspan><tspan class="s">  ${xml(fitText(meta.join('  ·  '), 11, room))}</tspan></text>
+${time ? `<text class="s" x="${42 + textW}" y="${34 - dy}" text-anchor="end" font-family="${FONT}" font-size="11" font-variant-numeric="tabular-nums">${time}</text>` : ''}
+<text x="42" y="${49 - dy}" font-family="${FONT}" font-size="11" font-variant-numeric="tabular-nums"><tspan fill="${state.color}">${xml(lead)}</tspan>${rest ? `<tspan class="t">${xml(rest)}</tspan>` : ''}</text>
+<rect class="k" x="42" y="${55 - dy}" width="${textW}" height="4" rx="2"/><rect x="42" y="${55 - dy}" width="${Math.round(textW * (progressOf(a) ?? 0))}" height="4" rx="2" fill="${state.color}"/>
+${statusMark(W - 8, out ? 12 : 16, markOf(a), color)}
+<line class="ln" x1="0" y1="${H - 0.5}" x2="${W}" y2="${H - 0.5}"/>`,
+  )
+}
+
 // --- terminal drawing: the same rows in text.
 
 const ctxBar = (pct: number, width: number): string => {
@@ -1240,7 +1298,7 @@ const ctxBar = (pct: number, width: number): string => {
 
 const STATUS_GLYPH: Record<string, string> = { running: '●', done: '✓', failed: '✗', incomplete: '◐', planned: '◷' }
 // The terminal glyph's colour: green tick, red cross, amber half ring, else the tier colour.
-const glyphColor = (a: AgentRun, tierColor: string): string => {
+const glyphColor = (a: Parameters<typeof markOf>[0], tierColor: string): string => {
   const mark = markOf(a)
   return mark === 'failed' ? 'red' : mark === 'done' ? 'green' : mark === 'incomplete' ? STATE_COLOR.needs_input : tierColor
 }
@@ -1585,6 +1643,39 @@ async function keepBrief($: EngineInterface, id: string, prompt: unknown, descri
   await updateAgents($, l => l.map(a => (a.id === id ? { ...a, brief } : a)))
 }
 
+// The orchestrator's own step list (a `step` call from the main session): it goes on the task the call's `task` names,
+// else on the one orchestrator.ts `stepTask` picks, and is kept with the flow (flow-live.json, then the archive). Only a
+// list is taken: a bare count draws nothing on a task row. The reply names the task, so a wrong pick shows at once.
+async function orchestratorStep($: EngineInterface, input: StepInput): Promise<{ result: string }> {
+  try {
+    if (!hasItemOps(input)) return { result: 'ignored: report your own steps as a list (steps), then next: true as each one finishes' }
+    const f = await readFlow($)
+    if (!f || f.isFinished || !f.tasks.length) return { result: `ignored: no open flow with planned tasks; plan it with ${TOOL} first` }
+    const target = stepTask(f.tasks, await readAgents($), acceptedOf(f), input.task)
+    if ('error' in target) return { result: `ignored: ${target.error}` }
+    const at = (await clockAt($)) ?? undefined
+    const title = f.tasks[target.i]!.title
+    let unknown: string[] = []
+    await updateFlow($, p => {
+      const t = p && !p.isFinished ? p.tasks[target.i] : undefined
+      const moved = t && t.title === title ? stepItems(t.items, input, at) : null
+      if (!p || !t || !moved) return p
+      unknown = moved.unknown
+      // An empty list clears the steps; the start stays.
+      const { items: _items, ...rest } = t
+      const startedAt = t.startedAt ?? (moved.items.length ? at : undefined)
+      const next = { ...rest, ...(moved.items.length ? { items: moved.items } : {}), ...(startedAt === undefined ? {} : { startedAt }) }
+      return { ...p, tasks: p.tasks.map((x, k) => (k === target.i ? next : x)) }
+    })
+    if (at !== undefined) await update($, now, prev => Math.max(asNow(prev), at))
+    await persistLive($)
+    const tail = unknown.length ? ` (unknown step${unknown.length > 1 ? 's' : ''} ${unknown.map(t => `"${t.slice(0, 60)}"`).join(', ')} ignored)` : ''
+    return { result: `ok: task ${target.i + 1}${tail}` }
+  } catch {
+    return { result: 'ok (the panel could not be updated)' }
+  }
+}
+
 const isPlansObject = (v: unknown): v is Record<string, unknown> => !!v && typeof v === 'object' && !Array.isArray(v)
 
 // ---------------------------------------------------------------------------
@@ -1846,11 +1937,27 @@ async function planNudge($: EngineInterface, e: { tool: string; agentId?: string
   if (!(await isPlanDue($))) {
     resetPlanCalls()
     flowWork++
+    if (isOwnWork(e.tool)) await stampOwnWork($).catch(() => {})
     return next(e)
   }
   planTools.set(e.tool, (planTools.get(e.tool) ?? 0) + 1)
   if (!isPlanNudgeCall(++planCalls)) return next(e)
   return withNudgeLine(await next(e), ruleComposed ? PLAN_NUDGE : `${PLAN_NUDGE} ${FLOW_RULE}`)
+}
+
+// A work call of the main session (before it runs) while the orchestrator is on a task without a step list
+// (orchestrator.ts ownTask): the first one dates that task's start, so its Orchestrator row runs from there.
+async function stampOwnWork($: EngineInterface): Promise<void> {
+  const f = await readFlow($)
+  if (!f || f.isFinished) return
+  const i = ownTask(f.tasks, await readAgents($), acceptedOf(f), f.phase)
+  const task = i === null ? undefined : f.tasks[i]
+  if (i === null || !task || task.startedAt !== undefined) return
+  const at = await clockAt($)
+  if (at === null) return
+  await updateFlow($, p => (p && !p.isFinished && p.tasks[i]?.title === task.title && p.tasks[i]?.startedAt === undefined ? { ...p, tasks: p.tasks.map((t, k) => (k === i ? { ...t, startedAt: at } : t)) } : p))
+  await update($, now, prev => Math.max(asNow(prev), at))
+  await persistLive($)
 }
 
 const forgetFlights = (agentId: string): void => {
@@ -2293,7 +2400,7 @@ export const register: Register = (on, options) => {
       void tickDay($).catch(() => {}) // a new day: today's flows leave the Finished tab, the days passed are merged
       void (async () => {
         const list = await readAgents($)
-        if (!list.some(isLive)) return
+        if (!list.some(isLive) && !isOrchestrating(await readFlow($), list)) return
         const at = await $.clock.now()
         await update($, now, () => at)
       })().catch(() => {})
@@ -2451,7 +2558,7 @@ export const register: Register = (on, options) => {
   on('tool.call', { tool: STEP_TOOL }, async ($, e) => {
     const input = e as unknown as StepInput
     const agentId = e.agentId
-    if (!agentId) return { result: 'ignored: only subagents report steps' }
+    if (!agentId) return orchestratorStep($, input)
     quiet.delete(agentId)
     const num = (v: unknown) => (typeof v === 'number' && Number.isFinite(v) ? v : undefined)
     // Sent counts and note win for this call; otherwise a list gives them.
@@ -2778,22 +2885,23 @@ export const register: Register = (on, options) => {
     // `fp` prefixes an archive group's fold state (`<entryId>:<agentId>`), so folding a row there never folds the live one.
     const isUnfolded = (a: AgentRun, fp = '') => (p.openAgents ?? []).includes(fp + a.id)
     // `kp` prefixes the keys of an archive group's rows, so they never share a key with the live ones.
-    // Every agent row folds; a row with no step list yet has a dim chevron and opens on its details.
-    const foldButton = (a: AgentRun, kp = '', fp = '', hasItems = true) => (
+    // Every agent row folds; a row with no step list yet has a dim chevron and opens on its details. `id` is the fold
+    // state's id in `openAgents` (an Orchestrator row's is its task's, `orch-<n>-<title key>`, so it stays open once accepted).
+    const foldAt = (id: string, key: string, hasItems: boolean) => (
       <Button
-        key={`${kp}agent-fold-${a.id}`}
-        label={foldGlyph(isUnfolded(a, fp))}
+        key={key}
+        label={foldGlyph((p.openAgents ?? []).includes(id))}
         plain
         dimColor={!hasItems}
         onPress={() =>
           updatePanel($, prev => {
             const open = prev.openAgents ?? []
-            const id = fp + a.id
             return { ...prev, openAgents: open.includes(id) ? open.filter(x => x !== id) : [...open, id] }
           })
         }
       />
     )
+    const foldButton = (a: AgentRun, kp = '', fp = '', hasItems = true) => foldAt(fp + a.id, `${kp}agent-fold-${a.id}`, hasItems)
 
     // A row's handoff note opens under it by its note button; `k` is the row's key, prefixed as fold states are.
     const isNoteOpen = (k: string) => (p.openNotes ?? []).includes(k)
@@ -2831,10 +2939,15 @@ export const register: Register = (on, options) => {
       // When a finished row finished (an accepted one, when it was accepted), on its name line; running and queued rows show none.
       const doneOf = (a: AgentRun): string => (a.status !== 'running' && a.endedAt ? doneText(a.endedAt, today) : '')
       const acceptedDone = (pl: Planned): string => (pl.doneAt ? doneText(pl.doneAt, today) : '')
-      // The finished rows and the accepted ones in one list, latest completion first.
-      type Done = { a: AgentRun } | { pl: Planned }
-      const byDone = (runs: AgentRun[]): Done[] =>
-        sortNewest<Done>([...runs.map(a => ({ a })), ...acceptedRows.map(pl => ({ pl }))], r => ('a' in r ? runPlace(r.a) : acceptedPlace(r.pl)))
+      // The finished rows and the accepted ones in one list, latest completion first; the archive's Orchestrator rows
+      // (`own`) among them by their last step's end, or by `at` (the save) while a step was still open.
+      type Done = { a: AgentRun } | { pl: Planned } | { own: Planned; o: Orch }
+      const orchPlace = (pl: Planned, o: Orch) => ({ end: o.endedAt ?? at, start: o.startedAt ?? 0, id: `orch-${pl.n}` })
+      const byDone = (runs: AgentRun[], own: Planned[] = []): Done[] =>
+        sortNewest<Done>(
+          [...runs.map(a => ({ a })), ...acceptedRows.map(pl => ({ pl })), ...own.flatMap(pl => (pl.orch ? [{ own: pl, o: pl.orch }] : []))],
+          r => ('a' in r ? runPlace(r.a) : 'own' in r ? orchPlace(r.own, r.o) : acceptedPlace(r.pl)),
+        )
       const taskFor = (a: AgentRun) => taskOf(tasks, links, a)
       // A `#3 …` the description started with is not repeated after the number it gave.
       const nameOf = (a: AgentRun): string => {
@@ -2866,6 +2979,15 @@ export const register: Register = (on, options) => {
       const taskNoteKey = (pl: Planned) => `${fp}task-${pl.n}-${keyOf(pl.title)}`
       const runNoteButton = (a: AgentRun, n: TaskNote) => (hasNote(n) ? noteButton(runNoteKey(a), `${kp}note-${a.id}`) : null)
       const taskNoteButton = (pl: Planned, n: TaskNote) => (hasNote(n) ? noteButton(taskNoteKey(pl), `${kp}note-task-${pl.n}`) : null)
+      // An Orchestrator row folds by its task (openAgents), so an accepted one stays as it was while it ran.
+      const orchFoldId = (pl: Planned) => `${fp}orch-${pl.n}-${keyOf(pl.title)}`
+      const orchFold = (pl: Planned, hasItems: boolean) => foldAt(orchFoldId(pl), `${kp}orch-fold-${pl.n}`, hasItems)
+      const isOrchOpen = (pl: Planned) => (p.openAgents ?? []).includes(orchFoldId(pl))
+      const orchItems = (o: Orch) => timedItems(o.items, { startedAt: o.startedAt, endedAt: o.endedAt })
+      // An accepted task's steps, when the orchestrator kept a list on it; the acceptance ends a step without an end.
+      const acceptedItems = (pl: Planned) => timedItems(itemsOf(pl.items), { startedAt: pl.startedAt, endedAt: pl.doneAt })
+      // An opened Orchestrator row with no step list: when it started (when known), then that none came.
+      const orchDetail = (o: Orch): string[] => [o.startedAt === undefined ? s.orchestrator : `${s.orchestrator} · ${s.started} ${doneText(o.startedAt, today)}`, s.noSteps]
       // A row that throws draws one dim line in its place; the other rows still draw.
       const guard = (a: AgentRun, draw: () => RenderChildren): RenderChildren => {
         try {
@@ -2874,8 +2996,20 @@ export const register: Register = (on, options) => {
           return failed('Agent row', `${kp}${a.id}`)
         }
       }
+      const guardOrch = (pl: Planned, draw: () => RenderChildren): RenderChildren => {
+        try {
+          return draw()
+        } catch {
+          return failed('Orchestrator row', `${kp}orch-${pl.n}`)
+        }
+      }
       // The one list `v.rows` names, drawn with the surface's own rows.
-      type RowDraw = { agent: (a: AgentRun, word: string) => RenderChildren; accepted: (pl: Planned) => RenderChildren; planned: (pl: Planned) => RenderChildren }
+      type RowDraw = {
+        agent: (a: AgentRun, word: string) => RenderChildren
+        accepted: (pl: Planned) => RenderChildren
+        planned: (pl: Planned) => RenderChildren
+        orchestrator: (pl: Planned, o: Orch) => RenderChildren
+      }
       const listOf = (d: RowDraw): RenderChildren[] => {
         const note = (key: string, text: string) => (
           <Text key={`${kp}${key}`} dimColor>
@@ -2884,19 +3018,27 @@ export const register: Register = (on, options) => {
         )
         if (v.rows === 'active') {
           if (!running.length && !v.planned.length) return [note('empty', s.nothingQueued)]
-          return [...running.map(a => guard(a, () => d.agent(a, s.isRunning))), ...v.planned.map(d.planned)]
+          // The orchestrator's own rows run too: after the workers, before the queued tasks.
+          const own = v.planned.flatMap(pl => {
+            const o = pl.orch
+            return o ? [guardOrch(pl, () => d.orchestrator(pl, o))] : []
+          })
+          return [...running.map(a => guard(a, () => d.agent(a, s.isRunning))), ...own, ...v.planned.filter(pl => !pl.orch).map(d.planned)]
         }
         if (v.rows === 'finished') {
           return [
             archivedCount > 0 && note('archived', `${archivedCount} archived`),
             !finished.length && !acceptedRows.length && note('empty', s.noFinished),
-            ...byDone(finished).map(r => ('a' in r ? guard(r.a, () => d.agent(r.a, s.isFinished)) : d.accepted(r.pl))),
+            ...byDone(finished).map(r => ('a' in r ? guard(r.a, () => d.agent(r.a, s.isFinished)) : 'pl' in r ? d.accepted(r.pl) : null)),
           ]
         }
-        // The archive's list: every row, latest completion first.
+        // The archive's list: every row, latest completion first, the Orchestrator rows among them; then the tasks still queued.
         return [
-          v.list.length === 0 && acceptedRows.length === 0 && note('empty', s.empty),
-          ...byDone(v.list).map(r => ('a' in r ? guard(r.a, () => d.agent(r.a, r.a.status === 'running' ? s.isRunning : s.isFinished)) : d.accepted(r.pl))),
+          v.list.length === 0 && acceptedRows.length === 0 && v.planned.length === 0 && note('empty', s.empty),
+          ...byDone(v.list, v.planned).map(r =>
+            'a' in r ? guard(r.a, () => d.agent(r.a, r.a.status === 'running' ? s.isRunning : s.isFinished)) : 'own' in r ? guardOrch(r.own, () => d.orchestrator(r.own, r.o)) : d.accepted(r.pl),
+          ),
+          ...v.planned.filter(pl => !pl.orch).map(d.planned),
         ]
       }
       if (Svg) {
@@ -2907,6 +3049,11 @@ export const register: Register = (on, options) => {
           const d = noteSvgBody(W, parts)
           return <Svg key={key} source={svg(W, d.height, d.body)} alt={noteAlt(parts)} width={W} height={d.height} />
         }
+        // A row's steps, one drawing each, and the dim lines an opened row with no step list shows; `key` prefixes their keys.
+        const itemRows = (key: string, items: AgentItem[]) =>
+          items.map((it, i) => <Svg key={`${key}-${i}`} source={svg(W, ITEM_H, itemSvg(W, it, at, fitText))} alt={itemAlt(it, at)} width={W} height={ITEM_H} />)
+        const detailRows = (key: string, lines: string[]) =>
+          lines.map((line, i) => <Svg key={`${key}-${i}`} source={svg(W, ITEM_H, noteSvg(W, line, fitText))} alt={line} width={W} height={ITEM_H} />)
         // Every row: line 1 is native (a Button cannot sit inside a drawing): the fold chevron at the far left, the indent
         // that puts the task name at the drawing's text column, the note icon after the name and when it
         // finished at the far end; then the drawing at the full width without its title line.
@@ -2938,25 +3085,19 @@ export const register: Register = (on, options) => {
               </Box>
               {toNote && isNoteOpen(runNoteKey(a)) && notePanel(`${kp}agent-note-${a.id}`, note)}
               <Svg source={agentSvg(W, a, at, { titleOutside: true, after: taskFor(a)?.after, isAccepted: isAccepted(a) })} alt={alt} width={W} height={agentHeight(true)} />
-              {isUnfolded(a, fp) &&
-                items.map((it, i) => (
-                  <Svg key={`${kp}agent-item-${a.id}-${i}`} source={svg(W, ITEM_H, itemSvg(W, it, at, fitText))} alt={itemAlt(it, at)} width={W} height={ITEM_H} />
-                ))}
-              {isUnfolded(a, fp) &&
-                items.length === 0 &&
-                detailLines(a).map((line, i) => (
-                  <Svg key={`${kp}agent-detail-${a.id}-${i}`} source={svg(W, ITEM_H, noteSvg(W, line, fitText))} alt={line} width={W} height={ITEM_H} />
-                ))}
+              {isUnfolded(a, fp) && itemRows(`${kp}agent-item-${a.id}`, items)}
+              {isUnfolded(a, fp) && items.length === 0 && detailRows(`${kp}agent-detail-${a.id}`, detailLines(a))}
             </Box>
           )
         }
-        // A task row with a note: its title natively at the drawing's text column with the note button beside it (and
-        // when it was accepted at the far end), the drawing without its title below, the note under it when open. A task
-        // row without a note is the one drawing it always was.
-        const taskRow = (key: string, pl: Planned, title: RenderChildren, drawing: (out: boolean) => { source: string; alt: string; height: number }, done = '') => {
+        // A task row with a note or a step list: its title natively at the drawing's text column (after the fold chevron
+        // when it has steps, as on an agent row) with the note button beside it (and when it was accepted at the far end),
+        // the drawing without its title below, the note under it when open, the steps when unfolded. A task row with
+        // neither is the one drawing it always was.
+        const taskRow = (key: string, pl: Planned, title: RenderChildren, drawing: (out: boolean) => { source: string; alt: string; height: number }, done = '', items: AgentItem[] = []) => {
           const note = taskNote(pl)
           const toNote = taskNoteButton(pl, note)
-          if (!toNote) {
+          if (!toNote && !items.length) {
             const d = drawing(false)
             return <Svg key={key} source={d.source} alt={d.alt} width={W} height={d.height} />
           }
@@ -2964,12 +3105,13 @@ export const register: Register = (on, options) => {
           return (
             <Box key={key} flexDirection="column">
               <Box flexDirection="row" alignItems="center">
-                <Svg source={TASK_INDENT_SVG} alt="" width={TITLE_INDENT} height={1} />
+                {items.length ? <Box flexShrink={0}>{orchFold(pl, true)}</Box> : null}
+                {items.length ? <Svg source={INDENT_SVG} alt="" width={INDENT_W} height={1} /> : <Svg source={TASK_INDENT_SVG} alt="" width={TITLE_INDENT} height={1} />}
                 <Box flexDirection="row" alignItems="center" gap={1} flexGrow={1} flexShrink={1} minWidth={0}>
                   <Box flexShrink={1} minWidth={0} overflow="hidden">
                     {title}
                   </Box>
-                  <Box flexShrink={0}>{toNote}</Box>
+                  {toNote && <Box flexShrink={0}>{toNote}</Box>}
                   <Box flexGrow={1} />
                   {done && (
                     <Box flexShrink={0}>
@@ -2978,8 +3120,9 @@ export const register: Register = (on, options) => {
                   )}
                 </Box>
               </Box>
-              {isNoteOpen(taskNoteKey(pl)) && notePanel(`${key}-note`, note)}
+              {toNote && isNoteOpen(taskNoteKey(pl)) && notePanel(`${key}-note`, note)}
               <Svg source={d.source} alt={d.alt} width={W} height={d.height} />
+              {items.length > 0 && isOrchOpen(pl) && itemRows(`${kp}orch-item-${pl.n}`, items)}
             </Box>
           )
         }
@@ -2988,9 +3131,35 @@ export const register: Register = (on, options) => {
             `${kp}accepted-${pl.n}`,
             pl,
             <Text bold wrap="truncate-end">{`${pl.n}. ${pl.title}`}</Text>,
-            out => ({ source: acceptedSvg(W, pl, acceptedDone(pl), out), alt: `${pl.n}. ${pl.title}: ${s.acceptedRow} · ${s.noRun}`, height: out ? TASK_OUT_H : ACCEPTED_H }),
+            out => ({ source: acceptedSvg(W, pl, acceptedDone(pl), out), alt: `${pl.n}. ${pl.title}: ${s.acceptedRow} · ${s.orchestrator}`, height: out ? TASK_OUT_H : ACCEPTED_H }),
             acceptedDone(pl),
+            acceptedItems(pl),
           )
+        // A task the orchestrator does itself: an agent row's layout, its drawing from orchestratorSvg; it folds out its
+        // steps, or with no list yet, when it started.
+        const orchRow = (pl: Planned, o: Orch) => {
+          const items = orchItems(o)
+          const note = taskNote(pl)
+          const toNote = taskNoteButton(pl, note)
+          return (
+            <Box key={`${kp}orch-${pl.n}`} flexDirection="column">
+              <Box flexDirection="row" alignItems="center">
+                <Box flexShrink={0}>{orchFold(pl, items.length > 0)}</Box>
+                <Svg source={INDENT_SVG} alt="" width={INDENT_W} height={1} />
+                <Box flexDirection="row" alignItems="center" gap={1} flexGrow={1} flexShrink={1} minWidth={0}>
+                  <Box flexShrink={1} minWidth={0} overflow="hidden">
+                    <Text bold wrap="truncate-end">{`${pl.n}. ${pl.title}`}</Text>
+                  </Box>
+                  {toNote && <Box flexShrink={0}>{toNote}</Box>}
+                </Box>
+              </Box>
+              {toNote && isNoteOpen(taskNoteKey(pl)) && notePanel(`${kp}orch-note-${pl.n}`, note)}
+              <Svg source={orchestratorSvg(W, pl, o, at, true)} alt={`${pl.n}. ${pl.title}: ${s.orchestrator}, ${agentState(orchShown(o)).name}`} width={W} height={agentHeight(true)} />
+              {isOrchOpen(pl) && itemRows(`${kp}orch-item-${pl.n}`, items)}
+              {isOrchOpen(pl) && items.length === 0 && detailRows(`${kp}orch-detail-${pl.n}`, orchDetail(o))}
+            </Box>
+          )
+        }
         const plannedRow = (pl: Planned) =>
           taskRow(
             `${kp}plan-${pl.n}`,
@@ -3005,6 +3174,7 @@ export const register: Register = (on, options) => {
               agent: agentRow,
               accepted: acceptedRow,
               planned: plannedRow,
+              orchestrator: orchRow,
             }),
         }
       }
@@ -3061,28 +3231,76 @@ export const register: Register = (on, options) => {
               <Text color={state.color}>{lead}</Text>
               <Text dimColor>{rest}</Text>
             </Text>
-            {isUnfolded(a, fp) &&
-              items.map((it, i) => {
-                const l = itemLine(it, at, cols)
-                return (
-                  <Text key={`${kp}agent-item-${a.id}-${i}`} wrap="truncate-end">
-                    {'   '}
-                    <Text color={l.color} dimColor={l.isDim}>
-                      {l.mark}
-                    </Text>{' '}
-                    <Text dimColor={l.isDim}>{l.title}</Text>
-                    {l.time ? <Text dimColor>{`  ${l.time}`}</Text> : null}
-                  </Text>
-                )
-              })}
-            {isUnfolded(a, fp) &&
-              items.length === 0 &&
-              detailLines(a).map((line, i) => (
-                <Text key={`${kp}agent-detail-${a.id}-${i}`} dimColor wrap="truncate-end">
-                  {'   '}
-                  {line}
+            {isUnfolded(a, fp) && itemLines(`${kp}agent-item-${a.id}`, items)}
+            {isUnfolded(a, fp) && items.length === 0 && detailTexts(`${kp}agent-detail-${a.id}`, detailLines(a))}
+          </Box>
+        )
+      }
+      // A row's steps, one line each, and the dim lines an opened row with no step list shows; `key` prefixes their keys.
+      const itemLines = (key: string, items: AgentItem[]) =>
+        items.map((it, i) => {
+          const l = itemLine(it, at, cols)
+          return (
+            <Text key={`${key}-${i}`} wrap="truncate-end">
+              {'   '}
+              <Text color={l.color} dimColor={l.isDim}>
+                {l.mark}
+              </Text>{' '}
+              <Text dimColor={l.isDim}>{l.title}</Text>
+              {l.time ? <Text dimColor>{`  ${l.time}`}</Text> : null}
+            </Text>
+          )
+        })
+      const detailTexts = (key: string, lines: string[]) =>
+        lines.map((line, i) => (
+          <Text key={`${key}-${i}`} dimColor wrap="truncate-end">
+            {'   '}
+            {line}
+          </Text>
+        ))
+      // A task the orchestrator does itself, as a worker's row: `Orchestrator` where the model is, then what it waits for
+      // and its time; the bar, the state and the steps below; its steps (or when it started) when unfolded.
+      const orchLine = (pl: Planned, o: Orch) => {
+        const tier = pl.tier in TIER_COLOR ? pl.tier : 'other'
+        const color = colorOf(tier)
+        const a = orchShown(o)
+        const state = agentState(a)
+        const steps = a.stepTotal ? `${stepCount(a)}${a.stepNote ? ' ' + a.stepNote : ''}` : ''
+        const time = orchTime(o, at)
+        const bareLine = `  ${tier} · ${s.orchestrator}`
+        const waits = afterText(pl.after)
+        // The waits go first when the line is short; the time stays.
+        const modelLine = waits && `${bareLine} · ${waits}`.length + (time ? time.length + 3 : 0) <= cols ? `${bareLine} · ${waits}` : bareLine
+        const room = Math.max(state.name.length + 1, cols - 2 - barW - 1)
+        const [lead, rest] = splitHead(clip(steps ? `${state.name} · ${steps}` : state.name, room), state.name)
+        const items = orchItems(o)
+        const note = taskNote(pl)
+        const toNote = taskNoteButton(pl, note)
+        return (
+          <Box key={`${kp}orch-${pl.n}`} flexDirection="column" marginBottom={1}>
+            <Box flexDirection="row" gap={1}>
+              <Text color={color}>▣</Text>
+              {orchFold(pl, items.length > 0)}
+              <Box flexShrink={1} minWidth={0}>
+                <Text bold wrap="truncate-end">
+                  {pl.n}. {pl.title}
                 </Text>
-              ))}
+              </Box>
+              {toNote}
+              <Text color={glyphColor(a, color)}>{STATUS_GLYPH[markOf(a)]}</Text>
+            </Box>
+            {toNote && isNoteOpen(taskNoteKey(pl)) && noteLines(`${kp}orch-note-${pl.n}`, note)}
+            <Text dimColor wrap="truncate-end">
+              {modelLine}
+              {time ? ` · ${time}` : ''}
+            </Text>
+            <Text wrap="truncate-end">
+              {'  '}
+              <Text color={state.color}>{ctxBar((progressOf(a) ?? 0) * 100, barW)}</Text> <Text color={state.color}>{lead}</Text>
+              <Text dimColor>{rest}</Text>
+            </Text>
+            {isOrchOpen(pl) && itemLines(`${kp}orch-item-${pl.n}`, items)}
+            {isOrchOpen(pl) && items.length === 0 && detailTexts(`${kp}orch-detail-${pl.n}`, orchDetail(o))}
           </Box>
         )
       }
@@ -3097,15 +3315,25 @@ export const register: Register = (on, options) => {
         const tier = pl.tier in TIER_COLOR ? pl.tier : 'other'
         const note = taskNote(pl)
         const toNote = taskNoteButton(pl, note)
+        const items = acceptedItems(pl)
+        // With the orchestrator's steps, the fold chevron takes the room after the tick.
         return (
           <Box key={`${kp}accepted-${pl.n}`} flexDirection="column" marginBottom={1}>
             <Box flexDirection="row" gap={1}>
+              {items.length > 0 && <Text color="green">✓</Text>}
+              {items.length > 0 && orchFold(pl, true)}
               <Box flexShrink={1} minWidth={0}>
-                <Text wrap="truncate-end">
-                  <Text color="green">✓</Text>
-                  {'   '}
-                  {pl.n}. {pl.title}
-                </Text>
+                {items.length > 0 ? (
+                  <Text wrap="truncate-end">
+                    {pl.n}. {pl.title}
+                  </Text>
+                ) : (
+                  <Text wrap="truncate-end">
+                    <Text color="green">✓</Text>
+                    {'   '}
+                    {pl.n}. {pl.title}
+                  </Text>
+                )}
               </Box>
               {toNote}
               {acceptedDone(pl) ? <Box flexGrow={1} /> : null}
@@ -3116,8 +3344,9 @@ export const register: Register = (on, options) => {
               {'  '}
               <Text color={colorOf(tier)}>{tier}</Text>
               {' · '}
-              <Text color={STATE_COLOR.done}>{`${s.acceptedRow} · ${s.noRun}`}</Text>
+              <Text color={STATE_COLOR.done}>{`${s.acceptedRow} · ${s.orchestrator}`}</Text>
             </Text>
+            {items.length > 0 && isOrchOpen(pl) && itemLines(`${kp}orch-item-${pl.n}`, items)}
           </Box>
         )
       }
@@ -3174,7 +3403,7 @@ export const register: Register = (on, options) => {
             ≈{fmtCost(v.t.cost)} · {fmtTokens(v.t.tokens)} {s.tokensWord} · {fmtTime(v.t.time)}
           </Text>
         ),
-        body: () => listOf({ agent: a => row(a), accepted: acceptedLine, planned: plannedLine }),
+        body: () => listOf({ agent: a => row(a), accepted: acceptedLine, planned: plannedLine, orchestrator: orchLine }),
       }
     }
 
@@ -3379,8 +3608,12 @@ export const register: Register = (on, options) => {
       const isShown = !!f || list.length > 0
       if (!isShown && !earlier.entries.length) return notes.length ? notes : <Text dimColor>{rows === 'active' ? s.nothingQueued : s.noFinished}</Text>
       const meta = await readMeta($)
-      const at = Math.max(await readNow($), ...list.map(a => a.startedAt), 0)
-      const planned = plannedOf(f, list)
+      const orch = orchOf(f, list)
+      const at = Math.max(await readNow($), ...list.map(a => a.startedAt), ...[...orch.values()].map(o => o.startedAt ?? 0), 0)
+      const planned = plannedOf(f, list).map(pl => {
+        const o = orch.get(pl.n)
+        return o ? { ...pl, orch: o } : pl
+      })
       const t = totals(list, at)
       const own = { tasks: f?.tasks ?? [], runs: list, accepted: f ? acceptedOf(f) : [], acceptedAt: f?.acceptedAt }
       const c = earlier.entries.length ? combineParts<TaskLike, AgentRun>([...earlier.entries.map(dayPartOf), own]) : null

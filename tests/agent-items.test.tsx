@@ -283,12 +283,12 @@ describe('agent items through the step tool', () => {
     expect(chevron?.props.dimColor).toBe(true)
   })
 
-  test('calls from the main agent stay ignored', async ($, on) => {
+  test('calls from the main agent never touch a worker row; with no planned task they are ignored', async ($, on) => {
     engine(on)
     await start($)
     await spawn($)
-    expect(await step($, { steps: SIX }, null)).toBe('ignored: only subagents report steps')
-    expect((await terminal($)).text).not.toMatch(/0\/6/)
+    expect(await step($, { steps: SIX }, null)).toBe('ignored: no open flow with planned tasks; plan it with mcp__flowdeck__progress first')
+    expect((await terminal($)).text).not.toMatch(/\d\/6/)
   })
 
   test('a failing clock or store never throws the call', async ($, on) => {

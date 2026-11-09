@@ -41,6 +41,13 @@ export type PlannedTask = TaskNoteParts & {
   after: number[]
   mirrored?: boolean
   counted?: boolean
+} & OrchestratorSteps
+
+/** The orchestrator's own step list on a task no worker run belongs to (the `step` tool called from the main session). */
+export type OrchestratorSteps = {
+  items?: AgentItem[]
+  /** When the orchestrator's list on it began (its first `step` call). */
+  startedAt?: number
 }
 
 export type Flow = {
@@ -105,7 +112,7 @@ export type AgentRun = {
   brief?: string
 }
 
-export type ArchiveTask = TaskNoteParts & { title: string; tier: string; model?: string; after?: number[] }
+export type ArchiveTask = TaskNoteParts & OrchestratorSteps & { title: string; tier: string; model?: string; after?: number[] }
 
 /** An agent run as it was when its flow was saved, without the live-only fields. */
 export type ArchiveAgent = Omit<AgentRun, 'tool' | 'isAsked' | 'archived'>

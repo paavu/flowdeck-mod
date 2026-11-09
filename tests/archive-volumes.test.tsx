@@ -157,7 +157,7 @@ describe('the archive before 1.0.0025 is imported once', () => {
     // the first group is open and shows its rows, read from its session file
     const v = await view($)
     expect(v.open).toEqual([true, ...Array(8).fill(false)])
-    expect(v.text.split('✓ write tests (careful)').length - 1).toBe(1)
+    expect(v.text.split('1. write tests').length - 1).toBe(1)
     expect(v.text).not.toMatch(/Showing .* flows/)
     // one session file each: e3 once, and of e6 the later-ended copy
     const saved = sessions(env.files, DIR)

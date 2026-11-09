@@ -3,24 +3,27 @@
 // confirmations. It draws only: the data, the panel's flow drawing and every press come from register.tsx.
 import type { Elements, RenderChildren } from 'claude-code'
 
-import type { AgentRun, ArchiveAgent, ArchiveDetail, ArchiveEntry, ArchiveRecord, Panel, PlannedTask, TaskPlan } from '../types'
-import { formatEntry, groupLine, keyOf } from './archive'
+import type { AgentRun, ArchiveAgent, ArchiveDetail, ArchiveEntry, ArchiveRecord, ArchiveTask, Panel, PlannedTask, TaskPlan } from '../types'
+import { groupLine, keyOf } from './archive'
 import { foldGlyph } from './fold'
-import { acceptedOf } from './tasks'
+import { listed } from './orchestrator'
+import type { Orch } from './orchestrator'
+import { acceptedOf, unstarted } from './tasks'
 
 /** Move-to-Trash on an Archive row: U+1F5D1 with U+FE0E, so it stays a text glyph in the row's font and colour. */
 export const TRASH_ICON = '\u{1F5D1}︎'
 /** Restore on a Trash row. */
 export const RESTORE_ICON = '↩'
 
-/** A planned task, numbered in plan order; `ready` once everything it waits for is done; `doneAt` when it was accepted. */
-export type Planned = PlannedTask & { n: number; ready?: boolean; doneAt?: number }
+/** A planned task, numbered in plan order; `ready` once everything it waits for is done; `doneAt` when it was accepted; `orch` while it is an Orchestrator row (orchestrator.ts). */
+export type Planned = PlannedTask & { n: number; ready?: boolean; doneAt?: number; orch?: Orch }
 export type Totals = { cost: number; tokens: number; time: number }
 
 // One flow as the panel draws it, live or from the archive: the header (the three tiles; never the flow's title) and, on
 // demand, the body, one flat list of `rows`: `active` (the running rows newest first, then the planned
 // tasks in plan order), `finished` (the finished rows not archived and the accepted ones, latest completion first) or
-// `all`, the archive's (every row and the accepted ones, latest completion first). `at` is the clock the rows count to.
+// `all`, the archive's (every row, the accepted ones and the planned tasks' Orchestrator rows, latest completion first,
+// then the planned tasks still queued). `at` is the clock the rows count to.
 export type FlowView = {
   kp: string
   fp: string
@@ -127,8 +130,20 @@ export function summaryLine(v: Pick<ArchiveView, 'fmt' | 'words'>, rec: ArchiveR
   return rec.missing ? `${line} · ${v.words.fileMissing}` : line
 }
 
-// An opened group's body: the session as it ended (its rows, latest completion first; an archived plan's
-// drawing; the task list of a flow saved without runs), or why it is not there.
+// A saved flow's tasks no run belongs to and not accepted, as the live panel draws them: one the orchestrator kept a step
+// list on is an Orchestrator row (orchestrator.ts `listed`); in a flow saved without runs the others are queued rows, so
+// its group still shows every task it holds (its item count). Nothing in a saved session can start, so none reads `ready`.
+export function archivedPlanned(tasks: (ArchiveTask & { counted?: boolean })[], runs: AgentRun[], accepted: number[]): Planned[] {
+  const orch = listed(tasks, runs, accepted)
+  return unstarted(tasks, runs, accepted).flatMap(t => {
+    const pl: Planned = { ...t, after: t.after ?? [], ready: false }
+    const o = orch.get(t.n)
+    return o ? [{ ...pl, orch: o }] : runs.length ? [] : [pl]
+  })
+}
+
+// An opened group's body: the session as it ended (its rows, latest completion first, the orchestrator's own among them;
+// an archived plan's drawing), or why it is not there.
 function groupBody(v: ArchiveView, rec: ArchiveRecord, key: string): RenderChildren {
   const { Box, Text } = v.ui
   const width = v.W - GROUP_INDENT * COLUMN_PX
@@ -146,29 +161,26 @@ function groupBody(v: ArchiveView, rec: ArchiveRecord, key: string): RenderChild
   const kp = `${v.list}-${key}-`
   if (entry.plan) return v.plan(entry.plan, kp, entry.endedAt, width)
   const runs = (entry.agents ?? []).map(a => endedRun(a, entry.endedAt))
-  if (!runs.length) {
-    return formatEntry(entry).lines.map((l, k) => (
-      <Text key={`${kp}${k}`} dimColor wrap="truncate-end">
-        {l}
-      </Text>
-    ))
-  }
+  // A day's session linked each run to its own flow's task when it was merged: no task is free for another flow's run.
+  const tasks = entry.mergedIds ? entry.tasks.map(t => ({ ...t, counted: true })) : entry.tasks
+  const accepted = acceptedOf(entry)
   const view = v.flowView({
     kp,
     fp: `${groupKey(v.list, entry.id)}:`,
     list: runs,
-    // A day's session linked each run to its own flow's task when it was merged: no task is free for another flow's run.
-    tasks: entry.mergedIds ? entry.tasks.map(t => ({ ...t, counted: true })) : entry.tasks,
-    accepted: acceptedOf(entry),
+    tasks,
+    accepted,
     acceptedAt: entry.acceptedAt,
     acceptedFallback: entry.endedAt,
-    planned: [],
+    planned: archivedPlanned(tasks, runs, accepted),
     at: entry.endedAt,
     t: { cost: entry.cost, tokens: entry.tokens, time: entry.time },
     rows: 'all',
     width,
   })
-  return v.Svg ? [view.header, view.body()] : <Box flexDirection="column" marginTop={1}>{view.body()}</Box>
+  // A flow saved without runs has no tiles (its summary line stays).
+  if (v.Svg) return runs.length ? [view.header, view.body()] : view.body()
+  return <Box flexDirection="column" marginTop={1}>{view.body()}</Box>
 }
 
 // Whether an opened group draws the three tiles (the desktop, a flow saved with runs): its summary line then gives way to them.
