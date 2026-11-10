@@ -498,5 +498,7 @@ describe('the rule for the model', () => {
     expect(rule.text.length).toBeLessThan(760)
     const tool = registered.find(t => t.name === 'progress')
     for (const word of ['brief', 'Agent prompt']) expect(tool.description).toContain(word)
+    const step = registered.find(t => t.name === 'step')
+    expect(step.description).toMatch(/^Report your own steps to the panel: workers for their run, the orchestrator \(main session\) for a task it does itself/)
   })
 })

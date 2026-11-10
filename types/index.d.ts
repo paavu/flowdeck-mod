@@ -220,6 +220,8 @@ export type Panel = {
   tab: PanelTab
   /** Task tracking, one choice for all projects, stored under the engine-store key `rule` (read at session start). */
   rule: Rule
+  /** Strict mode, one choice for all projects, stored under the engine-store key `strict` (read at session start); off unless switched on. */
+  isStrict: boolean
 }
 
 /** Task tracking: only `off` keeps the flow rule out of the system prompt; `unset` (an earlier release's default) counts as on. */

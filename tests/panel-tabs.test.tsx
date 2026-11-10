@@ -259,7 +259,7 @@ describe('the tabs', () => {
       const keys = (n: any) => walk(n).map(keyOfNode).filter(Boolean)
       expect(keys(row('top-toggles'))).toEqual(['top-toggles', 'context', 'usage', 'band', 'keep-warm'])
       expect(keys(row('top-toggles'))).not.toContain('track-tasks')
-      expect(keys(row('flowdeck-title'))).toEqual(['flowdeck-title', 'track-tasks'])
+      expect(keys(row('flowdeck-title'))).toEqual(['flowdeck-title', 'track-tasks', 'strict-mode'])
       expect(textOf(row('flowdeck-title'))).toContain('FlowDeck')
       const at = walk(root).map(keyOfNode)
       expect(at.indexOf('usage')).toBeLessThan(at.indexOf('flowdeck-title'))

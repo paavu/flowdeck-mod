@@ -2,6 +2,21 @@
 
 Versions are `M.m.xxxx`; every build bumps the 4-digit build number. Details and rulings: `docs/ledger.md`, `docs/design.md`.
 
+## 1.0.0077 (2026-11-09)
+- Strict mode, a new setting, off by default for every install (existing ones too; nothing turns it on but you). With strict mode on and task tracking on, flowdeck refuses instead of reminding: a work call of the main session (an edit, a shell command, a worker launch) while no flow is open is refused with `flowdeck strict mode: refused, no flow is open. Load mcp__flowdeck__progress ...`, and a task the orchestrator does itself without a step list is refused once the step reminder was shown twice for it (`... task N has no step list. Send mcp__flowdeck__step with task: N and steps ...`). A finished flow counts as no flow open.
+- Never refused: workers' and subagents' calls, reads and searches, ToolSearch, AskUserQuestion, flowdeck's own tools, task bookkeeping and read-only MCP tools (the list is `STRICT_ALLOWED` in hooks/nudge.ts). Nothing is refused while tracking is off or when the stored choice cannot be read.
+- Loop guard: after 2 refusals in one main turn the rest of that turn goes through, and the first call let through adds one record (`strict`, `tool`, `denied`) to `untracked-work.json`; the next turn refuses again.
+- Switch it with `/flowdeck-strict on`, `off` or `status`, or the `○ Strict` switch beside `● Track tasks` (shown while tracking is on). Mod store key `strict`.
+- With strict mode on, the step reminder also shows in a session whose prompt already holds the flow rule, so a task is reminded twice before its work is refused.
+
+## 1.0.0076 (2026-11-09)
+- A session that was already running when the mod was updated (picked up with `/reload-plugins`) keeps the system prompt it started with, so 1.0.0075's step instruction in the flow rule never reached it. Now, while it does a task of the open flow itself without a step list, its work calls get one line, on the 1st and every 3rd for that task: `flowdeck: you are doing task N yourself; report it with mcp__flowdeck__step: ...`. It stops once the task has a list, starts over for the next task, and never shows in a session whose prompt this version composed, for workers, or with tracking off.
+
+## 1.0.0075 (2026-11-09)
+- The flow rule in the system prompt now tells the orchestrator to report a task it does itself with the `step` tool too: a `steps` list (3-8 titles) once, then `next: true` as each step ends, and to load both tools with one ToolSearch (`select:mcp__flowdeck__progress,mcp__flowdeck__step`) when they are deferred. Before, it named only `progress`, so the main session never loaded `step` and its Orchestrator rows showed no steps.
+- The rule's other sentences are shorter with the same meaning, so it stays under its 760-character cap (756 characters).
+- The `step` tool's description now starts with both users: workers for their run, the orchestrator for a task it does itself (it began "For flowdeck workers"). SKILL.md and the README say the same.
+
 ## 1.0.0074 (2026-11-09)
 - Archive: a saved flow draws the orchestrator's own tasks as the live panel does. An accepted one is the `Accepted · Orchestrator` row with its steps behind the fold glyph; one with a step list that was not accepted is an Orchestrator row (`Orchestrator` where the model is, its time, the state, the bar and its steps with their marks and times; a step still open at the save reads Running, its clock stopped at the save). The rows sit among the worker rows, latest completion first, with their notes behind `ⓘ`, on the desktop and in the terminal.
 - A flow saved without worker runs is no longer a plain task list (`✓ title (tier)`, `○ title (tier)`): its group draws those rows, and its tasks never started as queued rows after them (never `ready`), so it still shows every task it holds. Its summary line stays; it gets no tiles.

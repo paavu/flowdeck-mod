@@ -11,7 +11,7 @@
 </p>
 
 <p align="center">
-  <img alt="Version 1.0.0074" src="https://img.shields.io/badge/version-1.0.0074-8f8cf4">
+  <img alt="Version 1.0.0077" src="https://img.shields.io/badge/version-1.0.0077-8f8cf4">
   <img alt="MIT license" src="https://img.shields.io/badge/license-MIT-5fbf8f">
   <img alt="Claude Code 2.1.295 or later" src="https://img.shields.io/badge/Claude%20Code-%E2%89%A5%202.1.295-8f8cf4">
   <img alt="Terminal and desktop" src="https://img.shields.io/badge/surfaces-terminal%20%2B%20desktop-5fbf8f">
@@ -290,6 +290,7 @@ Under the tab row, a muted line counts today's turns that did work with tracking
 |---|---|
 | `/flowdeck-panel` | Shows or hides the side panel. `/flowdeck-agents`, its old name, still works in this release. |
 | `/flowdeck-rule on`, `off`, `status` | Turns task tracking on or off for every project, or says what the current choice is and what it means (see [Task tracking](#task-tracking)). |
+| `/flowdeck-strict on`, `off`, `status` | Turns strict mode on or off for every project, or says what it refuses (see [Strict mode](#strict-mode)). |
 | `/flowdeck:flowdeck <task>` | Starts a flow on the task: plan, design (when the task touches UI), delegate, review, close. A flow already open is saved and replaced. Works whatever the tracking choice. |
 | `/flowdeck:flowdeck` | With no task: adopts the work already under way in the session into a flow. |
 
@@ -334,7 +335,7 @@ How to use:
 
 #### Orchestrator rows
 
-A planned task no worker run belongs to is one the orchestrator (the main session) does itself. While it works on it, the Active tab draws it as a worker's row is drawn, with `Orchestrator` where a worker's model is: the tier, what it waits for and the time since it started on the meta line, then the state (`Running · 2/4 · Run the backtest`), the bar and, folded out, its own steps. The orchestrator reports those steps with `mcp__flowdeck__step` as a worker does, with `task` naming the task when several are open. The row runs:
+A planned task no worker run belongs to is one the orchestrator (the main session) does itself. While it works on it, the Active tab draws it as a worker's row is drawn, with `Orchestrator` where a worker's model is: the tier, what it waits for and the time since it started on the meta line, then the state (`Running · 2/4 · Run the backtest`), the bar and, folded out, its own steps. The orchestrator reports those steps with `mcp__flowdeck__step` as a worker does, with `task` naming the task when several are open. A running session whose system prompt was composed without the flow rule of this version (an update picked up with `/reload-plugins`) gets a one-line reminder to do so on its work calls for such a task, on the 1st and every 3rd, until the task has a step list. The row runs:
 
 - while the orchestrator's step list for the task has a step left (once every step ended it reads `Done`, or `Incomplete` with a step not done, until the task is accepted);
 - without a step list, from the orchestrator's first own work call (an edit, a shell command; not a worker launch) while the task is the lowest ready one with no worker run, no worker running, no worker result waiting for review and the flow in its delegate or review phase.
@@ -484,7 +485,7 @@ What you see:
 
 How to use: switch tracking from the strip, the switch beside the `FlowDeck` title or `/flowdeck-rule`; the choice is kept for every project. With tracking on there is no strip.
 
-Task tracking decides whether the mod puts its flow rule (`flowdeck:flow-rule`) into the system prompt of every session. It is on unless switched off. The rule tells Claude to report every task through `progress`: the plan once with `title` and `tasks` (`title`, `tier`, `after` for tasks that edit the same files, `goal`), `add` for a new task, `done` with `result` and `feedback` notes when a task is accepted, and `#<n> <title>` at the start of each worker's Agent description. Every task that does work (an edit, a shell command, a worker) opens or joins a flow first, even a one-step task (a flow of one task), and each task is closed with `done` and its notes before the turn ends; only an answer given with no work calls gets no flow. It blocks no edit or tool call.
+Task tracking decides whether the mod puts its flow rule (`flowdeck:flow-rule`) into the system prompt of every session. It is on unless switched off. The rule tells Claude to report every task through `progress`: the plan once with `title` and `tasks` (`title`, `tier`, `after` for tasks that edit the same files, `goal`), `add` for a new task, `done` with `result` and `feedback` notes when a task is accepted, and `#<n> <title>` at the start of each worker's Agent description. For a task it does itself, the orchestrator also reports its own steps with `step`: a `steps` list (3-8 titles) once, then `next: true` as each step finishes. Every task that does work (an edit, a shell command, a worker) opens or joins a flow first, even a one-step task (a flow of one task), and each task is closed with `done` and its notes before the turn ends; only an answer given with no work calls gets no flow. It blocks no edit or tool call unless [strict mode](#strict-mode) is on.
 
 The rule is a request, so the mod also checks it, in three ways. All three follow the stored choice (`/flowdeck-rule` and the `Track tasks` switch), not a session that ran `/flowdeck:flowdeck`, so they stop at once when tracking is off, and none reaches a worker.
 
@@ -504,6 +505,14 @@ The rule is a request, so the mod also checks it, in three ways. All three follo
 - **`/flowdeck-rule status`** says the current choice and what it means. The strip never shows on the Archive and Trash tabs.
 - **Existing installs**: from 1.0.0065 every install tracks unless its stored choice is `off`. Release 1.0.0037 had saved `on` for an install that already ran the mod and `unset` for a new one; `unset` now counts as `on`, so those installs start tracking at their next session. Opt out with `/flowdeck-rule off` or the `○ Track tasks` switch. A store that cannot be read counts as on.
 
+### Strict mode
+
+Strict mode turns the plan and step reminders into refusals. It is off for every install, new or existing, until you switch it on, and it acts only while task tracking is on. With both on, the main session's work call (an edit, a write, a shell command, a worker launch) is refused while no flow is open, and Claude is told to load `mcp__flowdeck__progress` (ToolSearch `select:mcp__flowdeck__progress` if deferred), plan the task with a title and tasks, and retry; a finished flow counts as no flow open. While a flow is open, work on a task Claude does itself without a step list is refused once the step reminder was shown twice for that task (with strict mode on the reminder shows even when the system prompt holds the flow rule), and Claude is told to send `mcp__flowdeck__step` with `task: N` and `steps` (3-8 titles), then retry. Workers' and subagents' calls are never refused, nor are reads and searches, ToolSearch, AskUserQuestion, flowdeck's own tools, task bookkeeping and read-only MCP tools (the list is `STRICT_ALLOWED` in `hooks/nudge.ts`). A stored choice that cannot be read refuses nothing.
+
+The loop guard keeps a confused turn from stalling: after 2 refusals in one main turn, the rest of that turn goes through, and the first call let through adds one record to `.claude/flowdeck/untracked-work.json` (`strict`: `flow` or `step`, the tool, `denied`: 2); it does not count as a turn without a flow. The next turn refuses again. The reminders and the turn-end check work as before.
+
+How to use: `/flowdeck-strict on`, `off` or `status`, or the `○ Strict` switch beside `● Track tasks` above the tabs (shown only while tracking is on). The choice is kept for every project (mod store key `strict`) and applies from the next call.
+
 ### What it costs
 
 Measured on Claude Code 2.1.312. Prose is estimated at about 3.6 characters a token (no tokenizer is available to the mod); tool schemas are given as Claude Code's `/context` counts them (about 2 characters a token of their JSON), and `/context`'s rounded System prompt total is shown too.
@@ -515,7 +524,7 @@ Measured on Claude Code 2.1.312. Prose is estimated at about 3.6 characters a to
 | `step` tool schema | once a worker loads the tool | 1,516 characters, `/context` 758 tokens | 1,274 characters, `/context` 638 tokens |
 | `SKILL.md` | when `/flowdeck:flowdeck` runs | 16,712 characters, about 4,640 tokens | 16,828 characters, about 4,670 tokens |
 
-With tracking on, the main session pays the flow rule (about 740 characters, about 205 tokens in the system prompt), the `progress` schema once the tool is loaded, a short reminder line on the 1st and every 3rd work call of a main turn when no flow is open (it carries the whole rule only until a compose has put the rule in the system prompt), and one send-back message at the end of a turn that did 2 or more work calls without a flow. The strip's token number is computed from the same texts. A few `progress` calls per task come on top. With tracking `off`, the tools are listed by name only (deferred) and the system prompt is unchanged.
+With tracking on, the main session pays the flow rule (about 760 characters, about 210 tokens in the system prompt), the `progress` schema once the tool is loaded, the `step` schema once it reports a task it does itself, a short reminder line on the 1st and every 3rd work call of a main turn when no flow is open (it carries the whole rule only until a compose has put the rule in the system prompt), and one send-back message at the end of a turn that did 2 or more work calls without a flow. The strip's token number is computed from the same texts. A few `progress` calls per task come on top. With tracking `off`, the tools are listed by name only (deferred) and the system prompt is unchanged.
 
 ## Configuration and data
 
@@ -526,6 +535,7 @@ With tracking on, the main session pays the flow rule (about 740 characters, abo
 | Reset as time left or exact time | `◷` in Usage (mod store `usageRemaining`) | time left |
 | Keep warm | panel top row (mod store `keepWarm`, per project folder) | on |
 | Task tracking | `Track tasks` beside the `FlowDeck` title, the strip's buttons, `/flowdeck-rule` (mod store `rule`, all projects) | `on` |
+| Strict mode | `Strict` beside `Track tasks` while tracking is on, `/flowdeck-strict` (mod store `strict`, all projects) | `off` |
 | Band shown | panel top row (per session) | shown |
 | Project folder of a session | mod store `projectOf`, an object `{ sessionId: folder }` of at most 100 sessions (the oldest are dropped); used only while that folder's `.claude/flowdeck` exists | the folder found at session start |
 | Cache prices | `MODELS` in `hooks/cache.ts` | Fable 10 / 0.25, Opus 4 / 0.20, Sonnet 2 / 0.20, Haiku 0.5 / 0.05 USD per million tokens |

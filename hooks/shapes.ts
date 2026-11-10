@@ -33,6 +33,8 @@ export const PANEL_DEFAULT: Panel = {
   tab: 'active',
   // Not chosen until the user picks (the store key `rule` wins at session start).
   rule: 'unset',
+  // Off until the user switches it on (the store key `strict` wins at session start).
+  isStrict: false,
 }
 
 const TABS: readonly PanelTab[] = ['active', 'finished', 'archive', 'trash']
@@ -76,6 +78,8 @@ export function asPanel(v: unknown): Panel {
     tab: TABS.includes(o.tab as PanelTab) ? (o.tab as PanelTab) : d.tab,
     // A panel held from before 1.0.0037 has no choice: unset until session start reads the store.
     rule: asRule(o.rule),
+    // A panel held from before 1.0.0077 has no switch: strict mode is off.
+    isStrict: bool(o.isStrict, d.isStrict),
   }
 }
 

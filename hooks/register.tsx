@@ -4,7 +4,7 @@ import type { Elements, EngineInterface, Register, RenderChildren } from 'claude
 import type { AgentItem, AgentRun, ArchiveDetail, ArchiveEntry, ArchiveLists, ArchiveRecord, Flow, Panel, PanelTab, Phase, PlannedTask, Reading, Rule, Samples, TaskPlan, UsageWindow } from '../types'
 import { derive, finishItems, hasItemOps, ITEM_H, itemAlt, itemLine, itemsOf, itemSvg, noteSvg, stepItems, timedItems } from './agent-items'
 import type { StepInput } from './agent-items'
-import { countCall, FLOW_SEND_BACK, isPlanNudgeCall, isWorkCall, PLAN_NUDGE, PLAN_SEND_BACK, withNudgeLine } from './nudge'
+import { countCall, countRemind, FLOW_SEND_BACK, isPlanNudgeCall, isStrictWork, isWorkCall, PLAN_NUDGE, PLAN_SEND_BACK, remindShown, STRICT_DENY_MAX, STRICT_FLOW_DENY, STRICT_STEP_AFTER, stepRemind, strictStepDeny, withNudgeLine } from './nudge'
 import { agentState, HOUSEKEEPING, isComplete, isIncomplete, isLive, markOf, progressOf, splitHead, stateText, stepCount } from './agent-state'
 import { contextRows, contextSvg, toReading } from './context'
 import { combineParts, dayPartOf, isWorthKeeping, keyOf, snapshot } from './archive'
@@ -31,8 +31,9 @@ import type { LiveRecord } from './live'
 import { SMALL_SIZE } from './sizes'
 import { VERSION } from './version'
 import { projectByKey, transcriptGuesses } from './project'
-import { asRule, estimateTokens, isStoredRule, isTracking, RULE_KEY, SCHEMA_CHARS_PER_TOKEN, toggledRule } from './rule'
+import { asRule, asStrict, estimateTokens, isStoredRule, isTracking, RULE_KEY, SCHEMA_CHARS_PER_TOKEN, STRICT_KEY, toggledRule } from './rule'
 import { appendUntracked, readUntracked, toolsOf, untrackedLine } from './untracked'
+import type { StrictPass } from './untracked'
 import { live, record, resetKey, resets, toWindows, usageHeadSvg, usageRows, usageSvg } from './usage'
 import { CACHE_HUE, cacheKey, isCardOpen, isRenewDue, isShowable, KEEP_WARM_DEFAULT, measured, remeasured, renewalEnded, seeded, stamped, toggledFold, userSpoke, viewOf } from './cache'
 import type { CacheFacts, CacheMode, KeepWarm } from './cache'
@@ -140,12 +141,13 @@ const TICK_MS = 5000
 const PHASES: readonly Phase[] = ['plan', 'design', 'delegate', 'review', 'close']
 // The flow rule, in the system prompt only while task tracking is on (rule.ts) or in a session that ran /flowdeck:flowdeck.
 const FLOW_RULE = `# flowdeck
-Track each task with ${TOOL} (ToolSearch \`select:${TOOL}\` if deferred; workers use only ${STEP_TOOL}). Plan once: title, tasks [{title, tier, after, goal}] from 1; chain tasks editing the same files with \`after\`. New task: \`add\` with its goal. Accepted: \`done: [n]\` with notes [{task, result, feedback}]. Worker Agent description: \`#<n> <title>\`. Pick the Agent \`model\` per task and send it as the task's \`model\`. Fable only after the user approves, once Opus heavy failed; state why atop its brief. Any task doing work (edit, shell, worker) opens or joins a flow first, even a one-step one (one task); only an answer with no work calls needs none. Close each task with \`done\` + notes before the turn ends.`
+ToolSearch \`select:${TOOL},${STEP_TOOL}\` if deferred. Report tasks with progress; one you do yourself also with step: \`steps\` (3-8 titles) once, \`next: true\` as each ends. Workers: step only. Plan once: title, tasks [{title, tier, after, goal}] from 1; chain same-file tasks with \`after\`. New: \`add\` with its goal. Accept: \`done: [n]\` with notes [{task, result, feedback}]. Agent description: \`#<n> <title>\`; pick its \`model\` per task, sent as the task's \`model\`. Fable only on the user's yes once Opus heavy failed; say why atop its brief. Work (edit, shell, worker) opens or joins a flow first, even a one-step task; only an answer with no work calls needs none. Close each task with \`done\` + notes before the turn ends.`
 const GOAL_TEXT = "The user's request for this task in a sentence; plain text, at most 300 characters."
 // The pane keeps its id from before the command's rename, so a pane the desktop app placed still opens.
 const PANE = 'flowdeck-agents'
 const PANEL_COMMANDS = ['flowdeck-panel', 'flowdeck-agents'] // the second is the old name, kept for one release
 const RULE_COMMAND = 'flowdeck-rule'
+const STRICT_COMMAND = 'flowdeck-strict'
 const MODEL_PROP = { type: 'string', enum: [...TASK_MODELS], description: "Model for the task, if not the tier's." }
 const TIERS = ['fable', 'heavy', 'careful', 'medium', 'light']
 
@@ -219,9 +221,9 @@ const PROGRESS_SPEC = {
 const STEP_SPEC = {
   name: 'step',
   description:
-    'For flowdeck workers: report your own steps to the panel. Send your plan once as steps (3-8 short titles), then next: true as each finishes; done (titles), active or failed for the others. ' +
-    'Without a list: total and done (a count) with a note. Silent: it only draws your row. ' +
-    'The orchestrator (main session) reports a task it does itself the same way, with a list, on that task\'s Orchestrator row.',
+    'Report your own steps to the panel: workers for their run, the orchestrator (main session) for a task it does itself, with a list, on that task\'s Orchestrator row. ' +
+    'Send your plan once as steps (3-8 short titles), then next: true as each finishes; done (titles), active or failed for the others. ' +
+    'Without a list (workers only): total and done (a count) with a note. Silent: it only draws your row.',
   inputSchema: {
     type: 'object',
     properties: {
@@ -1931,15 +1933,24 @@ async function loadUntracked($: EngineInterface): Promise<void> {
 // The main session's work calls with tracking on and no flow open are counted (planCalls): the first of a turn, then every
 // PLAN_NUDGE_EVERY-th, gets one line to plan first (nudge.ts PLAN_NUDGE, isPlanNudgeCall); an open flow starts the count
 // over. While the system prompt does not hold the rule yet (tracking turned on after the last compose), the line carries
-// the whole rule, so the running session tracks tasks at once. Never alters the call itself; a failing read adds nothing.
+// the whole rule, so the running session tracks tasks at once. With a flow open, an own work call may get the step
+// reminder instead (stepRemindLine). Never alters the call itself; a failing read adds nothing.
+// Strict mode refuses the call instead when it applies (strictStepRefusal, strictFlowRefusal); a refused call is not counted.
 async function planNudge($: EngineInterface, e: { tool: string; agentId?: string }, next: (e: any) => Promise<any>): Promise<any> {
   if (!isWorkCall(e.tool)) return next(e)
   if (!(await isPlanDue($))) {
     resetPlanCalls()
+    const stepRefusal = isOwnWork(e.tool) ? await strictStepRefusal($, e.tool).catch(() => null) : null
+    if (stepRefusal) return { deny: stepRefusal }
     flowWork++
-    if (isOwnWork(e.tool)) await stampOwnWork($).catch(() => {})
-    return next(e)
+    if (!isOwnWork(e.tool)) return next(e)
+    await stampOwnWork($).catch(() => {})
+    const line = await stepRemindLine($).catch(() => null)
+    const result = await next(e)
+    return line ? withNudgeLine(result, line) : result
   }
+  const flowRefusal = await strictFlowRefusal($, e.tool).catch(() => null)
+  if (flowRefusal) return { deny: flowRefusal }
   planTools.set(e.tool, (planTools.get(e.tool) ?? 0) + 1)
   if (!isPlanNudgeCall(++planCalls)) return next(e)
   return withNudgeLine(await next(e), ruleComposed ? PLAN_NUDGE : `${PLAN_NUDGE} ${FLOW_RULE}`)
@@ -1958,6 +1969,72 @@ async function stampOwnWork($: EngineInterface): Promise<void> {
   await updateFlow($, p => (p && !p.isFinished && p.tasks[i]?.title === task.title && p.tasks[i]?.startedAt === undefined ? { ...p, tasks: p.tasks.map((t, k) => (k === i ? { ...t, startedAt: at } : t)) } : p))
   await update($, now, prev => Math.max(asNow(prev), at))
   await persistLive($)
+}
+
+// The step reminder's line for a main-session own work call (nudge.ts stepRemind), or null: tracking is chosen, this load
+// of the hooks never composed the prompt with FLOW_RULE (`ruleComposed`: a session that picked up an update with
+// /reload-plugins keeps a prompt that may lack the step instruction), and the orchestrator is on a task of the open flow
+// without a step list (`ownTask`); the first such call per task, then every STEP_REMIND_EVERY-th. With strict mode on it
+// counts whatever the prompt holds, since strict refuses a task's work only after two reminders (strictStepRefusal).
+async function stepRemindLine($: EngineInterface): Promise<string | null> {
+  if ((ruleComposed && !(await isStrictOn($))) || !(await isTrackingChosen($))) return null
+  const own = await listlessTask($)
+  if (!own) return null
+  return countRemind(stepReminded, own.key) ? stepRemind(own.i + 1) : null
+}
+
+// The open linked flow's task the orchestrator is on without a step list (`ownTask`), with the step reminder's key for
+// it (flow title, index, task title); null otherwise.
+async function listlessTask($: EngineInterface): Promise<{ i: number; key: string } | null> {
+  const f = await readFlow($)
+  if (!f || !f.isLinked || f.isFinished) return null
+  const i = ownTask(f.tasks, await readAgents($), acceptedOf(f), f.phase)
+  const task = i === null ? undefined : f.tasks[i]
+  if (i === null || !task || itemsOf(task.items).length) return null
+  return { i, key: `${f.title}\u0000${i}\u0000${task.title}` }
+}
+
+// Strict mode is switched on (rule.ts STRICT_KEY); false when the store cannot be read, so strict never refuses then.
+async function isStrictOn($: EngineInterface): Promise<boolean> {
+  return asStrict(await $.store.get(STRICT_KEY).catch(() => null))
+}
+
+// Strict mode's refusal for a main-session work call while a plan is due (tracking on, no linked open flow): the reason,
+// or null when strict is off, the call is not strict work (nudge.ts isStrictWork) or the loop guard lets it through.
+async function strictFlowRefusal($: EngineInterface, tool: string): Promise<string | null> {
+  if (!isStrictWork(tool) || !(await isStrictOn($))) return null
+  return strictGate($, STRICT_FLOW_DENY, 'flow', tool)
+}
+
+// Strict mode's refusal for a main-session own work call on a task of the open flow without a step list, once the step
+// reminder was shown STRICT_STEP_AFTER times for that task; null otherwise, and while tracking is not chosen.
+async function strictStepRefusal($: EngineInterface, tool: string): Promise<string | null> {
+  if (!isStrictWork(tool) || !(await isStrictOn($)) || !(await isTrackingChosen($))) return null
+  const own = await listlessTask($)
+  if (!own || remindShown(stepReminded, own.key) < STRICT_STEP_AFTER) return null
+  return strictGate($, strictStepDeny(own.i + 1), 'step', tool)
+}
+
+// The loop guard: the first STRICT_DENY_MAX refusals of a main turn are refused; after them the turn's calls go through,
+// and the first one let through adds one record to the untracked-work log (untracked.ts StrictPass).
+async function strictGate($: EngineInterface, reason: string, kind: StrictPass['strict'], tool: string): Promise<string | null> {
+  if (strictDenied < STRICT_DENY_MAX) {
+    strictDenied++
+    return reason
+  }
+  if (!strictPassLogged) {
+    strictPassLogged = true
+    await logStrictPass($, kind, tool).catch(() => {})
+  }
+  return null
+}
+
+// The loop guard's record in the project's untracked-work log; without a project folder, or a clock, nothing is written.
+async function logStrictPass($: EngineInterface, kind: StrictPass['strict'], tool: string): Promise<void> {
+  const at = await clockAt($)
+  if (at === null || !project) return
+  const list = await appendUntracked(io($), project, { day: dayKey(at), time: hhmm(at), strict: kind, tool, denied: strictDenied })
+  if (list) await update($, untrackedDays, () => list.map(r => r.day))
 }
 
 const forgetFlights = (agentId: string): void => {
@@ -2066,6 +2143,11 @@ const resetPlanCalls = (): void => {
 }
 // The last prompt compose put the flow rule in the system prompt; false from session start until one does.
 let ruleComposed = false
+// The step reminder's count for the task it last counted (stepRemindLine).
+const stepReminded = { task: '', n: 0 }
+// Strict mode's refusals in this main turn, and whether the loop guard logged the call it let through (strictGate).
+let strictDenied = 0
+let strictPassLogged = false
 const RENEW_PROMPT = 'This request only renews the prompt cache for an idle session. Reply with the single word: ok'
 
 const isRenewalEcho = async ($: EngineInterface): Promise<boolean> => renewing && (await readKeepWarm($)).turnAt === 0
@@ -2138,6 +2220,20 @@ async function setRule($: EngineInterface, rule: Rule): Promise<void> {
   await updatePanel($, prev => (prev.rule === rule ? prev : { ...prev, rule }))
   await $.store.set(RULE_KEY, rule).catch(() => {})
 }
+
+// Strict mode, one choice for every project: the panel's copy draws the switch, the store keeps it (`on` or `off`).
+async function setStrict($: EngineInterface, isOn: boolean): Promise<void> {
+  await updatePanel($, prev => (prev.isStrict === isOn ? prev : { ...prev, isStrict: isOn }))
+  await $.store.set(STRICT_KEY, isOn ? 'on' : 'off').catch(() => {})
+}
+
+// What /flowdeck-strict answers: the choice, what it refuses, and that nothing is refused while tracking is off.
+const STRICT_WHAT =
+  "with task tracking on, flowdeck refuses the main session's work calls (edits, shells, workers) while no flow is open, and its own work on a task without a step list once the step reminder was shown twice; reads, searches, ToolSearch, AskUserQuestion and flowdeck's tools always go through, and after 2 refusals in a turn the rest of that turn goes through and is logged in untracked-work.json."
+const strictStatus = (isOn: boolean, isTrackingOn: boolean): string =>
+  isOn
+    ? `Strict mode is on for every project: ${STRICT_WHAT}${isTrackingOn ? '' : ' Task tracking is off, so nothing is refused until /flowdeck-rule on.'} /flowdeck-strict off turns it off.`
+    : 'Strict mode is off: flowdeck refuses no call; the reminders and the turn-end check still apply while tracking is on. /flowdeck-strict on turns it on.'
 
 // The rule goes into the system prompt unless tracking is off, or always once /flowdeck:flowdeck ran in this session. The
 // store is read each time, so a choice made in another session counts from its next request; the panel's copy stands in
@@ -2292,7 +2388,8 @@ function topToggleRow($: EngineInterface, ui: Pick<Elements['desktop'], 'Box' | 
   )
 }
 
-// The flowdeck group's title, with the task-tracking switch beside it; it reads only the stored choice, so the fallback panel draws it too.
+// The flowdeck group's title, with the task-tracking switch beside it and, while tracking is on, the strict-mode switch;
+// it reads only the stored choices, so the fallback panel draws it too.
 function flowTitleRow($: EngineInterface, ui: Pick<Elements['desktop'], 'Box' | 'Text' | 'Button'>, p: Panel): RenderChildren {
   const { Box, Text, Button } = ui
   return (
@@ -2305,6 +2402,11 @@ function flowTitleRow($: EngineInterface, ui: Pick<Elements['desktop'], 'Box' | 
       <Box flexShrink={0}>
         <Button key="track-tasks" label={`${isTracking(p.rule) ? '●' : '○'} Track tasks`} plain onPress={() => setRule($, toggledRule(p.rule))} />
       </Box>
+      {isTracking(p.rule) ? (
+        <Box flexShrink={0}>
+          <Button key="strict-mode" label={`${p.isStrict ? '●' : '○'} Strict`} plain onPress={() => setStrict($, !p.isStrict)} />
+        </Box>
+      ) : null}
     </Box>
   )
 }
@@ -2355,8 +2457,15 @@ export const register: Register = (on, options) => {
     const cwd = typeof e.cwd === 'string' ? e.cwd : ''
     project = await resolveProject($, cwd, sessionId).catch(() => cwd)
     ruleComposed = false
+    stepReminded.task = ''
+    stepReminded.n = 0
+    strictDenied = 0
+    strictPassLogged = false
     const rule = await loadRule($).catch(() => null)
     if (rule) await updatePanel($, prev => (prev.rule === rule ? prev : { ...prev, rule }))
+    // Strict mode is only read: nothing stored stays off, and no install is migrated to on.
+    const storedStrict: unknown = await $.store.get(STRICT_KEY).catch(() => null)
+    if (storedStrict !== null) await updatePanel($, prev => (prev.isStrict === asStrict(storedStrict) ? prev : { ...prev, isStrict: asStrict(storedStrict) }))
     const stored = await $.store.get('contextShown').catch(() => undefined)
     if (typeof stored === 'boolean') await updatePanel($, prev => ({ ...prev, isContextShown: stored }))
     const storedUsage = await $.store.get('usageShown').catch(() => undefined)
@@ -2388,6 +2497,7 @@ export const register: Register = (on, options) => {
       }).catch(() => {})
     }
     await $.command.register({ name: RULE_COMMAND, description: 'Turn task tracking on or off', argumentHint: 'on | off | status' }).catch(() => {})
+    await $.command.register({ name: STRICT_COMMAND, description: 'Turn strict mode on or off: refuse work while no flow is open', argumentHint: 'on | off | status' }).catch(() => {})
 
     // The flow shown and flow-live.json sorted into this session's and the last sessions' (closed and archived).
     await adoptLive($, sessionId)
@@ -2450,6 +2560,13 @@ export const register: Register = (on, options) => {
       return { text: ruleStatus(rule, (await read($, ruleSession).catch(() => false)) === true) }
     }
     return { text: 'Usage: /flowdeck-rule on | off | status' }
+  })
+
+  on('command.run', { command: STRICT_COMMAND }, async ($, e) => {
+    const arg = e.args.trim().toLowerCase()
+    if (arg === 'on' || arg === 'off') await setStrict($, arg === 'on')
+    else if (arg !== '' && arg !== 'status') return { text: 'Usage: /flowdeck-strict on | off | status' }
+    return { text: strictStatus(await isStrictOn($), await isTrackingChosen($).catch(() => true)) }
   })
 
   on('tool.call', { tool: TOOL }, async ($, e) => {
@@ -2676,6 +2793,8 @@ export const register: Register = (on, options) => {
       resetPlanCalls()
       planEnded = false
       flowWork = 0
+      strictDenied = 0
+      strictPassLogged = false
       const at = await $.clock.now().catch(() => 0)
       if (at) await updateKeepWarm($, k => ({ ...k, turnAt: at })).catch(() => {})
     }

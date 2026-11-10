@@ -179,19 +179,24 @@ describe('the flow rule in the system prompt', () => {
     for (const word of [
       'mcp__flowdeck__progress', // report through the progress tool
       'Plan once: title, tasks [{title, tier, after, goal}]', // plan once, goal on create
-      'chain tasks editing the same files with `after`',
+      'mcp__flowdeck__step', // the orchestrator's own steps
+      '`select:mcp__flowdeck__progress,mcp__flowdeck__step` if deferred',
+      'one you do yourself also with step: `steps` (3-8 titles) once, `next: true` as each ends',
+      'Workers: step only',
+      'chain same-file tasks with `after`',
       '`add` with its goal',
       '`done: [n]` with notes [{task, result, feedback}]', // result and feedback on accept
       '`#<n> <title>`',
-      'Any task doing work (edit, shell, worker) opens or joins a flow first, even a one-step one (one task)',
+      'Work (edit, shell, worker) opens or joins a flow first, even a one-step task',
       'only an answer with no work calls needs none',
       'Close each task with `done` + notes before the turn ends',
-      'Pick the Agent `model` per task and send it as the task\'s `model`', // model choice
-      'Fable only after the user approves, once Opus heavy failed; state why atop its brief',
+      'pick its `model` per task, sent as the task\'s `model`', // model choice
+      'Fable only on the user\'s yes once Opus heavy failed; say why atop its brief',
     ]) {
       expect(text).toContain(word)
     }
-    // Trimmed in 1.0.0037 from 896 characters; 1.0.0038 adds the model sentence, 1.0.0039 the Fable brief clause.
+    // Trimmed in 1.0.0037 from 896 characters; 1.0.0038 adds the model sentence, 1.0.0039 the Fable brief clause,
+    // 1.0.0075 the orchestrator's own step list (other wording tightened to stay under the cap).
     expect(text.length).toBeLessThan(760)
   })
 })
@@ -284,10 +289,10 @@ describe('the Track tasks switch', () => {
 })
 
 describe('the commands', () => {
-  test('registered: flowdeck-panel, flowdeck-agents (old name) and flowdeck-rule', async ($, on) => {
+  test('registered: flowdeck-panel, flowdeck-agents (old name), flowdeck-rule and flowdeck-strict', async ($, on) => {
     const { commands } = engine(on)
     await start($)
-    expect(commands.map(c => c.name)).toEqual(['flowdeck-panel', 'flowdeck-agents', 'flowdeck-rule'])
+    expect(commands.map(c => c.name)).toEqual(['flowdeck-panel', 'flowdeck-agents', 'flowdeck-rule', 'flowdeck-strict'])
     expect(commands.find(c => c.name === 'flowdeck-rule').description).toBe('Turn task tracking on or off')
   })
 

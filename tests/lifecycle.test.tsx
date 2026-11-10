@@ -179,7 +179,7 @@ describe('every task goes through flowdeck', () => {
     const r = await $.prompt.compose({ model: 'm', promptModel: 'm', surfaces: ['terminal'], tools: [], outputStyle: null, traits: [] } as any)
     const rule = r.sections.find((s: any) => s.id === 'flowdeck:flow-rule')
     expect(rule?.scope).toBe('session')
-    for (const word of ['mcp__flowdeck__progress', 'mcp__flowdeck__step', 'tasks [{title, tier, after, goal}]', '`after`', '`add`', 'done: [n]', 'result, feedback', '#<n> <title>', 'opens or joins a flow first', 'even a one-step one', 'Close each task with `done` + notes']) {
+    for (const word of ['mcp__flowdeck__progress', 'mcp__flowdeck__step', 'tasks [{title, tier, after, goal}]', '`after`', '`add`', 'done: [n]', 'result, feedback', '#<n> <title>', 'opens or joins a flow first', 'even a one-step task', '`steps` (3-8 titles) once', '`next: true`','Close each task with `done` + notes']) {
       expect(rule.text).toContain(word)
     }
     // Trimmed in 1.0.0037 to about half of the 896 characters it had.

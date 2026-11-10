@@ -12,6 +12,10 @@ export const UNTRACKED_TOOLS = 4
 /** `day` local `YYYY-MM-DD`, `time` local 24-hour `HH:MM`; `calls` the turn's work calls, `tools` its most used. */
 export type UntrackedTurn = { day: string; time: string; calls: number; tools: string[]; sentBack: boolean }
 
+/** Strict mode's loop guard let a call through after `denied` refusals in a main turn: `strict` names the refusal (no
+ * flow open, or a task without a step list), `tool` the call let through. Kept in the same file; asTurn does not count it. */
+export type StrictPass = { day: string; time: string; strict: 'flow' | 'step'; tool: string; denied: number }
+
 const path = (project: string): string => `${dataDir(project)}/${UNTRACKED_FILE}`
 
 // One record as read; null for anything else (it is then left in the file as it is and not counted).
@@ -36,7 +40,7 @@ export async function readUntracked(io: Io, project: string): Promise<UntrackedT
 }
 
 // Appends `rec`, keeping the newest UNTRACKED_MAX; the records as written, or null when nothing was written.
-export async function appendUntracked(io: Io, project: string, rec: UntrackedTurn): Promise<UntrackedTurn[] | null> {
+export async function appendUntracked(io: Io, project: string, rec: UntrackedTurn | StrictPass): Promise<UntrackedTurn[] | null> {
   if (!project) return null
   const got = await getFile(io, path(project))
   if (got.state === 'unreadable') return null
